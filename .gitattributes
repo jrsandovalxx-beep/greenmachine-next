@@ -1,0 +1,31 @@
+# Authored fresh for greenmachine-next (GMN-000A). Never reintroduce `* text=auto`:
+# on a default Windows checkout (core.autocrlf=true) it rewrites text files to CRLF,
+# so a clone no longer reproduces the committed bytes. This project ships
+# digest-pinned evidence; checkout bytes must equal committed bytes on every platform.
+
+# Default: every file is text, committed and checked out with LF.
+* text eol=lf
+
+# Binary files: exempt from all text conversion.
+*.png -text
+*.jpg -text
+*.jpeg -text
+*.gif -text
+*.ico -text
+*.pdf -text
+*.zip -text
+*.gz -text
+*.tar -text
+*.whl -text
+*.parquet -text
+*.xlsx -text
+*.db -text
+*.sqlite -text
+*.sqlite3 -text
+*.woff -text
+*.woff2 -text
+
+# Evidence and data payloads are digest-pinned: byte-exact, never normalized,
+# even though many are text formats (JSON, CSV, Markdown).
+evidence/** -text
+data/** -text
