@@ -9,7 +9,10 @@ Current state only. History and reasoning live in `DECISIONS.md`. Rewritten clea
 - Protection live on both: PRs required (0 approving reviews - solo config, D-027),
   `enforce_admins` on, no force push, no deletion. All six destructive operations demonstrated
   rejected, force pushes from proven-divergent refs.
-- Local clone: `Desktop\greenmachine-next`; working tree clean; active branch `gmr-001-closeout` tracking `origin/gmr-001-closeout`.
+- CI live and required on both branches (GMR-002): contexts
+  `Format, lint, type check, test (Python 3.11)` and
+  `Format, lint, type check, test (Python 3.12)`, strict off.
+- Local clone: `Desktop\greenmachine-next`; working tree clean.
 
 ## Legacy
 - `greenmachine-dashboard`: frozen at tag `legacy-v0.2` = commit `57cd833d`. Read-only reference.
@@ -31,7 +34,11 @@ Current state only. History and reasoning live in `DECISIONS.md`. Rewritten clea
   `3fc9f1e04d71cbd4ec464634d5598e16510a496d` (2026-07-27); record:
   `tickets/completed/GMR-001.md`. Merged to `staging` as
   `a3eb0ea26db6f4a1ac94cc7d6f75fe1a3afc9774`.
-- **GMR-002: NEXT** per the plan's order table; its build starts when Claude Lead issues
+- **GMR-002: COMPLETE** — implementation APPROVED WITH NOTES for SHA
+  `3e01ad3e4b90326f478083e727f97f9b2fe71ca3` (2026-07-27); record:
+  `tickets/completed/GMR-002.md`. Merged to `staging` as
+  `adb5405d881a1d8ba0046469f51bcf1dac5cae4c`.
+- **GMR-003: NEXT** per the plan's order table; its build starts when Claude Lead issues
   the builder prompt.
 
 ## Specialist work
@@ -54,8 +61,8 @@ Current state only. History and reasoning live in `DECISIONS.md`. Rewritten clea
    demonstrated**. The approved bytes are hash-pinned and are not edited to fix the wording;
    the note travels with the verdict.
 3. **GMR-001 COMPLETE:** implementation APPROVED for `3fc9f1e04d71cbd4ec464634d5598e16510a496d`
-   and merged to `staging` (merge commit `a3eb0ea26db6f4a1ac94cc7d6f75fe1a3afc9774`). GMR-002 is
-   next per the plan's order table.
+   and merged to `staging` (merge commit `a3eb0ea26db6f4a1ac94cc7d6f75fe1a3afc9774`). GMR-002
+   followed and is complete (CI live and required); GMR-003 is next per the plan's order table.
 4. Feature phase planned after GMR-004.
 
 ## Open Product Owner decisions
