@@ -9,7 +9,7 @@ Current state only. History and reasoning live in `DECISIONS.md`. Rewritten clea
 - Protection live on both: PRs required (0 approving reviews - solo config, D-027),
   `enforce_admins` on, no force push, no deletion. All six destructive operations demonstrated
   rejected, force pushes from proven-divergent refs.
-- Local clone: `Desktop\greenmachine-next`; working tree clean; active branch `gmr-001-foundation` tracking `origin/gmr-001-foundation`.
+- Local clone: `Desktop\greenmachine-next`; working tree clean; active branch `gmr-001-closeout` tracking `origin/gmr-001-closeout`.
 
 ## Legacy
 - `greenmachine-dashboard`: frozen at tag `legacy-v0.2` = commit `57cd833d`. Read-only reference.
@@ -27,8 +27,12 @@ Current state only. History and reasoning live in `DECISIONS.md`. Rewritten clea
 - **The plan is `tickets/REBUILD_PLAN.md` v7 (GMR-001..004, D-030): APPROVED WITH NOTES
   2026-07-28** for sha256 `f9c9089f036011678ba1c5d71bace3d1ea2895524e68a9777df8042085397443`.
   The old backlogs are retired archive.
-- **GMR-001: IN BUILD** (Fable) against the approved plan. Submission requires the committed
-  plan and the checker's pin to equal the approved hash.
+- **GMR-001: COMPLETE** — implementation APPROVED for SHA
+  `3fc9f1e04d71cbd4ec464634d5598e16510a496d` (2026-07-27); record:
+  `tickets/completed/GMR-001.md`. Merged to `staging` as
+  `a3eb0ea26db6f4a1ac94cc7d6f75fe1a3afc9774`.
+- **GMR-002: NEXT** per the plan's order table; its build starts when Claude Lead issues
+  the builder prompt.
 
 ## Specialist work
 - **GB-001/GB-002 (Grok): complete.** Twelve locked decisions (D-023), sample floors and rulings
@@ -49,8 +53,9 @@ Current state only. History and reasoning live in `DECISIONS.md`. Rewritten clea
    executable meaning unambiguous - **six rules, all six implemented, all six negatively
    demonstrated**. The approved bytes are hash-pinned and are not edited to fix the wording;
    the note travels with the verdict.
-3. **GMR-001 is in build** (Fable, per §GMR-001). The GMN-000A verdict text for criterion 1b
-   was re-emitted verbatim by GPT in the approval round and ships in the build package.
+3. **GMR-001 COMPLETE:** implementation APPROVED for `3fc9f1e04d71cbd4ec464634d5598e16510a496d`
+   and merged to `staging` (merge commit `a3eb0ea26db6f4a1ac94cc7d6f75fe1a3afc9774`). GMR-002 is
+   next per the plan's order table.
 4. Feature phase planned after GMR-004.
 
 ## Open Product Owner decisions
