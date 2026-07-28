@@ -14,7 +14,7 @@ automated selection. Evidence confidence is displayed alongside, never fused int
 
 ## Current status
 
-- Active ticket: **GMR-002** (per `tickets/ACTIVE.md` → REBUILD_PLAN §GMR-002).
+- Active ticket: **GMR-003** (per `tickets/ACTIVE.md` → REBUILD_PLAN §GMR-003).
 - Decision count: **36** (D-001..D-036).
 - Plan: REBUILD_PLAN v7, **APPROVED WITH NOTES 2026-07-28**, sha256
   `f9c9089f036011678ba1c5d71bace3d1ea2895524e68a9777df8042085397443` — the checker's pinned
@@ -23,6 +23,10 @@ automated selection. Evidence confidence is displayed alongside, never fused int
 - GMR-001 complete: implementation APPROVED for `3fc9f1e04d71cbd4ec464634d5598e16510a496d`,
   merged to `staging` (merge commit `a3eb0ea26db6f4a1ac94cc7d6f75fe1a3afc9774`); record:
   `tickets/completed/GMR-001.md`.
+- GMR-002 complete: implementation APPROVED WITH NOTES for
+  `3e01ad3e4b90326f478083e727f97f9b2fe71ca3`, merged to `staging` (merge commit
+  `adb5405d881a1d8ba0046469f51bcf1dac5cae4c`); CI is live and required on both branches;
+  record: `tickets/completed/GMR-002.md`.
 
 ## Read first
 
