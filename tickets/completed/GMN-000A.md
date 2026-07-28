@@ -1,7 +1,8 @@
 # GMN-000A — completed record
 
 - Reviewed SHA: `3d5e4fde3d6065fad1078749c85eb61b96fde9de`
-- Verdict date: 2026-07-28
+- Verdict date: 2026-07-27
+- Verdict-of-record sha256: `064fa760f461b650bab99333eede98b92c376c0c29cf37d7b846c28c06699375` (certified by the reviewer, 2026-07-28)
 - ticket text: pre-plan bootstrap (D-027); reviewed under Regime A per D-028a
 
 ```VERDICT
@@ -58,7 +59,7 @@ This configuration does not encode GPT review inside GitHub. Independent review 
 
 **REASONING — Adequate.**
 
-The exact required deletion command was rejected. The builder accurately disclosed that GitHub's default-branch guard caused the rejection before branch protection was consulted.
+The exact required deletion command was rejected. The builder accurately disclosed that GitHub’s default-branch guard caused the rejection before branch protection was consulted.
 
 The configured `allow_deletions:false` value is shown for `main`, the identical configuration was applied to `staging`, and the protection rule itself was directly exercised by the rejected `staging` deletion. Temporarily changing the default branch to force the second mechanism to fire was unnecessary and would have introduced avoidable configuration risk.
 
@@ -70,7 +71,7 @@ The reviewed SHA immutably identifies the four repository files. It does **not**
 
 The report demonstrates that protection existed and operated during the tests on **July 27, 2026, approximately 20:53–20:55 UTC**. Current protection status cannot be established from that historical output alone.
 
-Protection evidence is repository configuration, not commit content. It must be re-captured immediately before any production merge. Any missing or weakened protection at that time blocks the merge unless separately ruled under the project's governance process.
+The protection configuration for both `main` and `staging` must be re-captured immediately before any production merge. Any missing or weakened protection at that time blocks the merge unless separately ruled under the project’s governance process.
 
 No further GMN-000A evidence is required for the reviewed SHA.
 ```

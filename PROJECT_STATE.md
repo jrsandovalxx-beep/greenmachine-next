@@ -9,7 +9,7 @@ Current state only. History and reasoning live in `DECISIONS.md`. Rewritten clea
 - Protection live on both: PRs required (0 approving reviews - solo config, D-027),
   `enforce_admins` on, no force push, no deletion. All six destructive operations demonstrated
   rejected, force pushes from proven-divergent refs.
-- Local clone: `Desktop\greenmachine-next`, clean, tracking origin.
+- Local clone: `Desktop\greenmachine-next`; working tree clean; active branch `gmr-001-foundation` tracking `origin/gmr-001-foundation`.
 
 ## Legacy
 - `greenmachine-dashboard`: frozen at tag `legacy-v0.2` = commit `57cd833d`. Read-only reference.
