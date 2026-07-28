@@ -35,7 +35,7 @@ Current state only. History and reasoning live in `DECISIONS.md`. Rewritten clea
   `tickets/completed/GMR-001.md`. Merged to `staging` as
   `a3eb0ea26db6f4a1ac94cc7d6f75fe1a3afc9774`.
 - **GMR-002: COMPLETE** — implementation APPROVED WITH NOTES for SHA
-  `3e01ad3e4b90326f478083e727f97f9b2fe71ca3` (2026-07-28); record:
+  `3e01ad3e4b90326f478083e727f97f9b2fe71ca3` (2026-07-27); record:
   `tickets/completed/GMR-002.md`. Merged to `staging` as
   `adb5405d881a1d8ba0046469f51bcf1dac5cae4c`.
 - **GMR-003: NEXT** per the plan's order table; its build starts when Claude Lead issues
