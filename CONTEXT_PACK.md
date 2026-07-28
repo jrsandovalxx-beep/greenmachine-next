@@ -14,12 +14,15 @@ automated selection. Evidence confidence is displayed alongside, never fused int
 
 ## Current status
 
-- Active ticket: **GMR-001** (per `tickets/ACTIVE.md` → REBUILD_PLAN §GMR-001).
+- Active ticket: **GMR-002** (per `tickets/ACTIVE.md` → REBUILD_PLAN §GMR-002).
 - Decision count: **36** (D-001..D-036).
 - Plan: REBUILD_PLAN v7, **APPROVED WITH NOTES 2026-07-28**, sha256
   `f9c9089f036011678ba1c5d71bace3d1ea2895524e68a9777df8042085397443` — the checker's pinned
   value.
 - GMN-000A complete: APPROVED WITH NOTES for `3d5e4fde3d6065fad1078749c85eb61b96fde9de`.
+- GMR-001 complete: implementation APPROVED for `3fc9f1e04d71cbd4ec464634d5598e16510a496d`,
+  merged to `staging` (merge commit `a3eb0ea26db6f4a1ac94cc7d6f75fe1a3afc9774`); record:
+  `tickets/completed/GMR-001.md`.
 
 ## Read first
 
