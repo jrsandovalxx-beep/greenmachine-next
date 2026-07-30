@@ -177,13 +177,25 @@ check(
 # Rule 7 -- plan hash (pack): the freshness rules watch the active ticket and the decision
 # count; neither notices a stale plan version. Rule 7 makes that drift mechanical
 # (added by the §GMR-003R plan-revision PR; D-046 fixes the rule set at exactly 1-7).
-print("\nPlan hash recorded in CONTEXT_PACK.md")
-pack_hash_m = re.search(r"sha256\s*\n\s*`([0-9a-f]{64})`", pack)
-pack_hash = pack_hash_m.group(1) if pack_hash_m else "(not found)"
+# The match is anchored to the pack's Plan record -- the bullet beginning
+# "- Plan: REBUILD_PLAN" -- not to the first hash-shaped string in the file, so an
+# unrelated entry carrying the right value cannot mask a stale Plan record. A missing
+# Plan record, or a Plan record without a hash, FAILS the rule rather than passing
+# vacuously.
+print("\nPlan hash recorded in CONTEXT_PACK.md (the Plan record)")
+plan_entry_m = re.search(r"^- Plan: REBUILD_PLAN.*?(?=^- |\Z)", pack, re.M | re.S)
+if plan_entry_m is None:
+    pack_hash = "(no '- Plan: REBUILD_PLAN' record in CONTEXT_PACK.md)"
+else:
+    entry_hash_m = re.search(r"`([0-9a-f]{64})`", plan_entry_m.group(0))
+    pack_hash = (
+        entry_hash_m.group(1) if entry_hash_m else "(the Plan record contains no sha256)"
+    )
 check(
-    "plan hash (pack): CONTEXT_PACK.md records the pinned approved plan hash",
+    "plan hash (pack): the pack's Plan record carries the pinned approved plan hash",
     pack_hash == PINNED_PLAN_SHA256,
-    f"CONTEXT_PACK.md records {pack_hash}; pinned approved value is {PINNED_PLAN_SHA256}",
+    f"the Plan record in CONTEXT_PACK.md carries {pack_hash}; pinned approved value is "
+    f"{PINNED_PLAN_SHA256}",
 )
 
 print(f"\n{checks_run} checks run, {len(failures)} failed")

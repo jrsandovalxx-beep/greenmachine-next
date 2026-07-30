@@ -35,19 +35,14 @@ Current state only. History and reasoning live in `DECISIONS.md`. Rewritten clea
 - CI live and required on both branches: contexts `Format, lint, type check, test (Python 3.11)`
   and `Format, lint, type check, test (Python 3.12)`, strict off. Every review object from
   GMR-002's closeout onward is Regime B.
-- **GMR-003: STOPPED AND RETURNED** (D-039). The builder halted before committing anything:
-  plan v7's criterion 5 was unsatisfiable by any zero-deviation transplant. Nothing entered
-  history; branch `gmr-003-core` holds zero commits.
-- **The plan is `tickets/REBUILD_PLAN.md` v15: APPROVED WITH NOTES 2026-07-28**, the approval
-  naming sha256 `3daa28b952f3c78d80c2d01764f495e3866eb68e32d13de86ac6f7a67646d904`. Plans v8-v14
-  were REJECTED (7+7+5+3+3+3+4 findings, D-040..D-046). Two approval notes travel with the
-  verdict and are **not** edited into the hash-pinned bytes: (i) one lifecycle sentence still
-  says "which rule 8 now checks against the field" — obsolete under D-046, treated as stale
-  explanatory text, and the approval expressly does not revive rule 8; (ii) the approval does not
-  certify that any checker enforces the declaration fields.
-- **GMR-003R: NEXT** — the plan-revision PR (seven files) commits these approved bytes, re-pins
-  the checker, and lands manifest v3. GMR-003 stays stopped until GMR-003R is separately
-  reviewed, approved and merged. The old backlogs are retired archive.
+- **GMR-003: ACTIVE** — `tickets/ACTIVE.md` names it and the pack agrees. Its earlier stop
+  (D-039) was against superseded plan v7, whose criterion 5 no zero-deviation transplant could
+  satisfy; the approved v15 criteria are what it executes. Nothing entered history: branch
+  `gmr-003-core` holds zero commits and its verified extraction is stashed, to be re-verified
+  against the tag when the ticket resumes.
+- **GMR-003R: the revision object of this PR** — seven files, no completed record, pointer
+  untouched. It commits the approved plan bytes, re-pins the checker and lands manifest v3.
+  The old backlogs are retired archive.
 
 ## Specialist work
 - **GB-001/GB-002 (Grok): complete.** Twelve locked decisions (D-023), sample floors and rulings
