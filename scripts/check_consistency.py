@@ -188,9 +188,7 @@ if plan_entry_m is None:
     pack_hash = "(no '- Plan: REBUILD_PLAN' record in CONTEXT_PACK.md)"
 else:
     entry_hash_m = re.search(r"`([0-9a-f]{64})`", plan_entry_m.group(0))
-    pack_hash = (
-        entry_hash_m.group(1) if entry_hash_m else "(the Plan record contains no sha256)"
-    )
+    pack_hash = entry_hash_m.group(1) if entry_hash_m else "(the Plan record contains no sha256)"
 check(
     "plan hash (pack): the pack's Plan record carries the pinned approved plan hash",
     pack_hash == PINNED_PLAN_SHA256,
