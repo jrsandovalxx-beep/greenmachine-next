@@ -9,9 +9,6 @@ Current state only. History and reasoning live in `DECISIONS.md`. Rewritten clea
 - Protection live on both: PRs required (0 approving reviews - solo config, D-027),
   `enforce_admins` on, no force push, no deletion. All six destructive operations demonstrated
   rejected, force pushes from proven-divergent refs.
-- CI live and required on both branches (GMR-002): contexts
-  `Format, lint, type check, test (Python 3.11)` and
-  `Format, lint, type check, test (Python 3.12)`, strict off.
 - Local clone: `Desktop\greenmachine-next`; working tree clean.
 
 ## Legacy
@@ -27,19 +24,30 @@ Current state only. History and reasoning live in `DECISIONS.md`. Rewritten clea
   `3d5e4fde3d6065fad1078749c85eb61b96fde9de` (disclosed in GPT's plan-v4 review after the
   supplement was reviewed). Both judgment calls confirmed. The base gate for GMR-001 is cleared;
   the full verdict text goes into the GMN-000A completed record during GMR-001.
-- **The plan is `tickets/REBUILD_PLAN.md` v7 (GMR-001..004, D-030): APPROVED WITH NOTES
-  2026-07-28** for sha256 `f9c9089f036011678ba1c5d71bace3d1ea2895524e68a9777df8042085397443`.
-  The old backlogs are retired archive.
-- **GMR-001: COMPLETE** — implementation APPROVED for SHA
-  `3fc9f1e04d71cbd4ec464634d5598e16510a496d` (2026-07-27); record:
-  `tickets/completed/GMR-001.md`. Merged to `staging` as
-  `a3eb0ea26db6f4a1ac94cc7d6f75fe1a3afc9774`.
-- **GMR-002: COMPLETE** — implementation APPROVED WITH NOTES for SHA
-  `3e01ad3e4b90326f478083e727f97f9b2fe71ca3` (2026-07-27); record:
-  `tickets/completed/GMR-002.md`. Merged to `staging` as
-  `adb5405d881a1d8ba0046469f51bcf1dac5cae4c`.
-- **GMR-003: NEXT** per the plan's order table; its build starts when Claude Lead issues
-  the builder prompt.
+- **GMR-001: COMPLETE** - implementation APPROVED for SHA `3fc9f1e04d71cbd4ec464634d5598e16510a496d`
+  (2026-07-27), merged to `staging` as `a3eb0ea26db6f4a1ac94cc7d6f75fe1a3afc9774`; closeout
+  APPROVED WITH NOTES for `5e90e5967212b32a4620a5ca9742df28ac8e5742`. Records:
+  `tickets/completed/GMR-001.md`.
+- **GMR-002: COMPLETE** - implementation APPROVED WITH NOTES for SHA
+  `3e01ad3e4b90326f478083e727f97f9b2fe71ca3` (2026-07-27), merged to `staging` as
+  `adb5405d881a1d8ba0046469f51bcf1dac5cae4c`; closeout APPROVED WITH NOTES for
+  `0612a39450b206e8a8f1019451a4349f94a5ce0c`. Records: `tickets/completed/GMR-002.md`.
+- CI live and required on both branches: contexts `Format, lint, type check, test (Python 3.11)`
+  and `Format, lint, type check, test (Python 3.12)`, strict off. Every review object from
+  GMR-002's closeout onward is Regime B.
+- **GMR-003: STOPPED AND RETURNED** (D-039). The builder halted before committing anything:
+  plan v7's criterion 5 was unsatisfiable by any zero-deviation transplant. Nothing entered
+  history; branch `gmr-003-core` holds zero commits.
+- **The plan is `tickets/REBUILD_PLAN.md` v15: APPROVED WITH NOTES 2026-07-28**, the approval
+  naming sha256 `3daa28b952f3c78d80c2d01764f495e3866eb68e32d13de86ac6f7a67646d904`. Plans v8-v14
+  were REJECTED (7+7+5+3+3+3+4 findings, D-040..D-046). Two approval notes travel with the
+  verdict and are **not** edited into the hash-pinned bytes: (i) one lifecycle sentence still
+  says "which rule 8 now checks against the field" — obsolete under D-046, treated as stale
+  explanatory text, and the approval expressly does not revive rule 8; (ii) the approval does not
+  certify that any checker enforces the declaration fields.
+- **GMR-003R: NEXT** — the plan-revision PR (seven files) commits these approved bytes, re-pins
+  the checker, and lands manifest v3. GMR-003 stays stopped until GMR-003R is separately
+  reviewed, approved and merged. The old backlogs are retired archive.
 
 ## Specialist work
 - **GB-001/GB-002 (Grok): complete.** Twelve locked decisions (D-023), sample floors and rulings
@@ -60,10 +68,11 @@ Current state only. History and reasoning live in `DECISIONS.md`. Rewritten clea
    executable meaning unambiguous - **six rules, all six implemented, all six negatively
    demonstrated**. The approved bytes are hash-pinned and are not edited to fix the wording;
    the note travels with the verdict.
-3. **GMR-001 COMPLETE:** implementation APPROVED for `3fc9f1e04d71cbd4ec464634d5598e16510a496d`
-   and merged to `staging` (merge commit `a3eb0ea26db6f4a1ac94cc7d6f75fe1a3afc9774`). GMR-002
-   followed and is complete (CI live and required); GMR-003 is next per the plan's order table.
-4. Feature phase planned after GMR-004.
+3. **GMR-001 COMPLETE** - both review objects verdicted (implementation `3fc9f1e0...`;
+   closeout `5e90e596...`). Verdict-of-record hashes are certified by the reviewer before a
+   completed record is built (GMN-000A `064fa760...`, GMR-001 `23109bb2...`) - the standing
+   method after the GMN-000A transcription defect.
+4. Feature phase planned after GMR-005.
 
 ## Open Product Owner decisions
 - From GR-001: IAA source of record (official leaderboard vs event-derived, with the

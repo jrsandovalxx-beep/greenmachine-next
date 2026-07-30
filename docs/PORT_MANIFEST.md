@@ -1,21 +1,37 @@
-# PORT_MANIFEST v2 — the transplant universe, partitioned by owner
+# PORT_MANIFEST v3 — the transplant universe, partitioned by owner
 
-All 141 files the GMS-001 audit classified PORT, with blob sha256 at tag `legacy-v0.2`
+All 144 files in the transplant universe, with blob sha256 at tag `legacy-v0.2`
 (= `57cd833d742272b0af8f35801dfa7dfb9534c3e0`; resolve with `^{commit}`, D-028d). Committed and
-frozen in GMR-001. **Every row has exactly one owner**, so no file is claimed twice and none can
-vanish between tickets (plan-v2 review, finding 2):
+**Provenance of this file, stated exactly** (plan-v8 finding 4): GMR-001 committed and froze the
+**141-row v2 manifest**, and its approved verification was `141/141`. Rows **142-144 are added by
+GMR-003R**, each re-verified against the tag in that PR — they were never part of GMR-001's
+commit or its verdict. **Every row has exactly one owner**, so no file is claimed twice and none
+can vanish between tickets (plan-v2 review, finding 2).
+
+**v3 (D-039, D-040)** adds rows 142-144 — `docs/GLOSSARY.md`,
+`docs/adr/0008-golden-testing-strategy.md`, and `docs/STREAMLIT_PROTOTYPE.md`. GMS-001 categorized all three REFERENCE; that was wrong,
+and the GMR-003 diagnostic proved it empirically: five transplanted tests read these documents
+and assert against their content, so they are **dependencies of ported tests, not reference
+material**. With the first two present the affected modules go 4 failed + 17 skipped → 37 passed
+and the suite's skip set becomes byte-identical to the tag's; with `docs/STREAMLIT_PROTOTYPE.md`
+present, `test_deployment_documentation_names_the_entrypoint_and_requirements` passes — measured,
+content-only assertions — which keeps the deployment-contract architecture guard live rather than
+inert (plan-v8 finding 5). Their blob hashes come from the D-029 inventory and are unchanged by
+this recategorization; none of the three perturbs node-ID collection, which scans `*.py`.
 
 | Owner | Rows | Meaning |
 | --- | --- | --- |
 | `SUPERSEDED-000A` | 1 | `.gitignore` — replaced by the GMN-000A **authored** file, approved with its full text in the GMN-000A review. The legacy blob is deliberately NOT transplanted; its hash is recorded here so the difference is a documented ruling, not an omission. |
 | `GMR-001` | 4 | Toolchain — transplanted with the enumerated deviations (name/version, ruff pin, `-e .`), so resulting hashes intentionally differ; the ticket's provenance table records legacy hash → result hash per file. |
 | `GMR-002` | 1 | `ci.yml` — transplanted with zero deviations; resulting hash must equal the manifest hash. |
-| `GMR-003` | 135 | The core. Zero deviations; resulting hash equals the manifest hash for every row. The empty `__init__.py` placeholders from the GMR-001 skeleton are **replaced** by these real files — that is the designed hand-off, not a conflict. |
+| `GMR-003` | 138 | The core. Zero deviations; resulting hash equals the manifest hash for every row. The empty `__init__.py` placeholders from the GMR-001 skeleton are **replaced** by these real files — that is the designed hand-off, not a conflict. |
 
-**Verification at build time (GMR-001 criterion):** every row's hash is re-verified against the
-frozen tag in the legacy clone — `git cat-file blob legacy-v0.2^{commit}:<path> | sha256sum` —
-and the 141/141 result pasted, grounding this manifest against the repository rather than a
-document.
+**Verification, by review object** (plan-v9 finding 5 — one paragraph may not credit GMR-001 with
+a verification it never performed): every row's hash is re-verified against the frozen tag in the
+legacy clone — `git cat-file blob legacy-v0.2^{commit}:<path> | sha256sum` — grounding this
+manifest against the repository rather than a document. **GMR-001 verified the 141 rows of v2 and
+its approved evidence was `141/141`. GMR-003R verifies rows 142-144 and pastes the `144/144`
+total.** GMR-003 then re-verifies its own 138 owned rows in its provenance table.
 
 | # | Owner | Legacy path | Blob sha256 |
 | --- | --- | --- | --- |
@@ -160,3 +176,6 @@ document.
 | 139 | GMR-003 | `tests/unit/scoring/test_engine.py` | `397cde5b8fc80e7aa1975749993137696ba88cea943431f8a962d560af014f38` |
 | 140 | GMR-003 | `tests/unit/test_package.py` | `b19ac35174824435ddcd7ba37bd3874237c29eb9a84f89643a4064be09362dee` |
 | 141 | GMR-003 | `config/nonproduction/gm041_engine_synthetic.yaml` | `51dac8cccfbba66d69a9dd6b744f4f077ecb1a37bdbaf7185242f0c224a5ece5` |
+| 142 | GMR-003 | `docs/GLOSSARY.md` | `6be7a266f61b55de9fbca79c94797474ccf7d3c09d5576891f521982e9f327e7` |
+| 143 | GMR-003 | `docs/adr/0008-golden-testing-strategy.md` | `4836ac5a868276ea75152f4f01aaefa73c8f16384497a6f0eaf77cb7b7c8e880` |
+| 144 | GMR-003 | `docs/STREAMLIT_PROTOTYPE.md` | `7abfe8ac4d6c8a464e664c05d9c8ee0409c119b882a91b3212482d79aefbc60a` |
