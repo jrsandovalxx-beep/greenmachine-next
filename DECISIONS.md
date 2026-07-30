@@ -1112,3 +1112,394 @@ v7; the implementation PR is not submitted for review until a plan approval exis
 sha256, and if the approved bytes differ from v7 the plan-binding steps re-run against the
 approved bytes. Merges remain approval-gated (D-018). Parallelism moves the waiting, not the
 gates.
+
+## D-037 - Mutable configuration is captured raw, before and after
+GPT's GMR-002 approval carried a capture-method note: the pre-change branch-protection record
+was a jq **projection**, not a raw API capture, so the comparison was not literal
+raw-to-raw equality across every response field. It accepted the round on stated grounds -
+same projection both sides, full raw post-change JSON supplied, omitted fields individually
+disclosed and currently false, live direct-push re-tests - and ruled explicitly that this
+"does not establish projected pre-change captures as the preferred future standard."
+
+**The rule, from GMR-003 onward:** when a ticket changes any mutable configuration - branch
+protection, deployment settings, repository settings - the builder retains the **full raw API
+response before the change and after it**, and diffs raw against raw. A projection may
+accompany the raw diff as a reading aid; it may not replace it. This binds GMR-004's
+deployment configuration work and the production-merge protection re-capture in
+`docs/PRODUCTION_MERGE_CHECKLIST.md`.
+
+Why it is a decision and not a preference: mutable configuration is the one class of evidence
+a commit SHA cannot bind. A projection is a claim about which fields matter, authored by the
+same party whose change is under review - exactly the judgment a reviewer exists to make
+independently.
+
+## D-038 - Verdict-of-record certification, and the fence-width rule
+Standing method, established after the GMN-000A defect and confirmed twice since. A completed
+record's verdict block is never transcribed on trust:
+
+1. Claude Lead produces a canonical verdict file from the relayed text and states its sha256.
+2. GPT hashes that file and **certifies** the value as the binding, publicly reproducible
+   reference - or returns exact byte differences for mechanical correction.
+3. The builder inserts the certified bytes programmatically and proves
+   `sha256(fenced block content) == certified value` from both the working tree and the
+   committed blob.
+4. GPT re-verifies the same arithmetic from the closeout diff alone.
+
+Certified so far: GMN-000A `064fa760...`, GMR-001 `23109bb2...`, GMR-002 `d934523e...` - all
+three certified on first submission, each verdict dated 2026-07-27. GPT confirmed the
+four-backtick construction satisfies criterion (b) and that the criterion (f) language scan may
+exclude it in the same manner as three-backtick verdict blocks.
+
+**Fence width follows the content.** The GMR-002 verdict is the first containing fenced code
+blocks of its own; a three-backtick `VERDICT` fence would be terminated early by them and the
+record would be silently truncated - the failure would be invisible in rendered markdown and
+would surface only as a hash mismatch. The record therefore uses a fence **wider than any
+fence inside the verdict** (four backticks for GMR-002), and the extraction, verification and
+language-scan-exclusion commands use the same width. Restated as a rule: **the fence must be
+one backtick wider than the widest fence the verdict contains.**
+
+The interface-rendering tokens GPT's emissions sometimes carry (citation markers, fenced-block
+`id="..."` attributes) are normalized out and the normalization is disclosed in the
+certification request; GPT's GMN-000A certification ruled such tokens immaterial to a verdict's
+substance.
+
+## D-039 - Plan v8: the GMR-003 verification defect, and its repair
+GMR-003's builder stopped before committing anything and returned the ticket. The stop was
+correct and the defect was Claude Lead's: **criterion 5 assumed a test's node IDs are a function
+of its own source.** They are a function of the whole repository tree, and in one case of the
+absolute checkout path. Nothing was xfailed, skipped or reordered to make the numbers come out -
+the stop-and-return rule produced exactly the behavior it exists to produce, and the evidence
+below is the builder's, measured before any commit.
+
+**The three findings.**
+
+1. **Node IDs are tree-dependent.** Four modules parametrize over files discovered at collection
+   time (`sorted(root.rglob("*.py"))` and similar). Trees of different sizes produce different
+   node counts; pytest's duplicate-id disambiguation renumbers ids even for shared files; and one
+   static case in `test_versioning.py` renders a checkout-absolute path into its id, so that id
+   cannot match across any two machines, ever. Measured: 2,885 tag nodes vs 2,620 new; 267
+   tag-only, all inside those four modules; 2 new-only, same phenomenon in reverse.
+2. **Two documents were miscategorized by the salvage audit.** Four transplanted tests read
+   `docs/GLOSSARY.md` and `docs/adr/0008-golden-testing-strategy.md` and assert against their
+   content. **A document a ported test asserts against is a dependency of that test, not
+   reference material.** Confirmed empirically: with both present the affected modules go 4
+   failed + 17 skipped to 37 passed, and the suite's skip set becomes byte-identical to the
+   tag's; node-ID collection is unperturbed (the scans collect `*.py`). PORT_MANIFEST v3 adds
+   them as rows 142-143, owner GMR-003; the partition becomes 137 + 4 + 1 + 1 = 143. Their blob
+   hashes come from the D-029 inventory unchanged, so the recategorization adds no unverified
+   bytes.
+3. **Seven tests read files the rebuild does not have**, five of which it will never have
+   (an evidence bundle under OQ-7, the never-port synthetic demo generator, the legacy release
+   archiver, the legacy prototype document). They are transplanted byte-identical as content and
+   deselected by an exact list fixed in the plan, each node carrying a disposition and an owning
+   ticket. Two are owned by GMR-004, which must re-enable them and prove them green.
+
+**What replaced criterion 5.** Test-surface equivalence is now proven **by module class**:
+exact node-ID set equality for every tree-independent module (empty diff, no escape hatch), and
+for the four enumerated environment-dependent modules, **function-inventory equality** plus a
+**parameter-set derivation** showing the collected parameters equal the live tree computed
+independently. Function inventories were measured equal across both trees - 1,191 entries,
+sha256 `200bb976c671a0f7a6e5ffa31bdb3417ff8b83f444ac2366a3654f6bc5795f1f`, equal per module -
+which is what makes the new shape both attainable and strong: it proves no test function was
+lost, added or renamed, and that the parameter divergence is exactly "same tests, different
+tree" rather than "different tests".
+
+**Guards against the deselect becoming a hiding place.** A deselect that matches nothing is a
+silent no-op, so the plan requires the `(7 deselected)` summary line as proof every entry
+matched; a **tag-side control** applying the same seven deselects to the legacy tree, removing
+exactly seven nodes and leaving it green, proves the list masks no real failure; and the skip
+pattern must match the tag's exactly (4 platform skips both sides).
+
+**GMR-003R.** The lifecycle requires a revised plan to be committed with the checker's new hash
+in a dedicated PR but never stated that PR's criteria. They are now fixed in the plan itself and
+are part of what the reviewer approves when it approves v8. §GMR-001's text is preserved
+unchanged - it is the historical instruction under which a completed, approved ticket ran - and
+GMR-003R states the supersession of its partition constants explicitly rather than editing
+history.
+
+## D-040 - Plan v9: the seven v8 blockers
+GPT rejected plan v8 with seven findings; all accepted. It confirmed the repair direction -
+module-class equivalence, the document recategorization, the 143-row arithmetic, the skeleton
+deletion - and rejected the execution. Each fix below is grounded in a measurement the builder
+produced, not in an argument.
+
+1. **(Critical) The `pyproject.toml` deviation was invalid.** v8 said the file "gains exactly one
+   block"; the repository already has a `[tool.pytest.ini_options]` table, so that reading
+   produces duplicate TOML, and the alternative reading silently deletes `minversion`,
+   `testpaths`, `-ra`, `--strict-markers`, `--strict-config` and the fixed Hypothesis seed. v9
+   specifies the **complete resulting table**. The builder then found what the reviewer's
+   reconstruction had missed: the table also contains a **five-line comment block** citing
+   ADR-0008 for the seed. v9 reproduces it verbatim and requires a byte-for-byte pre-edit check
+   (522 bytes) with stop-and-return on any difference. Two reviews and a measurement were needed
+   to get one table right.
+2. **(High) GMR-003R would have committed knowingly false state.** Confined to three files, it
+   would have merged plan v9 while `PROJECT_STATE.md` and `CONTEXT_PACK.md` still asserted that
+   v7 was authoritative and v8 pending. The permitted delta becomes **six files**, adding those
+   two and `DECISIONS.md`. A plan-revision PR that commits false current state is not a smaller
+   change; it is a defective one.
+3. **(High) Dangling decision references.** v8 cited D-037..D-039 as its authority while
+   forbidding them from entering the repository until after GMR-004. GMR-003R now commits
+   `DECISIONS.md` through D-040, and a criterion greps the plan's citations against the register
+   to prove none dangles. The decision-lag disclosed at the GMR-002 closeout is retired here.
+4. **(High) The manifest rewrote GMR-001's history.** v3 claimed all rows were "committed and
+   frozen in GMR-001" and verified `143/143`. GMR-001 committed 141 and its verdict said
+   `141/141`. The provenance paragraph now states that plainly and attributes rows 142-144 to
+   GMR-003R.
+5. **(High) An architecture guard would have gone inert.** v8 deselected all three
+   non-parametrized `test_deployment_contract.py` tests and let the builder *explain* the absence
+   instead of demonstrating the guard. Explaining why a guard cannot fire is not a negative test.
+   The fix follows the same principle as the glossary: `docs/STREAMLIT_PROTOTYPE.md` is a
+   document a ported test asserts against, so it is a dependency. Ported as manifest row 144, the
+   documentation test passes (content-only assertions, measured) and the module keeps **six live
+   tests**; criterion 7 loses its exception clause. Measured note: the module has 8 test
+   functions and only 3 ever failed, so it was never wholly inert - but the plan permitted it to
+   be, which is the defect.
+6. **(High) "The feature phase" is not an owner.** Five deselections had no bounded owner. **A
+   new ticket, GMR-005 - Deselection retirement**, is added to the plan and the order table with
+   fixed criteria: every remaining node must reach one of three terminal states - re-enabled,
+   replaced by a rebuild-appropriate test, or removed with a written justification naming the
+   ruling that makes it inapplicable - and the ticket cannot complete while any `--deselect`
+   survives. "Still pending" is not a terminal state.
+7. **(High) Criterion 5(d) was unsatisfiable for one module.** `test_versioning.py`'s divergent
+   node is a **static** parametrization rendering the checkout-absolute path, not a file scan, so
+   no `git ls-files` derivation exists for it. Class B splits: **B1** (three tree-scanning
+   modules) keeps the derivation; **B2** (`test_versioning.py`) requires **normalized node-ID
+   equality** - the checkout root **as rendered inside the node ID** replaced with `<REPO_ROOT>`.
+   Rendering matters: pytest doubles Windows backslashes inside the ID, so a raw path replacement
+   matches nothing. Measured: 70 nodes each side, normalized sha256
+   `8a0941ab8112e18194cd79717f6ae7dc703067bdcb8d35f69044e1c12a6ba1df`, equal.
+
+The deselection register drops from seven nodes to six, and every one now names a review object:
+two to GMR-004, four to GMR-005.
+
+## D-041 - Plan v10: seven propagation failures, and the checker that now catches them
+GPT rejected plan v9 with seven findings; all accepted. It confirmed the substance - the complete
+pytest table with its comment block, the 522-byte stop condition, D-001..D-040 with no dangling
+citation, 144 path-unique rows partitioned 138/4/1/1, the STREAMLIT_PROTOTYPE recategorization,
+the B1/B2 split and its rendered-path qualifier, rule 7, and GMR-005 as the right structural
+owner. **Every one of the seven blockers was the same failure: GMR-005 was added to the plan
+without sweeping the places ticket order and counts appear.** That is the propagation class
+D-016's checker exists to catch, and it caught none of them because the checker had no rule about
+the plan's internal consistency. It does now.
+
+1. **(Critical) GMR-004's closeout still handed `ACTIVE.md` the sentinel** while the order table
+   put GMR-005 after it - two instructions with no compliant implementation. Fixed to point at
+   GMR-005.
+2. **(High) GMR-004's deselect arithmetic said "the remaining five entries stay"** where six
+   minus two is four. The resulting `pyproject.toml` was therefore not determinable from the
+   ticket text - exactly the ambiguity the fixed-result rule exists to prevent. Fixed, and the
+   complete resulting table is now pasted in §GMR-004 as it is in §GMR-003.
+3. **(High) The pointer-order guard is changed by GMR-003R and was not demonstrated.** D-012
+   applies to a mutated guard as much as a new one. GMR-003R's demonstrations go from two to
+   four, adding "sentinel where GMR-005 is expected" and "GMR-005 where the sentinel is expected"
+   - the first of which is precisely the demonstration that would have caught finding 1.
+4. **(High) GMR-003R's delta left governance and sequencing stale.** `docs/TEAM_ROLES.md` was
+   verified at GMR-001 as reproducing the regime table and would have stopped doing so the moment
+   GMR-005 existed; `PROJECT_STATE.md` still said "Feature phase planned after GMR-004". The
+   delta becomes **seven files**, and the state criterion now requires that no sequencing line
+   survive which the new plan falsifies, proven by a pasted grep with a disposition per line.
+5. **(High) The manifest still credited GMR-001 with a 144-row verification** in a later
+   paragraph while the corrected provenance paragraph said 141. Verification is now stated by
+   review object: GMR-001 verified 141/141; GMR-003R verifies rows 142-144 and the 144/144 total;
+   GMR-003 re-verifies its own 138.
+6. **(High) GMR-005 could have declared success by deleting live coverage** - dropping
+   `test_deployment_contract.py` to retire two nodes would have taken its six live tests with it
+   and left the suite green precisely because the coverage was gone. New criterion 2b requires
+   before/after node inventories for every file touched, with only the retiring nodes permitted
+   to disappear. New criterion 2c removes the "delete" option entirely for
+   `test_requirements_txt_sits_beside_the_entrypoint`: only its evidence-bundle assertion is
+   inapplicable, so it must be re-enabled or replaced with its applicable assertions preserved.
+   The reviewer named that node; the plan names it back.
+7. **(Medium) The GMR-003 narrative still carried v8's counts** - two documents where there are
+   three, seven deselections where there are six, "approves v8" in a v9 document. Corrected.
+
+**The mechanical fix, which matters more than any of the seven.** Reasoning failed to catch this
+class twice running, so the kit checker gained a "Plan internal consistency" section: the order
+table is parsed from the lifecycle text; **only the last ticket in it may hand `ACTIVE.md` the
+sentinel**; every ticket in the table must have a section; the deselection register's size must
+equal the first `(N deselected)` figure and the figures may only shrink; prose claiming a
+remaining-entry count must match a stated figure; and **every partition statement in the plan
+must equal the manifest's actual owner counts unless it is explicitly marked historical**. That
+last rule fired immediately on this revision, catching two live statements of the superseded
+141-row partition that I had left unmarked - a finding a reviewer would otherwise have returned.
+
+## D-042 - Plan v11: two silent no-ops, and a checker described but not required
+GPT rejected plan v10 with five findings; all accepted. Two are the same mechanical failure, and
+it is the one this project has already been bitten by twice.
+
+1. **(Critical) GMR-005's criteria 2b and 2c were absent from the plan bytes.** D-041 described
+   them; the plan did not contain them. The cause: a scripted `str.replace` whose anchor did not
+   match, which returns the unchanged text silently while the surrounding script prints
+   "applied". I trusted the script's output instead of re-reading the file - **exactly what
+   D-016's second rule forbids, in the register I wrote it in.** The consequence would have been
+   real: v10 as pinned still permitted GMR-005 to delete `test_deployment_contract.py` entirely,
+   taking six live tests with it, and the node the reviewer specifically protected was
+   unprotected in the authority that governs the builder. A decision register is not executable;
+   only the pinned plan is.
+2. **(Medium) The same class produced a surviving reference to approving a superseded revision.**
+   Another anchor that did not match, another silent no-op.
+   **The fix is mechanical, not resolve:** every scripted edit now runs through a helper that
+   asserts the anchor exists, asserts it is unique, and **re-reads the file afterward to verify
+   the new text is present and the old text is gone**. An edit that cannot be verified is not an
+   edit. The first run of the new helper immediately aborted on a bad anchor rather than
+   reporting success - the failure mode that caused this finding, caught at its source.
+3. **(Critical) The plan-internal-consistency checker was described in D-041 but never required
+   by §GMR-003R.** This is the deeper version of the same error: the mechanism the plan named as
+   its defence against the fourteen prior findings existed only in the kit script and in a
+   decision, while the pinned ticket text required four demonstrations and never mentioned rules
+   8-12. A builder could have satisfied every criterion and shipped a checker without them. Rules
+   7-12 are now **specified in §GMR-003R with their semantics**, and criterion 6 requires **ten
+   demonstrations**, including one proving rule 12's historical exemption is narrow rather than a
+   hole - an exemption nobody demonstrates is an escape hatch.
+4. **(High) GMR-003R's criterion 4 still said D-001..D-040** inside the very PR whose purpose
+   includes eliminating stale governance references. Now D-001..D-042, and the kit checker gained
+   a rule comparing every decision range asserted **inside the plan** against the register, with
+   the same historical-marker exemption the partition rule uses.
+5. **(Medium) The manifest still said "both"** where three documents are now recategorized.
+
+**What this round is really about.** Three of the five findings are one failure - a claim about
+the artifact that the artifact does not support - and the reviewer caught all three by reading
+the bytes rather than the description. That is the entire argument for an independent reviewer
+who is given the file and not the summary, and for a checker that reads the plan the way the
+reviewer does.
+
+## D-043 - Plan v12: a guard that checked one spelling, and a demonstration that could not exist
+GPT rejected plan v11 with three findings; all accepted. Two are the same shape as D-042's and
+one is new.
+
+1. **(Critical) The plan's opening line asserted `D-031..D-040` while the register held D-042** -
+   a stale range in the first sentence of the document whose currency the whole apparatus exists
+   to protect. Worse, the kit rule I added in D-042 *to catch exactly this* matched only ranges
+   beginning `D-001`, and this one begins `D-031`. **A guard that checks one spelling of a claim
+   does not check the claim.** The rule now matches any `D-0AA..D-0BB`, and - the part that
+   matters for the pinned authority - **rule 13 is specified in §GMR-003R** rather than living
+   only in the kit script and a decision. That was v11's own finding 2 recurring one level down:
+   describing a guard is not requiring it.
+2. **(Critical) Criterion 6's demonstration (x) was internally unsatisfiable.** It sat inside
+   "ten demonstrations, each red for the right reason, each with a nonzero exit" while itself
+   requiring a **pass**, and the criterion also stated that editing the plan copy makes the
+   plan-hash rule red - so no run could be simultaneously clean and red as written. Restructured:
+   (x) becomes a real rule-13 failure demonstration, and the exemption controls move to a new
+   **criterion 6b** whose pass condition is stated precisely - **the absence of the named rule
+   from the failure list**, with the plan-hash red expected and disclosed - followed by one
+   fully clean run at the end. The underlying instinct was right: an exemption nobody tests is
+   an escape hatch. The expression was impossible.
+3. **(High) `PROJECT_STATE.md` still said "§GMR-003R expanded to six files"** while the plan
+   defined seven - a known-false claim inside one of the seven files the PR commits, in the
+   artifact whose purpose is current-state accuracy. Criterion 5 now requires that neither the
+   state file nor the pack misstate **this PR's own scope**, proven by a grep with a disposition
+   per sentence.
+
+**The pattern worth recording.** Across v10, v11 and v12 the same failure recurs at descending
+levels: a claim about an artifact that the artifact does not support - first in the plan versus
+the decision register, then in the register versus the checker, now in the checker's regex versus
+the class it claims to cover. Each round the reviewer found it by reading the bytes rather than
+the description. The lesson is not "be more careful"; it is that **every claim of the form "X is
+enforced" must name the enforcing text and be demonstrated against it**, which is what criteria 6
+and 6b now do for all seven repository rules.
+
+## D-044 - Plan v13: the specification checked against the implementation
+GPT rejected plan v12 with three findings; all accepted. It first verified the delivered checker
+source independently - 23,478 bytes, 470 lines, sha256 `21b4694195cc83e6...`, syntax valid - and
+then did the thing the previous four rounds could not: **compared the plan's rule specification
+against the code that claims to enforce it.** Every finding came out of that comparison.
+
+1. **(Critical) Rule 9 was implemented in one direction only.** The plan requires both that every
+   ticket in the order table has a section and that **every section carrying implementation
+   criteria appears in the order table**. The code checked only the first. An orphan ticket
+   section could therefore have held executable criteria outside the approved sequence with the
+   rule green. The reverse direction is now implemented and demonstration (vi) is restated to
+   exercise it explicitly rather than incidentally.
+2. **(High) Rule 13's exemption window was 300 characters where the plan fixes 500** - the same
+   boundary rule 12 uses and the one criterion 6b's control is written against. A historical
+   marker sitting 301-500 characters away would pass the specification and fail the code: a
+   **false positive in a guard whose entire purpose is distinguishing preserved history from
+   drift**. Corrected to 500.
+3. **(Medium) The rule list's introduction contradicted the rule list** - "New checker rules
+   7-12 ... All six are implemented" above an enumeration of seven - inside the section whose
+   purpose is eliminating plan-internal contradictions. Fixed, and **rule 14** now checks a
+   stated rule range and count against the rules actually enumerated. It fired on this revision
+   before submission, which is the only reason v13 does not carry the same defect forward.
+
+**What this round establishes.** The reviewer moved from reading the plan to reading the plan
+against the artifact it names, and found two real divergences plus one self-contradiction. That
+is the natural end state of D-043's rule - "every claim of the form 'X is enforced' must name the
+enforcing text and be demonstrated against it" - and it is why the checker source now travels
+with every plan package: a specification nobody diffs against its implementation is a description,
+not a guarantee. The checker is at fourteen repository rules and forty-five kit checks; the
+enforcing artifact and the specification now agree, and the reviewer has both.
+
+## D-045 - Plan v14: structure beats spelling
+GPT rejected plan v13 with three findings; all accepted, and this time it did not merely read the
+checker - it **attacked** it, inserting evasions and showing them pass:
+
+- `ACTIVE.md points to the sentinel` in a non-final ticket - rule 8 stayed green, because the
+  code matched the single phrase "gets the sentinel";
+- `Five entries remain after this ticket.` - rule 10 stayed green, because the code matched only
+  `remaining <word> entries`;
+- rule 13's heading replaced by a second rule 14, giving `7,8,9,10,11,12,14,14` - rule 14 stayed
+  green, because it compared only minimum, maximum and length.
+
+**The root cause is not three regexes. It is regex over prose.** Natural language has unbounded
+paraphrase; a guard that matches sentence forms can always be walked around, and each round of
+"add another spelling" is a round the reviewer wins. v14 changes the shape of the problem:
+
+1. **The two prose-dependent claims are now structured fields.** Every ticket declares
+   `**Closeout pointer:** <GMR-00N|SENTINEL>` on its own line, and a **deselection ledger** table
+   states the count at each stage. **The field is the instruction a builder executes**; prose
+   about pointers or counts is explicitly narrative and non-operative. Rule 8 compares
+   declarations to the order table; rule 10 compares figures to the ledger. Rephrasing a sentence
+   now changes nothing, because no sentence was load-bearing.
+2. **Where a prose net remains, it is written to over-trigger.** The net matches the *claim
+   shape* in five orderings - "N entries remain", "remaining N entries", "N deselections",
+   "register has N" - rather than one spelling, and anything it flags must either be a ledger
+   figure or carry an explicit `narrative` marker. **A guard that under-triggers is silent; a
+   guard that over-triggers is merely annoying.** Marking eight lines in this revision was the
+   whole cost, and the first draft of the net - proximity-based - was rejected in testing because
+   it flagged unrelated numbers without catching anything the claim-shape version misses.
+3. **Rule 14 now requires the exact contiguous set**, scoped to the section that states the
+   range, with no gap and no duplicate. Minimum, maximum and length do not establish that a list
+   is what it claims to be.
+
+**The general rule, recorded because it outlives this plan:** when a guard must enforce a claim
+that lives in prose, either move the claim into a structured field the guard reads exactly, or
+accept a net that over-triggers and demand explicit marking. Never a regex that matches one way
+of saying it - that is not a guard, it is a spelling test.
+
+## D-046 - Product Owner ruling: the consistency rules leave the plan's scope
+GPT rejected plan v14 with four findings; all four were real and all four were about the kit
+checker's plan-internal-consistency rules. So were the three before them, and the three before
+those. **Five consecutive reviews found no defect in GMR-003's transplant criteria** - the
+reviewer has confirmed the module-class equivalence design, the manifest partition, the
+deselection register and GMR-005's coverage protections sound in every round since v9 - and
+instead found progressively more elaborate evasions of a guard I had added: a rephrased sentence,
+a malformed duplicate field, a phantom ledger row, a digit where a number word was expected.
+
+**The Product Owner ruled to remove those rules from the plan's scope.** The reasoning, recorded
+because it is a governance judgment and not a technical one:
+
+1. **They do not govern the builder.** Rules 8-14 catch *Claude Lead's* propagation errors when
+   revising the plan. A transplant is neither safer nor less safe for their existence. The
+   repository's executable authority should contain what a builder must do, and nothing else.
+2. **The surface was unbounded.** A text checker cannot be proven complete against paraphrase.
+   Each round closed real holes and opened the next; the findings were shrinking in severity but
+   not in number, and there was no state in which the rules could be declared finished.
+3. **Claiming enforcement was the actual error.** D-042 established that describing a guard is
+   not requiring it; the correction was to require it. The better correction, visible only after
+   four more rounds, was to **stop claiming it at all**. A tool that helps its author is not a
+   guarantee to a reviewer, and dressing it as one invited exactly the scrutiny it could not
+   survive.
+
+**What changes:** the repository checker implements rules 1-7 - the six GMR-001 rules plus the
+context-pack plan-hash rule - and GMR-003R demonstrates four failures rather than eleven. **What
+does not:** the structured `**Closeout pointer:**` declarations and the deselection ledger stay in
+the plan, because they are good drafting independent of any script; the field is unambiguous
+where prose was not. The kit checker keeps its consistency rules as an **unreviewed authoring
+tool**, offered as disclosure and never as evidence, and hardening it further is Lead
+housekeeping outside the plan.
+
+**The lesson, stated for whoever reads this later:** an independent reviewer will scrutinize
+exactly as hard as the claims invite. Claim that a script enforces a semantic property and the
+reviewer will - correctly - test whether it does, indefinitely. The discipline is not to claim
+less than is true; it is to **claim only what the artifact must guarantee for the work to be
+sound**, and to keep authoring aids out of the contract.

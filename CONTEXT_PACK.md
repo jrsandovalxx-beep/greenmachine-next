@@ -15,18 +15,18 @@ automated selection. Evidence confidence is displayed alongside, never fused int
 ## Current status
 
 - Active ticket: **GMR-003** (per `tickets/ACTIVE.md` → REBUILD_PLAN §GMR-003).
-- Decision count: **36** (D-001..D-036).
-- Plan: REBUILD_PLAN v7, **APPROVED WITH NOTES 2026-07-28**, sha256
-  `f9c9089f036011678ba1c5d71bace3d1ea2895524e68a9777df8042085397443` — the checker's pinned
+- Decision count: **46** (D-001..D-046).
+- Plan: REBUILD_PLAN v15, **APPROVED WITH NOTES 2026-07-28**, sha256
+  `3daa28b952f3c78d80c2d01764f495e3866eb68e32d13de86ac6f7a67646d904` — the checker's pinned
   value.
 - GMN-000A complete: APPROVED WITH NOTES for `3d5e4fde3d6065fad1078749c85eb61b96fde9de`.
 - GMR-001 complete: implementation APPROVED for `3fc9f1e04d71cbd4ec464634d5598e16510a496d`,
-  merged to `staging` (merge commit `a3eb0ea26db6f4a1ac94cc7d6f75fe1a3afc9774`); record:
-  `tickets/completed/GMR-001.md`.
+  merged to `staging` (`a3eb0ea26db6f4a1ac94cc7d6f75fe1a3afc9774`); closeout approved
+  `5e90e5967212b32a4620a5ca9742df28ac8e5742`.
 - GMR-002 complete: implementation APPROVED WITH NOTES for
-  `3e01ad3e4b90326f478083e727f97f9b2fe71ca3`, merged to `staging` (merge commit
-  `adb5405d881a1d8ba0046469f51bcf1dac5cae4c`); CI is live and required on both branches;
-  record: `tickets/completed/GMR-002.md`.
+  `3e01ad3e4b90326f478083e727f97f9b2fe71ca3`, merged to `staging`
+  (`adb5405d881a1d8ba0046469f51bcf1dac5cae4c`); closeout approved
+  `0612a39450b206e8a8f1019451a4349f94a5ce0c`. CI live and required on both branches.
 
 ## Read first
 

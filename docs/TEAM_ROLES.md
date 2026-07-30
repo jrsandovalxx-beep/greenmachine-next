@@ -51,6 +51,7 @@ review object:
 | GMR-002 closeout PR | B |
 | GMR-003 implementation + closeout PRs | B |
 | GMR-004 submissions 1, 2 + closeout PR | B |
+| GMR-005 implementation + closeout PRs | B |
 
 ## GPT's rejection and the overrule process (D-020)
 

@@ -2,9 +2,8 @@
 """Repository consistency checker for greenmachine-next.
 
 Adapted for the repository from the planning kit's checker (REBUILD_PLAN, GMR-001
-scope item 3). The kit script guarded a planning-document tree; this one guards the
-repository. It implements exactly the six repository rules the plan enumerates, per
-the approval verdict's ruling on the checker spec (six rules, 2026-07-28):
+scope item 3; rules re-pinned and rule 7 added by §GMR-003R per D-046 — the
+repository checker implements rules 1-7 and nothing more):
 
 1. freshness (ticket)     CONTEXT_PACK.md names the current active ticket.
 2. freshness (count)      CONTEXT_PACK.md states the current decision count.
@@ -13,8 +12,10 @@ the approval verdict's ruling on the checker spec (six rules, 2026-07-28):
                           tickets/ACTIVE.md names the first ticket after that prefix.
 5. banned phrases         the plan contains no retired-lifecycle phrase outside fenced
                           code blocks.
-6. manifest partition     the PORT_MANIFEST owner partition sums 135 + 4 + 1 + 1 = 141,
+6. manifest partition     the PORT_MANIFEST owner partition sums 138 + 4 + 1 + 1 = 144,
                           no row unowned.
+7. plan hash (pack)       the plan hash recorded in CONTEXT_PACK.md equals the pinned
+                          approved value.
 
 Why it exists is unchanged from the kit (D-016): a finding a script can catch must
 never reach a reviewer. Run it before any package goes to GPT and paste the output.
@@ -33,14 +34,14 @@ from pathlib import Path
 
 ROOT = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
 
-# The sha256 GPT's plan approval names (APPROVED WITH NOTES, 2026-07-28). Any edit to
-# tickets/REBUILD_PLAN.md turns the plan-hash rule red; a plan revision is committed only
-# with a reviewed PR that updates this pin alongside the plan bytes (plan lifecycle).
-PINNED_PLAN_SHA256 = "f9c9089f036011678ba1c5d71bace3d1ea2895524e68a9777df8042085397443"
+# The sha256 GPT's plan approval names (v15, APPROVED WITH NOTES, 2026-07-28). Any edit
+# to tickets/REBUILD_PLAN.md turns the plan-hash rule red; a plan revision is committed
+# only with a reviewed PR that updates this pin alongside the plan bytes (plan lifecycle).
+PINNED_PLAN_SHA256 = "3daa28b952f3c78d80c2d01764f495e3866eb68e32d13de86ac6f7a67646d904"
 
 # The completed-order table (plan lifecycle, closeout criterion c). The set of files in
 # tickets/completed/ must be exactly a prefix of this table.
-ORDER = ("GMN-000A", "GMR-001", "GMR-002", "GMR-003", "GMR-004")
+ORDER = ("GMN-000A", "GMR-001", "GMR-002", "GMR-003", "GMR-004", "GMR-005")
 SENTINEL = "NO ACTIVE TICKET — next phase pending planning"
 
 # The seven retired-lifecycle phrases, fixed by the plan's BANNED-PHRASES block. Fenced
@@ -55,9 +56,9 @@ BANNED_PHRASES = (
     "annex quoting",
 )
 
-# The manifest owner partition (PORT_MANIFEST v2; plan GMR-001 scope item 3).
+# The manifest owner partition (PORT_MANIFEST v3; §GMR-003R, D-039/D-040).
 EXPECTED_PARTITION = {
-    "GMR-003": 135,
+    "GMR-003": 138,
     "GMR-001": 4,
     "GMR-002": 1,
     "SUPERSEDED-000A": 1,
@@ -166,11 +167,33 @@ row_re = re.compile(r"^\|\s*\d+\s*\|\s*(\S+)\s*\|\s*`[^`]+`\s*\|\s*`[0-9a-f]{64}
 owners = Counter(row_re.findall(manifest))
 unknown = {owner: n for owner, n in owners.items() if owner not in EXPECTED_PARTITION}
 check(
-    "manifest partition: owner partition sums 135 + 4 + 1 + 1 = 141, no row unowned",
-    dict(owners) == EXPECTED_PARTITION and sum(owners.values()) == 141,
-    f"owner counts are {dict(owners)}; the partition must be GMR-003=135 + GMR-001=4 "
-    f"+ GMR-002=1 + SUPERSEDED-000A=1 = 141"
+    "manifest partition: owner partition sums 138 + 4 + 1 + 1 = 144, no row unowned",
+    dict(owners) == EXPECTED_PARTITION and sum(owners.values()) == 144,
+    f"owner counts are {dict(owners)}; the partition must be GMR-003=138 + GMR-001=4 "
+    f"+ GMR-002=1 + SUPERSEDED-000A=1 = 144"
     + (f"; unrecognized owner(s): {unknown}" if unknown else ""),
+)
+
+# Rule 7 -- plan hash (pack): the freshness rules watch the active ticket and the decision
+# count; neither notices a stale plan version. Rule 7 makes that drift mechanical
+# (added by the §GMR-003R plan-revision PR; D-046 fixes the rule set at exactly 1-7).
+# The match is anchored to the pack's Plan record -- the bullet beginning
+# "- Plan: REBUILD_PLAN" -- not to the first hash-shaped string in the file, so an
+# unrelated entry carrying the right value cannot mask a stale Plan record. A missing
+# Plan record, or a Plan record without a hash, FAILS the rule rather than passing
+# vacuously.
+print("\nPlan hash recorded in CONTEXT_PACK.md (the Plan record)")
+plan_entry_m = re.search(r"^- Plan: REBUILD_PLAN.*?(?=^- |\Z)", pack, re.M | re.S)
+if plan_entry_m is None:
+    pack_hash = "(no '- Plan: REBUILD_PLAN' record in CONTEXT_PACK.md)"
+else:
+    entry_hash_m = re.search(r"`([0-9a-f]{64})`", plan_entry_m.group(0))
+    pack_hash = entry_hash_m.group(1) if entry_hash_m else "(the Plan record contains no sha256)"
+check(
+    "plan hash (pack): the pack's Plan record carries the pinned approved plan hash",
+    pack_hash == PINNED_PLAN_SHA256,
+    f"the Plan record in CONTEXT_PACK.md carries {pack_hash}; pinned approved value is "
+    f"{PINNED_PLAN_SHA256}",
 )
 
 print(f"\n{checks_run} checks run, {len(failures)} failed")
