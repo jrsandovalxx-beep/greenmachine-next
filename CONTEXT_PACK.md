@@ -14,7 +14,7 @@ automated selection. Evidence confidence is displayed alongside, never fused int
 
 ## Current status
 
-- Active ticket: **GMR-003** (per `tickets/ACTIVE.md` → REBUILD_PLAN §GMR-003).
+- Active ticket: **GMR-004** (per `tickets/ACTIVE.md` → REBUILD_PLAN §GMR-004).
 - Decision count: **46** (D-001..D-046).
 - Plan: REBUILD_PLAN v15, **APPROVED WITH NOTES 2026-07-28**, sha256
   `3daa28b952f3c78d80c2d01764f495e3866eb68e32d13de86ac6f7a67646d904` — the checker's pinned
@@ -27,6 +27,9 @@ automated selection. Evidence confidence is displayed alongside, never fused int
   `3e01ad3e4b90326f478083e727f97f9b2fe71ca3`, merged to `staging`
   (`adb5405d881a1d8ba0046469f51bcf1dac5cae4c`); closeout approved
   `0612a39450b206e8a8f1019451a4349f94a5ce0c`. CI live and required on both branches.
+- GMR-003 implementation complete: APPROVED WITH NOTES for
+  `7d1a396ba8cefb451f080957eb94bbc5a9234cfd`, merged to `staging`
+  (`25a86b1ec3890c9c85db95b1691c2fd231755b7e`) - the manifest's 138 rows, entire.
 
 ## Read first
 

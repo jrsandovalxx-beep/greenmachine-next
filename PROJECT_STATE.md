@@ -35,11 +35,14 @@ Current state only. History and reasoning live in `DECISIONS.md`. Rewritten clea
 - CI live and required on both branches: contexts `Format, lint, type check, test (Python 3.11)`
   and `Format, lint, type check, test (Python 3.12)`, strict off. Every review object from
   GMR-002's closeout onward is Regime B.
-- **GMR-003: ACTIVE** — `tickets/ACTIVE.md` names it and the pack agrees. Its earlier stop
+- **GMR-003: implementation COMPLETE** - APPROVED WITH NOTES for SHA
+  `7d1a396ba8cefb451f080957eb94bbc5a9234cfd` (2026-07-31), merged to `staging` as
+  `25a86b1ec3890c9c85db95b1691c2fd231755b7e`. The manifest's 138 rows landed with zero
+  deviations, the one enumerated `pyproject.toml` block, the OQ-4 marker and the enumerated
+  deletion of `tests/test_skeleton.py`. Record: `tickets/completed/GMR-003.md`. Its earlier stop
   (D-039) was against superseded plan v7, whose criterion 5 no zero-deviation transplant could
-  satisfy; the approved v15 criteria are what it executes. Nothing entered history: branch
-  `gmr-003-core` holds zero commits and its verified extraction is stashed, to be re-verified
-  against the tag when the ticket resumes.
+  satisfy; the approved v15 criteria are what it executed. The closeout PR is this ticket's
+  second review object and its verdict lives in the review thread, not in this file.
 - **GMR-003R: the revision object of this PR** — seven files, no completed record, pointer
   untouched. It commits the approved plan bytes, re-pins the checker and lands manifest v3.
   The old backlogs are retired archive.
