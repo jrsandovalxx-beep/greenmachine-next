@@ -31,16 +31,34 @@ deployment pipeline end to end.
      a reader can see the value came from configuration, not the checkout;
   3. otherwise the literal `unknown`. Never a crash.
 
-**The secrets bridge.** Community Cloud configures an app through its secrets store,
-not through environment variables. At startup the shell copies `GM_ENVIRONMENT` and
-`GM_COMMIT` from Streamlit secrets into the process environment, **only where the
-environment variable is absent** — a real environment variable always wins, and the
-resolution order above is unchanged by the bridge.
+**The secrets bridge.** At startup the shell copies `GM_ENVIRONMENT` and `GM_COMMIT`
+from Streamlit secrets into the process environment, **only where the key is absent
+from `os.environ`** — the bridge never overwrites an existing value, and the resolution
+order above is unchanged by it. **Observed on this host (2026-08-03, GMR-004
+submission 2):** Community Cloud already exports root-level secrets as environment
+variables — `GM_ENVIRONMENT` was present in `os.environ` before the bridge ran, and the
+bridge wrote nothing — so the bridge is a **no-op on this host** for root-level keys.
+It stays in place as approved, harmless defense-in-depth for environments where a
+secrets source exists but is not exported (for example a local run with a
+`.streamlit/secrets.toml`). An earlier revision of this paragraph said Community Cloud
+configures apps "not through environment variables"; that premise was wrong and is
+corrected here to match observed behaviour.
+
+## App visibility
+
+The staging app is **public**, by deliberate Product Owner choice (2026-08-03), so the
+build can be watched. That is acceptable while the shell renders four fields and no
+provider data. **Revisit trigger:** the first ticket that puts real provider data on
+the page — the ingestion ticket, not the fixtures screen. The repository itself stays
+private over provider-data licensing, so visibility is a per-surface decision, never a
+default carried forward silently.
 
 ## Initial staging deploy (Product Owner, once)
 
-1. On share.streamlit.io: **New app** → repository `jrsandovalxx-beep/greenmachine-next`,
-   branch `staging`, main file path `streamlit_app.py`.
+1. On share.streamlit.io: **Create app** (the control's label as observed at the first
+   real deploy, 2026-08-03; an earlier revision of this runbook said "New app") →
+   repository `jrsandovalxx-beep/greenmachine-next`, branch `staging`, main file path
+   `streamlit_app.py`.
 2. In the app's **Settings → Secrets**, set:
 
    ```toml
@@ -65,6 +83,12 @@ resolution order above is unchanged by the bridge.
    point on, **updating `GM_COMMIT` is a mandatory step of every redeploy** (step 2
    of the redeploy procedure), owned by this runbook: staleness there is a documented
    procedural risk, not a claim that it cannot happen.
+
+   **Observed on this host (2026-08-03, GMR-004 submission 2):** the commit field
+   resolved through git on the first deploy — `7329f02`, no `(env)` marker — so
+   Community Cloud does expose git metadata and this contingency was tested and found
+   unnecessary here. This step, and step 2 of the redeploy procedure, remain
+   conditional and are currently unused.
 
 ## Redeploy (every merge to `staging`)
 
