@@ -46,6 +46,14 @@ Current state only. History and reasoning live in `DECISIONS.md`. Rewritten clea
 - **GMR-003R: the revision object of this PR** — seven files, no completed record, pointer
   untouched. It commits the approved plan bytes, re-pins the checker and lands manifest v3.
   The old backlogs are retired archive.
+- **GMR-004: both submissions COMPLETE** — submission 1 APPROVED WITH NOTES for SHA
+  `72a31e44bcd98b94c1256e82547ae6ab29395bda` (2026-08-03), merged to `staging` as
+  `7329f02759b8ee4f8608fd5409ccfd23125ec933`; submission 2 APPROVED WITH NOTES at head of record
+  `500613ec81dd972a3ad53d8f4ec618665ad90c5f`. The staging app is live at
+  https://greenmachine.streamlit.app/ — **public**, by Product Owner choice, confirmed by
+  signed-out check; the revisit trigger is the first ticket rendering real provider data
+  (`docs/DEPLOYMENT.md`). Record: `tickets/completed/GMR-004.md`. This closeout PR is the ticket's
+  third review object and its verdict lives in the review thread, not in this file.
 
 ## Specialist work
 - **GB-001/GB-002 (Grok): complete.** Twelve locked decisions (D-023), sample floors and rulings

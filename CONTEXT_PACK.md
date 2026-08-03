@@ -14,7 +14,7 @@ automated selection. Evidence confidence is displayed alongside, never fused int
 
 ## Current status
 
-- Active ticket: **GMR-004** (per `tickets/ACTIVE.md` → REBUILD_PLAN §GMR-004).
+- Active ticket: **GMR-005** (per `tickets/ACTIVE.md` → REBUILD_PLAN §GMR-005).
 - Decision count: **46** (D-001..D-046).
 - Plan: REBUILD_PLAN v15, **APPROVED WITH NOTES 2026-07-28**, sha256
   `3daa28b952f3c78d80c2d01764f495e3866eb68e32d13de86ac6f7a67646d904` — the checker's pinned
@@ -30,6 +30,10 @@ automated selection. Evidence confidence is displayed alongside, never fused int
 - GMR-003 implementation complete: APPROVED WITH NOTES for
   `7d1a396ba8cefb451f080957eb94bbc5a9234cfd`, merged to `staging`
   (`25a86b1ec3890c9c85db95b1691c2fd231755b7e`) - the manifest's 138 rows, entire.
+- GMR-004 both submissions complete: S1 APPROVED WITH NOTES for
+  `72a31e44bcd98b94c1256e82547ae6ab29395bda` (merged `7329f02759b8ee4f8608fd5409ccfd23125ec933`);
+  S2 APPROVED WITH NOTES at head of record `500613ec81dd972a3ad53d8f4ec618665ad90c5f`. Staging app
+  live and public: https://greenmachine.streamlit.app/
 
 ## Read first
 
