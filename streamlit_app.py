@@ -100,26 +100,12 @@ def resolve_commit() -> str:
 
 def main() -> None:
     st.set_page_config(page_title="GreenMachine", layout="centered")
-    # GMR-004 submission 2 redeploy marker (criterion 7), doubling as the
-    # observed-route diagnostic the reviewer required: it records whether the
-    # GM_* keys reached os.environ before the bridge ran — i.e. whether the
-    # host already exports root-level secrets as environment variables and the
-    # bridge is a no-op here. Removed again by the criterion 8 rollback.
-    watched = ("GM_ENVIRONMENT", "GM_COMMIT")
-    pre_bridge = {key: key in os.environ for key in watched}
     bridge_secrets_into_environment()
-    bridge_wrote = [key for key in watched if key in os.environ and not pre_bridge[key]]
     st.title("GreenMachine")
     st.caption("Deployment shell (REBUILD_PLAN §GMR-004) — no product screens.")
     st.markdown(f"**Environment:** {resolve_environment()}")
     st.markdown(f"**Version:** {resolve_version()}")
     st.markdown(f"**Commit:** {resolve_commit()}")
-    st.caption(
-        "GMR004-S2 redeploy marker — pre-bridge os.environ: "
-        f"GM_ENVIRONMENT {'present' if pre_bridge['GM_ENVIRONMENT'] else 'absent'}, "
-        f"GM_COMMIT {'present' if pre_bridge['GM_COMMIT'] else 'absent'}; "
-        f"bridge wrote: {', '.join(bridge_wrote) if bridge_wrote else 'nothing'}"
-    )
 
 
 if __name__ == "__main__":
