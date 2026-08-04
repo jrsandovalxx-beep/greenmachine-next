@@ -54,6 +54,16 @@ Current state only. History and reasoning live in `DECISIONS.md`. Rewritten clea
   signed-out check; the revisit trigger is the first ticket rendering real provider data
   (`docs/DEPLOYMENT.md`). Record: `tickets/completed/GMR-004.md`. This closeout PR is the ticket's
   third review object and its verdict lives in the review thread, not in this file.
+- **GMR-005: COMPLETE** — implementation APPROVED WITH NOTES for SHA
+  `4e6904184d02177bbf12fa5fc76f08a21f225d77` (2026-08-04), merged to `staging` as
+  `4efffc0e816e2aac691d1437663ac3bcfe69785b`. The deselection ledger is at **zero** — no
+  transplanted test is left disabled. Register row 1 replaced (state (b)); rows 2 and 5–6 removed
+  (state (c)); `pyproject.toml`'s `addopts` carries no `--deselect`, restored byte-exactly to its
+  pre-deselection form. `.streamlit/config.toml` added from the legacy tag blob, ruled in scope.
+  Record: `tickets/completed/GMR-005.md`. This closeout PR is the ticket's second review object
+  and its verdict lives in the review thread, not in this file. **With this ticket the bootstrap
+  is complete**; the feature phase is planned as its own package, GPT-reviewed before any feature
+  ticket starts.
 
 ## Specialist work
 - **GB-001/GB-002 (Grok): complete.** Twelve locked decisions (D-023), sample floors and rulings
