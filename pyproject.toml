@@ -89,4 +89,4 @@ testpaths = ["tests"]
 # never derived from a date, a clock, or an environment variable. A developer
 # overrides it deliberately on the command line (a later --hypothesis-seed
 # wins), e.g. --hypothesis-seed=12345 or --hypothesis-seed=random.
-addopts = "-ra --strict-markers --strict-config --hypothesis-seed=20260724 --deselect tests/architecture/test_deployment_contract.py::test_requirements_txt_sits_beside_the_entrypoint --deselect tests/architecture/test_deployment_contract.py::test_the_release_archive_ships_requirements_under_the_outer_directory --deselect \"tests/unit/config/test_nonproduction_config_location.py::test_no_consumer_still_references_the_retired_fixture_path[generate_gm041_sample_evaluation.py]\" --deselect \"tests/unit/config/test_nonproduction_config_location.py::test_every_consumer_uses_the_canonical_path[generate_gm041_sample_evaluation.py]\""
+addopts = "-ra --strict-markers --strict-config --hypothesis-seed=20260724"

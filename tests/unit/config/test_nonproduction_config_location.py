@@ -83,9 +83,12 @@ def test_the_configuration_announces_itself_as_non_production() -> None:
 # Every consumer points at the canonical path
 # --------------------------------------------------------------------------
 
+# GMR-005 (register rows 5-6, terminal state (c)): the legacy synthetic demo
+# generator `scripts/generate_gm041_sample_evaluation.py` is ruled never-port,
+# never-execute (D-029), so its consumer parameter is permanently inapplicable
+# and was retired with its deselect entries. The surviving consumers are real.
 _CONSUMERS = (
     REPO_ROOT / "streamlit_app.py",
-    REPO_ROOT / "scripts" / "generate_gm041_sample_evaluation.py",
     REPO_ROOT / "tests" / "unit" / "scoring" / "test_engine.py",
 )
 
