@@ -3,14 +3,12 @@
 The hosted app installs the repository-root ``requirements.txt``
 automatically, so that file must carry exactly the bounded runtime/UI
 dependencies — the project runtime dependencies plus the UI extra — and
-never a development tool. The release archive keeps the one outer
-``greenmachine/`` directory whose contents become the GitHub repository
-root.
+never a development tool. (The legacy release-archive clause left with its
+test in GMR-005: the rebuild has no release-archive mechanism.)
 """
 
 from __future__ import annotations
 
-import importlib.util
 import tomllib
 from pathlib import Path
 
@@ -39,11 +37,18 @@ def _requirement_lines() -> tuple[str, ...]:
     return tuple(line.strip() for line in lines if line.strip() and not line.startswith("#"))
 
 
-def test_requirements_txt_sits_beside_the_entrypoint() -> None:
+def test_the_deployment_files_sit_at_the_repository_root() -> None:
+    """GMR-005 replacement for the transplanted
+    ``test_requirements_txt_sits_beside_the_entrypoint`` (register row 1,
+    terminal state (b)): the same contract against the rebuild's own layout.
+    Carried forward: the requirements file, the entrypoint, and the Streamlit
+    configuration all sit at the repository root. Dropped: the GM-020
+    evidence-bundle directory — OQ-7 (D-030) keeps evidence bundles in the
+    frozen legacy repository, so that assertion is inapplicable here.
+    """
     assert REQUIREMENTS.is_file()
     assert (REPO_ROOT / "streamlit_app.py").is_file()
     assert (REPO_ROOT / ".streamlit" / "config.toml").is_file()
-    assert (REPO_ROOT / "evidence" / "gm020_vertical_slice" / "prospective_run").is_dir()
 
 
 def test_requirements_carry_exactly_the_approved_specifications() -> None:
@@ -83,23 +88,6 @@ def test_no_secret_shaped_deployment_file_exists() -> None:
             if ".venv" not in path.parts and "cleanvenv" not in path.parts
         ]
         assert found == [], f"secret-shaped file(s) present: {found}"
-
-
-def test_the_release_archive_ships_requirements_under_the_outer_directory() -> None:
-    """The builder's real plan: requirements.txt is included, and every entry
-    keeps the intended single greenmachine/ outer directory."""
-    spec = importlib.util.spec_from_file_location(
-        "build_release_archive", REPO_ROOT / "scripts" / "build_release_archive.py"
-    )
-    assert spec is not None and spec.loader is not None
-    builder = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(builder)
-
-    arcnames = [arcname for arcname, _ in builder.release_file_plan()]
-    assert "greenmachine/requirements.txt" in arcnames
-    assert "greenmachine/streamlit_app.py" in arcnames
-    assert "greenmachine/.streamlit/config.toml" in arcnames
-    assert all(arcname.startswith("greenmachine/") for arcname in arcnames)
 
 
 def test_deployment_documentation_names_the_entrypoint_and_requirements() -> None:
