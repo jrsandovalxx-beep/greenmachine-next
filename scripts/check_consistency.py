@@ -2,20 +2,28 @@
 """Repository consistency checker for greenmachine-next.
 
 Adapted for the repository from the planning kit's checker (REBUILD_PLAN, GMR-001
-scope item 3; rules re-pinned and rule 7 added by §GMR-003R per D-046 — the
-repository checker implements rules 1-7 and nothing more):
+scope item 3; rules re-pinned and rule 7 added by §GMR-003R per D-046; extended to
+the two-plan form by §GMF-000R per FEATURE_PHASE_PLAN §5/§5a — ten rules, and
+nothing more):
 
-1. freshness (ticket)     CONTEXT_PACK.md names the current active ticket.
-2. freshness (count)      CONTEXT_PACK.md states the current decision count.
-3. plan hash              sha256(tickets/REBUILD_PLAN.md) equals the pinned approved value.
-4. pointer order          tickets/completed/ is exactly a prefix of the order table and
-                          tickets/ACTIVE.md names the first ticket after that prefix.
-5. banned phrases         the plan contains no retired-lifecycle phrase outside fenced
-                          code blocks.
-6. manifest partition     the PORT_MANIFEST owner partition sums 138 + 4 + 1 + 1 = 144,
-                          no row unowned.
-7. plan hash (pack)       the plan hash recorded in CONTEXT_PACK.md equals the pinned
-                          approved value.
+1.  freshness (ticket)      CONTEXT_PACK.md names the current active ticket.
+2.  freshness (count)       CONTEXT_PACK.md states the current decision count.
+3a. rebuild-plan hash       sha256(tickets/REBUILD_PLAN.md) equals its pin.
+3b. feature-plan hash       sha256(tickets/FEATURE_PHASE_PLAN.md) equals its pin.
+4.  pointer order           tickets/completed/ is exactly a prefix of the order table
+                            and tickets/ACTIVE.md names the first ticket after that
+                            prefix (two checks).
+5.  banned phrases          neither plan contains a retired-lifecycle phrase outside
+                            fenced code blocks (extended across both plans; still one
+                            rule).
+6.  manifest partition      the PORT_MANIFEST owner partition sums 138 + 4 + 1 + 1
+                            = 144, no row unowned.
+7a. bootstrap pack record   the pack's "Plan (bootstrap, historical)" record carries
+                            the pinned REBUILD_PLAN hash AND a version label equal to
+                            that plan's own title version.
+7b. feature pack record     the pack's "Plan (active, feature phase)" record carries
+                            the pinned FEATURE_PHASE_PLAN hash AND a version label
+                            equal to that plan's own title version.
 
 Why it exists is unchanged from the kit (D-016): a finding a script can catch must
 never reach a reviewer. Run it before any package goes to GPT and paste the output.
@@ -34,14 +42,32 @@ from pathlib import Path
 
 ROOT = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
 
-# The sha256 GPT's plan approval names (v15, APPROVED WITH NOTES, 2026-07-28). Any edit
-# to tickets/REBUILD_PLAN.md turns the plan-hash rule red; a plan revision is committed
-# only with a reviewed PR that updates this pin alongside the plan bytes (plan lifecycle).
-PINNED_PLAN_SHA256 = "3daa28b952f3c78d80c2d01764f495e3866eb68e32d13de86ac6f7a67646d904"
+# Two plans, two independently checked pins (FEATURE_PHASE_PLAN §5). Any later change
+# to either plan turns its rule red; a plan revision is committed only with a reviewed
+# PR that updates the pin alongside the plan bytes (plan lifecycle).
+# REBUILD_PLAN v16 = v15 + the §GMF-000R two-line revision (version line, GMR-005
+# criterion-4 correction); the bootstrap's completed records keep their v15 link-backs.
+PINNED_REBUILD_PLAN_SHA256 = "c41b6abd5fbe64c0e9b468bea0c9a2ddb5f1b646780c017655f0295aa0b82ca2"
+# FEATURE_PHASE_PLAN v6, APPROVED — the bytes committed unaltered by §GMF-000R.
+PINNED_FEATURE_PLAN_SHA256 = "0875a5a5bcca57ecd275f3c7deb3f743ec6cdc9a2c8ea4a7945a2d9fe920011b"
 
-# The completed-order table (plan lifecycle, closeout criterion c). The set of files in
-# tickets/completed/ must be exactly a prefix of this table.
-ORDER = ("GMN-000A", "GMR-001", "GMR-002", "GMR-003", "GMR-004", "GMR-005")
+# The completed-order table (FEATURE_PHASE_PLAN §4a — the complete combined sequence,
+# authoritative there). The set of files in tickets/completed/ must be exactly a prefix
+# of this table.
+ORDER = (
+    "GMN-000A",
+    "GMR-001",
+    "GMR-002",
+    "GMR-003",
+    "GMR-004",
+    "GMR-005",
+    "GMF-001",
+    "GMF-002",
+    "GMF-003",
+    "GMF-004",
+    "GMF-005",
+    "GMF-006",
+)
 SENTINEL = "NO ACTIVE TICKET — next phase pending planning"
 
 # The seven retired-lifecycle phrases, fixed by the plan's BANNED-PHRASES block. Fenced
@@ -86,7 +112,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 def active_pointer() -> str:
     """Return the ticket ID or sentinel that tickets/ACTIVE.md points at."""
     txt = read("tickets/ACTIVE.md")
-    m = re.search(r"^Active:\s*(GM[NR]-\w+|NO ACTIVE TICKET.*?)\s*(?:per\b.*)?$", txt, re.M)
+    m = re.search(r"^Active:\s*(GM[NRF]-\w+|NO ACTIVE TICKET.*?)\s*(?:per\b.*)?$", txt, re.M)
     return m.group(1).strip() if m else ""
 
 
@@ -120,14 +146,27 @@ check(
     f"CONTEXT_PACK.md states {pack_count} but DECISIONS.md holds {latest} decisions",
 )
 
-# Rule 3 -- plan hash: the hash-pinned plan file is the single frozen authority.
-print("\nPlan hash (tickets/REBUILD_PLAN.md)")
-plan_path = ROOT / "tickets" / "REBUILD_PLAN.md"
-plan_sha = hashlib.sha256(plan_path.read_bytes()).hexdigest() if plan_path.exists() else "(missing)"
+# Rules 3a and 3b -- plan hashes: each hash-pinned plan file is a frozen authority,
+# each guarded by its own pin (FEATURE_PHASE_PLAN §5: a single constant cannot guard
+# two files).
+print("\nPlan hashes (tickets/REBUILD_PLAN.md, tickets/FEATURE_PHASE_PLAN.md)")
+rebuild_path = ROOT / "tickets" / "REBUILD_PLAN.md"
+rebuild_sha = (
+    hashlib.sha256(rebuild_path.read_bytes()).hexdigest() if rebuild_path.exists() else "(missing)"
+)
 check(
-    "plan hash: sha256(tickets/REBUILD_PLAN.md) equals the pinned approved value",
-    plan_sha == PINNED_PLAN_SHA256,
-    f"committed file is {plan_sha}; pinned approved value is {PINNED_PLAN_SHA256}",
+    "rebuild-plan hash: sha256(tickets/REBUILD_PLAN.md) equals its pinned value",
+    rebuild_sha == PINNED_REBUILD_PLAN_SHA256,
+    f"committed file is {rebuild_sha}; pinned value is {PINNED_REBUILD_PLAN_SHA256}",
+)
+feature_path = ROOT / "tickets" / "FEATURE_PHASE_PLAN.md"
+feature_sha = (
+    hashlib.sha256(feature_path.read_bytes()).hexdigest() if feature_path.exists() else "(missing)"
+)
+check(
+    "feature-plan hash: sha256(tickets/FEATURE_PHASE_PLAN.md) equals its pinned value",
+    feature_sha == PINNED_FEATURE_PLAN_SHA256,
+    f"committed file is {feature_sha}; pinned value is {PINNED_FEATURE_PLAN_SHA256}",
 )
 
 # Rule 4 -- pointer order: completed/ is a prefix of the order table; ACTIVE.md names the
@@ -150,14 +189,19 @@ check(
     f"ACTIVE.md names {pointer!r} but the order table expects {expected!r}",
 )
 
-# Rule 5 -- banned phrases: retired lifecycle vocabulary must not return to the plan.
-print("\nBanned phrases (tickets/REBUILD_PLAN.md, outside fenced code blocks)")
-plan_scannable = outside_fences(read("tickets/REBUILD_PLAN.md"))
-hits = [phrase for phrase in BANNED_PHRASES if phrase in plan_scannable]
+# Rule 5 -- banned phrases: retired lifecycle vocabulary must not return to either
+# plan. Extended across both plans by §GMF-000R (FEATURE_PHASE_PLAN §5): the hash
+# rules protect today's approved bytes, but this rule exists precisely to survive
+# tomorrow's authorized re-pins. One rule, both files.
+print("\nBanned phrases (both plans, outside fenced code blocks)")
+phrase_hits: list[str] = []
+for plan_rel in ("tickets/REBUILD_PLAN.md", "tickets/FEATURE_PHASE_PLAN.md"):
+    scannable = outside_fences(read(plan_rel))
+    phrase_hits += [f"{plan_rel}: {p!r}" for p in BANNED_PHRASES if p in scannable]
 check(
-    "banned phrases: no retired-lifecycle phrase outside fences",
-    not hits,
-    "banned phrase present outside fences: " + ", ".join(repr(h) for h in hits),
+    "banned phrases: no retired-lifecycle phrase outside fences in either plan",
+    not phrase_hits,
+    "banned phrase present outside fences: " + ", ".join(phrase_hits),
 )
 
 # Rule 6 -- manifest partition: every row owned, the owner counts exact.
@@ -174,26 +218,67 @@ check(
     + (f"; unrecognized owner(s): {unknown}" if unknown else ""),
 )
 
-# Rule 7 -- plan hash (pack): the freshness rules watch the active ticket and the decision
-# count; neither notices a stale plan version. Rule 7 makes that drift mechanical
-# (added by the §GMR-003R plan-revision PR; D-046 fixes the rule set at exactly 1-7).
-# The match is anchored to the pack's Plan record -- the bullet beginning
-# "- Plan: REBUILD_PLAN" -- not to the first hash-shaped string in the file, so an
-# unrelated entry carrying the right value cannot mask a stale Plan record. A missing
-# Plan record, or a Plan record without a hash, FAILS the rule rather than passing
-# vacuously.
-print("\nPlan hash recorded in CONTEXT_PACK.md (the Plan record)")
-plan_entry_m = re.search(r"^- Plan: REBUILD_PLAN.*?(?=^- |\Z)", pack, re.M | re.S)
-if plan_entry_m is None:
-    pack_hash = "(no '- Plan: REBUILD_PLAN' record in CONTEXT_PACK.md)"
-else:
-    entry_hash_m = re.search(r"`([0-9a-f]{64})`", plan_entry_m.group(0))
-    pack_hash = entry_hash_m.group(1) if entry_hash_m else "(the Plan record contains no sha256)"
-check(
-    "plan hash (pack): the pack's Plan record carries the pinned approved plan hash",
-    pack_hash == PINNED_PLAN_SHA256,
-    f"the Plan record in CONTEXT_PACK.md carries {pack_hash}; pinned approved value is "
-    f"{PINNED_PLAN_SHA256}",
+# Rules 7a and 7b -- the two pack plan records (FEATURE_PHASE_PLAN §5a). Each rule
+# anchors to its own complete record -- not to the first hash-shaped string in the
+# file -- so an unrelated entry carrying the right value cannot mask a stale record
+# (the rule-7 hardening, inherited by both). A missing record, or a record without a
+# hash, FAILS the rule rather than passing vacuously. Each rule additionally binds
+# the version label inside the record to the version string in that plan's own title
+# line, so a revision that updates a plan's title without its record, or a record
+# without its title, turns the checker red instead of shipping a record that misnames
+# its own authority (the self-reference trap, closed mechanically).
+
+
+def plan_title_version(rel: str) -> str:
+    """Return the vN version string from a plan's title line."""
+    m = re.search(r"^# \S+ (v\d+)\b", read(rel), re.M)
+    return m.group(1) if m else "(no version in title)"
+
+
+def pack_record_check(
+    label: str,
+    anchor: str,
+    plan_rel: str,
+    plan_name: str,
+    pinned: str,
+) -> None:
+    entry_m = re.search(anchor, pack, re.M | re.S)
+    if entry_m is None:
+        check(
+            f"{label}: the pack record exists and carries the pinned hash",
+            False,
+            f"no record matching {anchor!r} in CONTEXT_PACK.md",
+        )
+        return
+    entry = entry_m.group(0)
+    hash_m = re.search(r"`([0-9a-f]{64})`", entry)
+    record_hash = hash_m.group(1) if hash_m else "(the record contains no sha256)"
+    label_m = re.search(re.escape(plan_name) + r" (v\d+)\b", entry)
+    record_version = label_m.group(1) if label_m else "(no version label in record)"
+    title_version = plan_title_version(plan_rel)
+    check(
+        f"{label}: the record carries the pinned hash and its version label equals "
+        f"the plan title's version",
+        record_hash == pinned and record_version == title_version,
+        f"record hash {record_hash} vs pin {pinned}; record label {record_version} vs "
+        f"{plan_rel} title {title_version}",
+    )
+
+
+print("\nPack plan records (CONTEXT_PACK.md: bootstrap-historical and active-feature)")
+pack_record_check(
+    "bootstrap pack record",
+    r"^- Plan \(bootstrap, historical\): REBUILD_PLAN.*?(?=^- |\Z)",
+    "tickets/REBUILD_PLAN.md",
+    "REBUILD_PLAN",
+    PINNED_REBUILD_PLAN_SHA256,
+)
+pack_record_check(
+    "feature pack record",
+    r"^- Plan \(active, feature phase\): FEATURE_PHASE_PLAN.*?(?=^- |\Z)",
+    "tickets/FEATURE_PHASE_PLAN.md",
+    "FEATURE_PHASE_PLAN",
+    PINNED_FEATURE_PLAN_SHA256,
 )
 
 print(f"\n{checks_run} checks run, {len(failures)} failed")

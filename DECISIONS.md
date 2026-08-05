@@ -1503,3 +1503,66 @@ exactly as hard as the claims invite. Claim that a script enforces a semantic pr
 reviewer will - correctly - test whether it does, indefinitely. The discipline is not to claim
 less than is true; it is to **claim only what the artifact must guarantee for the work to be
 sound**, and to keep authoring aids out of the contract.
+
+## D-047 - Transport envelope
+Recorded from FEATURE_PHASE_PLAN v6 §4b (2026-08-04); operationally in force through the entire
+bootstrap. Every artifact between conversations travels as `.md`. Byte-exact artifacts travel as
+base64 inside it, with the decode command and target hash stated. Documents over 180 KB are
+chunked with an index and a receipt protocol. Five delivery failures paid for this rule.
+
+## D-048 - Cover-message authority
+Recorded from FEATURE_PHASE_PLAN v6 §4b (2026-08-04); operationally in force through the entire
+bootstrap. The paste message accompanying an artifact is Claude Lead's instrument and carries
+Lead's instructions; it is not a summary of the artifact. Where a cover message and the plan
+disagree, **the plan wins**, and the builder reports the conflict rather than resolving it.
+
+## D-049 - Permitted deltas are content-scoped, not path-scoped
+A file in a permitted path list licenses only the content changes that list enumerates. A
+reviewer aside cannot widen a hash-pinned plan; only a plan-revision object can. (Established by
+the GMR-004 closeout V1 rejection; recorded from FEATURE_PHASE_PLAN v6 §4b.)
+
+## D-050 - A criterion satisfiable only by fabricating output is a criterion defect
+The builder states the impossibility, supplies the evidence the criterion reached for, and
+discloses the substitution. (Established by GMR-005 criterion 4 — the `(0 deselected)` literal —
+and its verdict; recorded from FEATURE_PHASE_PLAN v6 §2/§4b.)
+
+## D-051 - Ballpark Pal is excluded from the deployed application
+Its terms bar powering anything "made available to others," and a private deployment with
+invited viewers still makes it available to others. Provider data may enter a deployment only
+where access is limited to the licensed Product Owner **as sole user**, with no invited or
+shared viewers, **or** under written provider permission covering the actual audience.
+Private-versus-public is not the test; sole-user-versus-anyone-else is.
+
+## D-052 - No third-party provider data becomes a repository fixture or golden file
+Committing it is redistribution. This binds for Ballpark Pal and any future licensed provider;
+it does **not** bind MLB-derived data, which D-057 addresses expressly.
+
+## D-053 - Park factors: the pinned Baseball Savant per-handedness snapshot is the source of record
+Reinstated under D-057. Provenance-pinned: source URL, export date, row count, sha256.
+
+## D-054 - Weather: api.weather.gov (NWS)
+Open data, free for any purpose; no API key; an identifying `User-Agent` required; unpublished
+rate limits, over-limit requests retryable typically within ~5 seconds; documentation notes a
+key may be introduced later.
+
+## D-055 - Venue type is part of the park reference data
+Fixed/closed roof → forecast suppressed with a stated reason; open air → forecast applies;
+retractable with status unknown → explicit unknown. NWS covers the US only; Rogers Centre
+renders the same explicit unavailable state.
+
+## D-056 - The project has no secrets
+Neither source needs a credential. The `st.secrets` provisioning deferred through GMR-004 stays
+deferred until an object introduces a credentialed provider and states its handling rule first.
+
+## D-057 - Product Owner override of GPT finding 1
+Per D-020, the Product Owner overrides the feature-phase-plan review's finding 1 (authorization
+to obtain, commit and publicly display Baseball Savant data). The record is honest about what it
+sets aside (FEATURE_PHASE_PLAN v6 §1): the use is non-commercial; it is not confined to one copy
+on one device for home use, because the deployment is public; written permission has not been
+sought. **No claim is made that the conduct is permitted.** This is a decision to proceed
+despite the terms. The override is narrow and two boundaries survive it: **automated collection
+remains prohibited** — all MLB-derived data enters by manual export performed by the Product
+Owner, and §GMF-006 must prove no code path fetches from an MLB host — and **Ballpark Pal
+remains excluded** (D-051). Reversible: withdrawal means removing the committed snapshot and
+MLB-derived surfaces from the deployment, which the manual-export path and the adapter seam
+keep recoverable.

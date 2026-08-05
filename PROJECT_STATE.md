@@ -43,9 +43,10 @@ Current state only. History and reasoning live in `DECISIONS.md`. Rewritten clea
   (D-039) was against superseded plan v7, whose criterion 5 no zero-deviation transplant could
   satisfy; the approved v15 criteria are what it executed. The closeout PR is this ticket's
   second review object and its verdict lives in the review thread, not in this file.
-- **GMR-003R: the revision object of this PR** — seven files, no completed record, pointer
-  untouched. It commits the approved plan bytes, re-pins the checker and lands manifest v3.
-  The old backlogs are retired archive.
+- **GMR-003R: COMPLETE** — the plan-revision object of the GMR-003 sequence, seven files, no
+  completed record, pointer untouched. Merged to `staging` as
+  `21cd7d1e021dbde825900d5711bdc23f081a887c`: it committed the approved plan bytes, re-pinned
+  the checker and landed manifest v3. The old backlogs are retired archive.
 - **GMR-004: both submissions COMPLETE** — submission 1 APPROVED WITH NOTES for SHA
   `72a31e44bcd98b94c1256e82547ae6ab29395bda` (2026-08-03), merged to `staging` as
   `7329f02759b8ee4f8608fd5409ccfd23125ec933`; submission 2 APPROVED WITH NOTES at head of record
@@ -64,6 +65,10 @@ Current state only. History and reasoning live in `DECISIONS.md`. Rewritten clea
   and its verdict lives in the review thread, not in this file. **With this ticket the bootstrap
   is complete**; the feature phase is planned as its own package, GPT-reviewed before any feature
   ticket starts.
+- **Phase transition (2026-08-04): the feature phase is ACTIVE.** FEATURE_PHASE_PLAN v6
+  committed and pinned by §GMF-000R; REBUILD_PLAN advanced to v16 (the §GMR-005 criterion-4
+  correction and the version line — two lines, nothing else); decisions D-047..D-057 landed;
+  active ticket **GMF-001**.
 
 ## Specialist work
 - **GB-001/GB-002 (Grok): complete.** Twelve locked decisions (D-023), sample floors and rulings
