@@ -1,2 +1,2 @@
-Active: GMR-005 per REBUILD_PLAN §GMR-005
+Active: NO ACTIVE TICKET — next phase pending planning
 Completed records: tickets/completed/ — order table in REBUILD_PLAN (lifecycle, closeout rule c).

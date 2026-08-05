@@ -14,7 +14,9 @@ automated selection. Evidence confidence is displayed alongside, never fused int
 
 ## Current status
 
-- Active ticket: **GMR-005** (per `tickets/ACTIVE.md` → REBUILD_PLAN §GMR-005).
+- Active ticket: **NO ACTIVE TICKET — next phase pending planning** — the bootstrap is complete
+  (per `tickets/ACTIVE.md`); the feature phase is planned as its own GPT-reviewed package before
+  any feature ticket starts.
 - Decision count: **46** (D-001..D-046).
 - Plan: REBUILD_PLAN v15, **APPROVED WITH NOTES 2026-07-28**, sha256
   `3daa28b952f3c78d80c2d01764f495e3866eb68e32d13de86ac6f7a67646d904` — the checker's pinned
@@ -34,6 +36,10 @@ automated selection. Evidence confidence is displayed alongside, never fused int
   `72a31e44bcd98b94c1256e82547ae6ab29395bda` (merged `7329f02759b8ee4f8608fd5409ccfd23125ec933`);
   S2 APPROVED WITH NOTES at head of record `500613ec81dd972a3ad53d8f4ec618665ad90c5f`. Staging app
   live and public: https://greenmachine.streamlit.app/
+- GMR-005 complete: implementation APPROVED WITH NOTES for
+  `4e6904184d02177bbf12fa5fc76f08a21f225d77`, merged to `staging`
+  (`4efffc0e816e2aac691d1437663ac3bcfe69785b`) — the deselection ledger is at **zero**, no
+  transplanted test left disabled. Bootstrap complete.
 
 ## Read first
 
