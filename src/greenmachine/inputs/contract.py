@@ -26,6 +26,11 @@ is the product's spine: a screen renders an ``InputSnapshot`` and never fetches
   source by ``source_id``; a manual-export source carries the full
   ``ManualExportProvenance`` record, so D-057's manual-export chain is
   auditable from the snapshot alone.
+- **Event detail is snapshot data, not a fetch.** A batter's batted-ball log
+  (``BattedBallLog``) is carried in the snapshot at the same captured moment
+  as the aggregates beside it, because a detail view is a view of the same
+  instant: the log is reachable from more than one screen, so it is a shared
+  property of the batter, and a popup renders it without fetching.
 
 Structural identity fields (ids, names, enum members) are constructor
 arguments validated at build time; the three-way absence semantics apply to
@@ -269,13 +274,89 @@ class WindowedBatterMetrics:
 
 
 @dataclass(frozen=True)
+class ExitVelocityReading:
+    """Unit: miles per hour — one event's measurement, not an aggregate."""
+
+    miles_per_hour: Decimal
+
+    def __post_init__(self) -> None:
+        if self.miles_per_hour <= 0:
+            raise InputContractError("exit velocity must be positive")
+
+
+@dataclass(frozen=True)
+class HitDistanceReading:
+    """Unit: feet — one event's projected hit distance."""
+
+    feet: Decimal
+
+    def __post_init__(self) -> None:
+        if self.feet < 0:
+            raise InputContractError("hit distance cannot be negative")
+
+
+@dataclass(frozen=True)
+class BattedBallEvent:
+    """One batted-ball event in a batter's log — display-only, never scored.
+
+    ``pitch_type`` and ``result`` carry the contributing source's own
+    designations verbatim (provenance over invention: an enum authored here
+    would contradict the real export's vocabulary at wire-through). Each
+    measurement is a ``SnapshotField`` because real event rows arrive with
+    untracked measurements, and an untracked measurement is a named absence,
+    never a silent null.
+    """
+
+    event_date: date
+    pitch_type: str
+    result: str
+    exit_velocity: SnapshotField[ExitVelocityReading]
+    hit_distance: SnapshotField[HitDistanceReading]
+
+    def __post_init__(self) -> None:
+        if not self.pitch_type:
+            raise InputContractError("event pitch_type must be non-empty")
+        if not self.result:
+            raise InputContractError("event result must be non-empty")
+
+
+@dataclass(frozen=True)
+class BattedBallLog:
+    """A batter's per-event batted-ball log for one named window.
+
+    A **present, empty** log is a real observation — the source is healthy and
+    the batter had no batted balls in the window — and renders as exactly that.
+    It is distinct from the log being absent (``NOT_YET_OBSERVED``: not yet
+    captured; ``SOURCE_UNAVAILABLE``: the source failed). Events are ordered by
+    non-decreasing date so rendering is deterministic without screen-side
+    sorting.
+    """
+
+    window: Window
+    events: tuple[BattedBallEvent, ...]
+
+    def __post_init__(self) -> None:
+        dates = [event.event_date for event in self.events]
+        if dates != sorted(dates):
+            raise InputContractError("batted-ball events must be ordered by non-decreasing date")
+
+
+@dataclass(frozen=True)
 class BatterInputs:
-    """One batter's observed inputs at the snapshot's moment."""
+    """One batter's observed inputs at the snapshot's moment.
+
+    ``batted_ball_log`` is a shared property of what a batter is in this
+    product (it is reachable from more than one screen), captured at the same
+    moment as every aggregate beside it — a detail view is a view of the same
+    instant, so the log lives in the snapshot and a popup renders it without
+    fetching (§7).
+    """
 
     batter_id: str
     name: str
     windows: tuple[WindowedBatterMetrics, ...]
     pitch_type_splits: tuple[PitchTypeSplit, ...]
+    batted_ball_log: SnapshotField[BattedBallLog]
 
     def __post_init__(self) -> None:
         if not self.batter_id:
@@ -451,10 +532,15 @@ class InputSnapshot:
                     found.append((f"{owner}.{spec.name}", candidate))
 
         for batter in self.batters:
+            sweep(f"batter {batter.batter_id}", batter)
             for metrics in batter.windows:
                 sweep(f"batter {batter.batter_id} {metrics.window.value}", metrics)
             for split in batter.pitch_type_splits:
                 sweep(f"batter {batter.batter_id} vs {split.pitch_type}", split)
+            log = batter.batted_ball_log.value
+            if log is not None:
+                for index, event in enumerate(log.events):
+                    sweep(f"batter {batter.batter_id} event {index}", event)
         for park in self.parks:
             sweep(f"venue {park.venue.venue_id}", park)
         return found

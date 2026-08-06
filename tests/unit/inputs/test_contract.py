@@ -17,6 +17,8 @@ from synthetic import (
     SOURCES,
     absent_metrics,
     make_batter,
+    make_event,
+    make_log,
     make_park,
     make_snapshot,
     present_metrics,
@@ -25,8 +27,10 @@ from synthetic import (
 from greenmachine.inputs import (
     PARK_VENUES,
     AbsenceReason,
+    BattedBallEvent,
     BattedBallRate,
     DisplayState,
+    ExitVelocityReading,
     Handedness,
     InputContractError,
     InputSnapshot,
@@ -203,10 +207,12 @@ def test_an_unknown_source_id_is_rejected_at_snapshot_level() -> None:
 def test_iter_fields_sweeps_every_observed_field() -> None:
     snapshot = make_snapshot()
     labels = [owner for owner, _ in snapshot.iter_fields()]
-    # one window (4 fields) + one split (2 fields) + one park (4 fields)
-    assert len(labels) == 10
+    # batter log (1) + one window (4) + one split (2) + two log events (2 each)
+    # + one park (4)
+    assert len(labels) == 15
     assert any("RECENT_7D" in label for label in labels)
     assert any("vs ZZ" in label for label in labels)
+    assert any("event 0" in label for label in labels)
     assert any("venue synthetic-open" in label for label in labels)
 
 
@@ -220,6 +226,57 @@ def test_every_absence_reason_is_constructible_through_the_snapshot() -> None:
         ]
         window_fields = [f for f in batter_fields if f.absence is reason]
         assert len(window_fields) >= 4
+
+
+# ---------------------------------------------------------------------------
+# The batted-ball log: snapshot data, never a popup fetch
+# ---------------------------------------------------------------------------
+
+
+def test_unsorted_log_events_are_rejected() -> None:
+    with pytest.raises(InputContractError):
+        make_log(events=(make_event(date(2026, 1, 2)), make_event(date(2026, 1, 1))))
+
+
+def test_a_present_empty_log_is_a_real_observation_distinct_from_absence() -> None:
+    empty = SnapshotField.present(make_log(events=()), "synthetic-fixture")
+    missing: SnapshotField[object] = SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE)
+    assert empty.display_state() is DisplayState.VALUE
+    assert empty.value is not None and empty.value.events == ()
+    assert missing.display_state() is DisplayState.SOURCE_UNAVAILABLE
+
+
+def test_an_untracked_event_measurement_is_a_named_absence_never_a_null() -> None:
+    event = make_event(tracked=False)
+    assert event.exit_velocity.display_state() is DisplayState.SOURCE_UNAVAILABLE
+    assert event.hit_distance.display_state() is DisplayState.SOURCE_UNAVAILABLE
+    assert event.exit_velocity.value is None
+
+
+def test_event_vocabulary_must_be_non_empty() -> None:
+    with pytest.raises(InputContractError):
+        BattedBallEvent(
+            event_date=date(2026, 1, 1),
+            pitch_type="",
+            result="synthetic_result",
+            exit_velocity=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+            hit_distance=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+        )
+
+
+def test_an_event_with_an_unknown_source_is_rejected_at_snapshot_level() -> None:
+    event = BattedBallEvent(
+        event_date=date(2026, 1, 1),
+        pitch_type="ZZ",
+        result="synthetic_result",
+        exit_velocity=SnapshotField.present(
+            ExitVelocityReading(miles_per_hour=Decimal("1")), "no-such-source"
+        ),
+        hit_distance=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+    )
+    batter = make_batter(log=SnapshotField.present(make_log(events=(event,)), "synthetic-fixture"))
+    with pytest.raises(InputContractError):
+        make_snapshot(batters=(batter,))
 
 
 # ---------------------------------------------------------------------------

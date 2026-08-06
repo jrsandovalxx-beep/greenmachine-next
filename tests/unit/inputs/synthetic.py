@@ -14,10 +14,14 @@ from decimal import Decimal
 from greenmachine.inputs import (
     AbsenceReason,
     AirBallShare,
+    BattedBallEvent,
+    BattedBallLog,
     BattedBallRate,
     BatterInputs,
     ExitVelocityAverage,
+    ExitVelocityReading,
     Handedness,
+    HitDistanceReading,
     InputSnapshot,
     ManualExportProvenance,
     ParkFactor,
@@ -92,10 +96,39 @@ def absent_metrics(window: Window, reason: AbsenceReason) -> WindowedBatterMetri
     )
 
 
+def make_event(event_date: date = date(2026, 1, 1), tracked: bool = True) -> BattedBallEvent:
+    if tracked:
+        exit_velocity = SnapshotField.present(
+            ExitVelocityReading(miles_per_hour=Decimal("1.5")), SOURCE_SYNTHETIC
+        )
+        hit_distance = SnapshotField.present(
+            HitDistanceReading(feet=Decimal("9999")), SOURCE_SYNTHETIC
+        )
+    else:
+        exit_velocity = SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_SYNTHETIC)
+        hit_distance = SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_SYNTHETIC)
+    return BattedBallEvent(
+        event_date=event_date,
+        pitch_type="ZZ",
+        result="synthetic_result",
+        exit_velocity=exit_velocity,
+        hit_distance=hit_distance,
+    )
+
+
+def make_log(
+    events: tuple[BattedBallEvent, ...] | None = None, window: Window = Window.RECENT_7D
+) -> BattedBallLog:
+    if events is None:
+        events = (make_event(date(2026, 1, 1)), make_event(date(2026, 1, 2), tracked=False))
+    return BattedBallLog(window=window, events=events)
+
+
 def make_batter(
     batter_id: str = "synthetic-batter-1",
     windows: tuple[WindowedBatterMetrics, ...] | None = None,
     splits: tuple[PitchTypeSplit, ...] | None = None,
+    log: SnapshotField[BattedBallLog] | None = None,
 ) -> BatterInputs:
     if windows is None:
         windows = (present_metrics(Window.RECENT_7D),)
@@ -110,8 +143,14 @@ def make_batter(
                 exit_velocity=SnapshotField.absent(AbsenceReason.NOT_YET_OBSERVED),
             ),
         )
+    if log is None:
+        log = SnapshotField.present(make_log(), SOURCE_SYNTHETIC)
     return BatterInputs(
-        batter_id=batter_id, name="Synthetic Batter", windows=windows, pitch_type_splits=splits
+        batter_id=batter_id,
+        name="Synthetic Batter",
+        windows=windows,
+        pitch_type_splits=splits,
+        batted_ball_log=log,
     )
 
 
