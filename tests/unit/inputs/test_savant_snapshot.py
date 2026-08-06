@@ -87,14 +87,17 @@ def test_n_pa_is_positive_everywhere_and_spans_the_stated_range() -> None:
     assert all(value > 0 for value in values)
 
 
-def test_a_club_without_a_savant_row_renders_the_absent_state_never_a_number() -> None:
-    """Provenance finding 1 as a property: the gap is represented, not filled."""
+def test_a_club_without_a_savant_row_is_not_yet_observed_never_a_number() -> None:
+    """Provenance finding 1 as a property: the gap is represented, not filled,
+    and its reason is NOT_YET_OBSERVED - the source answered completely; the
+    2024-2026 rolling window has not accumulated Sutter Health Park history.
+    SOURCE_UNAVAILABLE would assert a failure that did not happen."""
     athletics = next(v for v in PARK_VENUES if v.savant_venue_id is None)
     assert athletics.team == "Athletics"
     field: SnapshotField[ParkFactor] = SnapshotField.absent(
-        AbsenceReason.SOURCE_UNAVAILABLE, "savant-park-factors"
+        AbsenceReason.NOT_YET_OBSERVED, "savant-park-factors"
     )
-    assert field.display_state() is DisplayState.SOURCE_UNAVAILABLE
+    assert field.display_state() is DisplayState.NOT_YET_OBSERVED
     assert field.value is None  # cannot be read as a number
 
 

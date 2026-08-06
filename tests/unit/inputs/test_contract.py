@@ -7,11 +7,12 @@ the constructive halves of criteria 5 and 6.
 from __future__ import annotations
 
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
 from synthetic import (
+    FIXED_VENUE,
     OPEN_AIR_VENUE,
     RETRACTABLE_VENUE,
     SOURCES,
@@ -178,9 +179,56 @@ def test_a_retractable_roof_may_carry_an_explicit_unknown() -> None:
     assert park.roof_status.value is RoofStatus.UNKNOWN
 
 
+@pytest.mark.parametrize(
+    ("venue_key", "reason"),
+    [
+        ("open", AbsenceReason.SOURCE_UNAVAILABLE),
+        ("open", AbsenceReason.NOT_YET_OBSERVED),
+        ("fixed", AbsenceReason.SOURCE_UNAVAILABLE),
+    ],
+)
+def test_a_roof_that_does_not_exist_cannot_fail_or_be_pending(
+    venue_key: str, reason: AbsenceReason
+) -> None:
+    """Finding 3: for open-air and fixed venues the only absence is NOT_APPLICABLE."""
+    target = OPEN_AIR_VENUE if venue_key == "open" else FIXED_VENUE
+    with pytest.raises(InputContractError):
+        ParkInputs(
+            venue=target,
+            park_factor_lhb=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+            park_factor_rhb=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+            roof_status=SnapshotField.absent(reason),
+            forecast=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+        )
+
+
+def test_a_retractable_roof_state_is_never_not_applicable() -> None:
+    """Finding 3, the other direction: the state is entirely applicable (D-055:
+    an unknown roof is a PRESENT RoofStatus.UNKNOWN, not an absence)."""
+    with pytest.raises(InputContractError):
+        ParkInputs(
+            venue=RETRACTABLE_VENUE,
+            park_factor_lhb=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+            park_factor_rhb=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+            roof_status=SnapshotField.absent(AbsenceReason.NOT_APPLICABLE),
+            forecast=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+        )
+
+
 # ---------------------------------------------------------------------------
 # Snapshot invariants
 # ---------------------------------------------------------------------------
+
+
+def test_an_aware_non_utc_timestamp_is_rejected() -> None:
+    """Finding 2: awareness alone is not the documented semantic; UTC is."""
+    with pytest.raises(InputContractError):
+        InputSnapshot(
+            captured_at=datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone(timedelta(hours=5))),
+            sources=SOURCES,
+            batters=(),
+            parks=(),
+        )
 
 
 def test_a_naive_timestamp_is_rejected() -> None:

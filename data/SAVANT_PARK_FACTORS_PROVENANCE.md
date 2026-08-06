@@ -73,8 +73,15 @@ All eight match, re-verified from the committed bytes at commit time.
 
 1. **Twenty-nine venues, not thirty — the Athletics have no row.** Both handedness
    views omit them; the 2022-2024 window held Oakland Coliseum, it aged out, nothing
-   replaced it. This is a gap to represent, not to fill: a parks screen renders a
-   defined *source unavailable* state for that club — never a blank, a zero, or a
+   replaced it. **This is a gap to represent, not to fill**, and the reason it
+   carries is ***not yet observed***. The source did not fail: the leaderboard
+   answered completely and returned 29 venues. The Athletics moved to Sutter Health
+   Park in 2025, so a **2024-2026** three-season rolling value has not accumulated
+   the history the filter asks for. A value that a healthy source has not yet
+   produced is *not yet observed*; *source unavailable* asserts a failure that did
+   not happen. Nor is it *not applicable* — a park factor is a meaningful quantity
+   for this venue and will exist once the rolling window clears 2024. The state
+   renders as a defined absence rather than a blank cell, a zero, or a
    league-average substitute. The reference data carries all thirty clubs with the
    Athletics' park factor explicitly absent.
 2. **`n_pa` varies enough to matter** — 13,560 (Tropicana Field, LHB) to 31,517 at the

@@ -185,6 +185,13 @@ RETRACTABLE_VENUE = ParkVenue(
     VenueType.RETRACTABLE_ROOF,
     None,
 )
+FIXED_VENUE = ParkVenue(
+    "synthetic-fixed",
+    "Synthetic Fixed Dome",
+    "Synthetic Fixed Club",
+    VenueType.FIXED_ROOF,
+    None,
+)
 
 
 def make_park(

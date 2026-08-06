@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, fields
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import Enum, unique
 from typing import Generic, TypeVar
@@ -516,10 +516,14 @@ class ParkInputs:
     """One venue's observed inputs: factors per handedness, roof, forecast.
 
     D-055's rendering rules live in the screens; the contract carries the
-    states they need: ``roof_status`` is NOT_APPLICABLE for open-air and
-    fixed-roof venues, and for retractable venues is either observed or an
-    explicit absence; a forecast for a closed or fixed roof is suppressed by
-    the screen with a stated reason, never silently.
+    states they need, enforced in both directions with venue type as the
+    membership evidence: ``roof_status`` is absent with NOT_APPLICABLE - and
+    no other reason - for open-air and fixed-roof venues, and for retractable
+    venues is present (D-055's retractable-unknown is an explicit, PRESENT
+    ``RoofStatus.UNKNOWN``, not an absence) or absent with SOURCE_UNAVAILABLE
+    or NOT_YET_OBSERVED, never NOT_APPLICABLE. A forecast for a closed or
+    fixed roof is suppressed by the screen with a stated reason, never
+    silently.
     """
 
     venue: ParkVenue
@@ -538,13 +542,22 @@ class ParkInputs:
                     f"venue {self.venue.venue_id!r}: park factor slot for {wanted.value} "
                     f"carries a {slot.value.handedness.value} factor"
                 )
-        if (
-            self.venue.venue_type is not VenueType.RETRACTABLE_ROOF
-            and self.roof_status.value is not None
-        ):
+        if self.venue.venue_type is not VenueType.RETRACTABLE_ROOF:
+            if self.roof_status.value is not None:
+                raise InputContractError(
+                    f"venue {self.venue.venue_id!r}: roof_status is observable only for "
+                    "retractable roofs; open-air and fixed venues carry NOT_APPLICABLE"
+                )
+            if self.roof_status.absence is not AbsenceReason.NOT_APPLICABLE:
+                raise InputContractError(
+                    f"venue {self.venue.venue_id!r}: a roof that does not exist did not "
+                    "fail and nothing is pending - the only absence is NOT_APPLICABLE"
+                )
+        elif self.roof_status.absence is AbsenceReason.NOT_APPLICABLE:
             raise InputContractError(
-                f"venue {self.venue.venue_id!r}: roof_status is observable only for "
-                "retractable roofs; open-air and fixed venues carry NOT_APPLICABLE"
+                f"venue {self.venue.venue_id!r}: a retractable roof's state is entirely "
+                "applicable; an unknown state is a PRESENT RoofStatus.UNKNOWN (D-055), "
+                "and an unobtained one is SOURCE_UNAVAILABLE or NOT_YET_OBSERVED"
             )
 
 
@@ -558,8 +571,16 @@ class InputSnapshot:
     parks: tuple[ParkInputs, ...]
 
     def __post_init__(self) -> None:
-        if self.captured_at.tzinfo is None or self.captured_at.utcoffset() is None:
-            raise InputContractError("captured_at must be timezone-aware")
+        if (
+            self.captured_at.tzinfo is None
+            or self.captured_at.utcoffset() is None
+            or self.captured_at.utcoffset() != timedelta(0)
+        ):
+            raise InputContractError(
+                "captured_at must be timezone-aware UTC (utcoffset zero): one "
+                "representation, normalised at the boundary — local ballpark time "
+                "is a rendering concern, not a storage one"
+            )
         if not self.sources:
             raise InputContractError("a snapshot names at least one source")
         source_ids = [source.source_id for source in self.sources]
