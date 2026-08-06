@@ -1,4 +1,4 @@
-# REBUILD_PLAN v15 — GMR-001 … GMR-005
+# REBUILD_PLAN v16 — GMR-001 … GMR-005
 
 Authorized by D-030; revised per D-031..D-046. v8 existed because GMR-003's builder stopped:
 criterion 5 assumed test node IDs are a function of the test files, and they are a function of
@@ -771,7 +771,7 @@ and the two `test_nonproduction_config_location.py` cases parametrized
 3. `pyproject.toml`'s `addopts` contains **no `--deselect` argument** at the end of this ticket;
    the complete resulting table is pasted. If any deselect must survive, this ticket cannot
    complete and returns to Claude Lead for a plan revision that says so explicitly.
-4. Full suite green in CI; the collection summary shows **`(0 deselected)`**; the pass/skip
+4. Full suite green in CI; the collection summary shows no `deselected` term and selection equals collection, with the deselect-free `addopts` table pasted; the pass/skip
    pattern is pasted and every previously deselected node is accounted for by (a), (b) or (c).
 5. Any test file this ticket authors or deletes is enumerated in its package with the reason;
    the transplanted files it does not touch remain byte-identical to the manifest, re-verified.
