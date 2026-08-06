@@ -176,10 +176,14 @@ def make_batter(
 
 
 OPEN_AIR_VENUE = ParkVenue(
-    "synthetic-open", "Synthetic Open Park", "Synthetic Club", VenueType.OPEN_AIR
+    "synthetic-open", "Synthetic Open Park", "Synthetic Club", VenueType.OPEN_AIR, None
 )
 RETRACTABLE_VENUE = ParkVenue(
-    "synthetic-retractable", "Synthetic Dome", "Synthetic Dome Club", VenueType.RETRACTABLE_ROOF
+    "synthetic-retractable",
+    "Synthetic Dome",
+    "Synthetic Dome Club",
+    VenueType.RETRACTABLE_ROOF,
+    None,
 )
 
 
@@ -190,10 +194,12 @@ def make_park(
 ) -> ParkInputs:
     if factor_reason is None:
         lhb = SnapshotField.present(
-            ParkFactor(factor=Decimal("999"), handedness=Handedness.LEFT), SOURCE_EXPORT
+            ParkFactor(factor=Decimal("999"), handedness=Handedness.LEFT, plate_appearances=1),
+            SOURCE_EXPORT,
         )
         rhb = SnapshotField.present(
-            ParkFactor(factor=Decimal("1"), handedness=Handedness.RIGHT), SOURCE_EXPORT
+            ParkFactor(factor=Decimal("1"), handedness=Handedness.RIGHT, plate_appearances=2),
+            SOURCE_EXPORT,
         )
     else:
         lhb = SnapshotField.absent(factor_reason, SOURCE_EXPORT)

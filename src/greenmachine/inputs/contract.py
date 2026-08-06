@@ -311,7 +311,13 @@ class PlateAppearanceEvent:
 
     ``pitch_type`` and ``result`` carry the contributing source's own
     designations verbatim (provenance over invention: an enum authored here
-    would contradict the real export's vocabulary at wire-through). Each
+    would contradict the real export's vocabulary at wire-through).
+    ``batted_ball`` is assigned at the ingestion boundary by deriving
+    membership from the pinned result vocabulary, **failing closed**: an
+    unrecognized result errors at ingestion and never defaults in either
+    direction — a default's sign silently biases every contact rate. GMF-006
+    pins the observed vocabulary and proves this law at wire-through; the
+    invariants below guard rows that disagree with themselves. Each
     measurement is a ``SnapshotField``; the trichotomy is load-bearing on
     ordinary rows: a non-contact plate appearance carries **NOT_APPLICABLE**
     for exit velocity and hit distance — nothing was hit, so the measurement
@@ -446,12 +452,20 @@ class Handedness(Enum):
 
 @dataclass(frozen=True)
 class ParkVenue:
-    """Reference-data identity of one venue (GMF-001 criterion 3)."""
+    """Reference-data identity of one venue (GMF-001 criterion 3).
+
+    ``venue_id`` is the reference slug and primary key. ``savant_venue_id``
+    is the join column to the pinned Savant snapshot; its values come from
+    the committed export (data/SAVANT_PARK_FACTORS_PROVENANCE.md), never
+    from memory, and it is ``None`` exactly where the snapshot has no row
+    for the club — a gap the product represents, never fills.
+    """
 
     venue_id: str
     name: str
     team: str
     venue_type: VenueType
+    savant_venue_id: int | None
 
     def __post_init__(self) -> None:
         if not self.venue_id or not self.name or not self.team:
@@ -460,14 +474,25 @@ class ParkVenue:
 
 @dataclass(frozen=True)
 class ParkFactor:
-    """D-053: a Savant per-handedness park factor. Unit: index, 100 = neutral."""
+    """D-053: a Savant per-handedness park factor. Unit: index, 100 = neutral.
+
+    ``plate_appearances`` is the sample behind the factor (``n_pa`` in the
+    pinned snapshot) — the D-014 evidence axis carried as a field of the
+    value, not decoration, so a screen cannot render a 13,560-PA factor
+    identically to a 31,000-PA one without deciding to. The pinned snapshot
+    is a three-season rolling window (2024-2026); a screen rendering these
+    values states which window they describe.
+    """
 
     factor: Decimal
     handedness: Handedness
+    plate_appearances: int
 
     def __post_init__(self) -> None:
         if self.factor <= 0:
             raise InputContractError("park factor must be positive")
+        if self.plate_appearances <= 0:
+            raise InputContractError("park factor plate_appearances must be positive")
 
 
 @dataclass(frozen=True)

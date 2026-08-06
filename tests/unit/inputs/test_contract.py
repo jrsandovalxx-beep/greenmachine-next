@@ -153,7 +153,7 @@ def test_park_factor_slot_handedness_is_enforced() -> None:
         ParkInputs(
             venue=OPEN_AIR_VENUE,
             park_factor_lhb=SnapshotField.present(
-                ParkFactor(factor=Decimal("1"), handedness=Handedness.RIGHT),
+                ParkFactor(factor=Decimal("1"), handedness=Handedness.RIGHT, plate_appearances=3),
                 "synthetic-fixture",
             ),
             park_factor_rhb=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
@@ -341,3 +341,12 @@ def test_every_park_reference_row_is_a_valid_venue() -> None:
     for venue in PARK_VENUES:
         assert venue.venue_id and venue.name and venue.team
         assert isinstance(venue.venue_type, VenueType)
+
+
+def test_savant_join_ids_are_unique_and_absent_only_for_the_athletics() -> None:
+    joined = [v for v in PARK_VENUES if v.savant_venue_id is not None]
+    missing = [v for v in PARK_VENUES if v.savant_venue_id is None]
+    assert len(joined) == 29
+    ids = [v.savant_venue_id for v in joined]
+    assert len(ids) == len(set(ids))
+    assert [v.team for v in missing] == ["Athletics"]  # the gap is represented, never filled

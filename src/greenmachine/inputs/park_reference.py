@@ -14,11 +14,14 @@ Volatile rows, recorded so drift is a data update rather than a surprise:
 - Daikin Park (Houston, 2025 rename) and Rate Field (Chicago White Sox,
   2024 rename) carry their current names.
 
-``venue_id`` is a stable slug. MLBAM numeric venue ids are deliberately not
-asserted here: they are provider-published identifiers this ticket has no
-pinned export for, and a wrong id silently mis-joins park factors. The Savant
-snapshot (criterion 4) carries its own venue naming; the join is bound where
-that file lands.
+``venue_id`` is a stable slug and the primary key. ``savant_venue_id`` is
+the join column to the pinned snapshot: its values are copied from the
+committed export's own rows — the file and its sha256 digest are pinned by
+data/SAVANT_PARK_FACTORS_PROVENANCE.md and by the snapshot test — never
+from memory: the original authoring deliberately declined to assert MLBAM
+ids from recall, and the join now binds against data. The Athletics carry
+``None``: the snapshot has no row for their venue (provenance finding 1),
+and the gap is represented, never filled.
 """
 
 from __future__ import annotations
@@ -30,34 +33,214 @@ _RETRACTABLE = VenueType.RETRACTABLE_ROOF
 _FIXED = VenueType.FIXED_ROOF
 
 PARK_VENUES: tuple[ParkVenue, ...] = (
-    ParkVenue("chase-field", "Chase Field", "Arizona Diamondbacks", _RETRACTABLE),
-    ParkVenue("sutter-health-park", "Sutter Health Park", "Athletics", _OPEN),
-    ParkVenue("truist-park", "Truist Park", "Atlanta Braves", _OPEN),
-    ParkVenue("camden-yards", "Oriole Park at Camden Yards", "Baltimore Orioles", _OPEN),
-    ParkVenue("fenway-park", "Fenway Park", "Boston Red Sox", _OPEN),
-    ParkVenue("wrigley-field", "Wrigley Field", "Chicago Cubs", _OPEN),
-    ParkVenue("rate-field", "Rate Field", "Chicago White Sox", _OPEN),
-    ParkVenue("great-american-ball-park", "Great American Ball Park", "Cincinnati Reds", _OPEN),
-    ParkVenue("progressive-field", "Progressive Field", "Cleveland Guardians", _OPEN),
-    ParkVenue("coors-field", "Coors Field", "Colorado Rockies", _OPEN),
-    ParkVenue("comerica-park", "Comerica Park", "Detroit Tigers", _OPEN),
-    ParkVenue("daikin-park", "Daikin Park", "Houston Astros", _RETRACTABLE),
-    ParkVenue("kauffman-stadium", "Kauffman Stadium", "Kansas City Royals", _OPEN),
-    ParkVenue("angel-stadium", "Angel Stadium", "Los Angeles Angels", _OPEN),
-    ParkVenue("dodger-stadium", "Dodger Stadium", "Los Angeles Dodgers", _OPEN),
-    ParkVenue("loandepot-park", "loanDepot park", "Miami Marlins", _RETRACTABLE),
-    ParkVenue("american-family-field", "American Family Field", "Milwaukee Brewers", _RETRACTABLE),
-    ParkVenue("target-field", "Target Field", "Minnesota Twins", _OPEN),
-    ParkVenue("citi-field", "Citi Field", "New York Mets", _OPEN),
-    ParkVenue("yankee-stadium", "Yankee Stadium", "New York Yankees", _OPEN),
-    ParkVenue("citizens-bank-park", "Citizens Bank Park", "Philadelphia Phillies", _OPEN),
-    ParkVenue("pnc-park", "PNC Park", "Pittsburgh Pirates", _OPEN),
-    ParkVenue("petco-park", "Petco Park", "San Diego Padres", _OPEN),
-    ParkVenue("t-mobile-park", "T-Mobile Park", "Seattle Mariners", _RETRACTABLE),
-    ParkVenue("oracle-park", "Oracle Park", "San Francisco Giants", _OPEN),
-    ParkVenue("busch-stadium", "Busch Stadium", "St. Louis Cardinals", _OPEN),
-    ParkVenue("tropicana-field", "Tropicana Field", "Tampa Bay Rays", _FIXED),
-    ParkVenue("globe-life-field", "Globe Life Field", "Texas Rangers", _RETRACTABLE),
-    ParkVenue("rogers-centre", "Rogers Centre", "Toronto Blue Jays", _RETRACTABLE),
-    ParkVenue("nationals-park", "Nationals Park", "Washington Nationals", _OPEN),
+    ParkVenue(
+        "chase-field",
+        "Chase Field",
+        "Arizona Diamondbacks",
+        _RETRACTABLE,
+        savant_venue_id=15,
+    ),
+    ParkVenue(
+        "sutter-health-park",
+        "Sutter Health Park",
+        "Athletics",
+        _OPEN,
+        savant_venue_id=None,
+    ),
+    ParkVenue(
+        "truist-park",
+        "Truist Park",
+        "Atlanta Braves",
+        _OPEN,
+        savant_venue_id=4705,
+    ),
+    ParkVenue(
+        "camden-yards",
+        "Oriole Park at Camden Yards",
+        "Baltimore Orioles",
+        _OPEN,
+        savant_venue_id=2,
+    ),
+    ParkVenue(
+        "fenway-park",
+        "Fenway Park",
+        "Boston Red Sox",
+        _OPEN,
+        savant_venue_id=3,
+    ),
+    ParkVenue(
+        "wrigley-field",
+        "Wrigley Field",
+        "Chicago Cubs",
+        _OPEN,
+        savant_venue_id=17,
+    ),
+    ParkVenue(
+        "rate-field",
+        "Rate Field",
+        "Chicago White Sox",
+        _OPEN,
+        savant_venue_id=4,
+    ),
+    ParkVenue(
+        "great-american-ball-park",
+        "Great American Ball Park",
+        "Cincinnati Reds",
+        _OPEN,
+        savant_venue_id=2602,
+    ),
+    ParkVenue(
+        "progressive-field",
+        "Progressive Field",
+        "Cleveland Guardians",
+        _OPEN,
+        savant_venue_id=5,
+    ),
+    ParkVenue(
+        "coors-field",
+        "Coors Field",
+        "Colorado Rockies",
+        _OPEN,
+        savant_venue_id=19,
+    ),
+    ParkVenue(
+        "comerica-park",
+        "Comerica Park",
+        "Detroit Tigers",
+        _OPEN,
+        savant_venue_id=2394,
+    ),
+    ParkVenue(
+        "daikin-park",
+        "Daikin Park",
+        "Houston Astros",
+        _RETRACTABLE,
+        savant_venue_id=2392,
+    ),
+    ParkVenue(
+        "kauffman-stadium",
+        "Kauffman Stadium",
+        "Kansas City Royals",
+        _OPEN,
+        savant_venue_id=7,
+    ),
+    ParkVenue(
+        "angel-stadium",
+        "Angel Stadium",
+        "Los Angeles Angels",
+        _OPEN,
+        savant_venue_id=1,
+    ),
+    ParkVenue(
+        "dodger-stadium",
+        "Dodger Stadium",
+        "Los Angeles Dodgers",
+        _OPEN,
+        savant_venue_id=22,
+    ),
+    ParkVenue(
+        "loandepot-park",
+        "loanDepot park",
+        "Miami Marlins",
+        _RETRACTABLE,
+        savant_venue_id=4169,
+    ),
+    ParkVenue(
+        "american-family-field",
+        "American Family Field",
+        "Milwaukee Brewers",
+        _RETRACTABLE,
+        savant_venue_id=32,
+    ),
+    ParkVenue(
+        "target-field",
+        "Target Field",
+        "Minnesota Twins",
+        _OPEN,
+        savant_venue_id=3312,
+    ),
+    ParkVenue(
+        "citi-field",
+        "Citi Field",
+        "New York Mets",
+        _OPEN,
+        savant_venue_id=3289,
+    ),
+    ParkVenue(
+        "yankee-stadium",
+        "Yankee Stadium",
+        "New York Yankees",
+        _OPEN,
+        savant_venue_id=3313,
+    ),
+    ParkVenue(
+        "citizens-bank-park",
+        "Citizens Bank Park",
+        "Philadelphia Phillies",
+        _OPEN,
+        savant_venue_id=2681,
+    ),
+    ParkVenue(
+        "pnc-park",
+        "PNC Park",
+        "Pittsburgh Pirates",
+        _OPEN,
+        savant_venue_id=31,
+    ),
+    ParkVenue(
+        "petco-park",
+        "Petco Park",
+        "San Diego Padres",
+        _OPEN,
+        savant_venue_id=2680,
+    ),
+    ParkVenue(
+        "t-mobile-park",
+        "T-Mobile Park",
+        "Seattle Mariners",
+        _RETRACTABLE,
+        savant_venue_id=680,
+    ),
+    ParkVenue(
+        "oracle-park",
+        "Oracle Park",
+        "San Francisco Giants",
+        _OPEN,
+        savant_venue_id=2395,
+    ),
+    ParkVenue(
+        "busch-stadium",
+        "Busch Stadium",
+        "St. Louis Cardinals",
+        _OPEN,
+        savant_venue_id=2889,
+    ),
+    ParkVenue(
+        "tropicana-field",
+        "Tropicana Field",
+        "Tampa Bay Rays",
+        _FIXED,
+        savant_venue_id=12,
+    ),
+    ParkVenue(
+        "globe-life-field",
+        "Globe Life Field",
+        "Texas Rangers",
+        _RETRACTABLE,
+        savant_venue_id=5325,
+    ),
+    ParkVenue(
+        "rogers-centre",
+        "Rogers Centre",
+        "Toronto Blue Jays",
+        _RETRACTABLE,
+        savant_venue_id=14,
+    ),
+    ParkVenue(
+        "nationals-park",
+        "Nationals Park",
+        "Washington Nationals",
+        _OPEN,
+        savant_venue_id=3309,
+    ),
 )
