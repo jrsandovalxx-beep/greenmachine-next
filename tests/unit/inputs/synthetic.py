@@ -14,8 +14,6 @@ from decimal import Decimal
 from greenmachine.inputs import (
     AbsenceReason,
     AirBallShare,
-    BattedBallEvent,
-    BattedBallLog,
     BattedBallRate,
     BatterInputs,
     ExitVelocityAverage,
@@ -28,6 +26,8 @@ from greenmachine.inputs import (
     ParkInputs,
     ParkVenue,
     PitchTypeSplit,
+    PlateAppearanceEvent,
+    PlateAppearanceLog,
     RoofStatus,
     SnapshotField,
     SourceAvailability,
@@ -96,7 +96,8 @@ def absent_metrics(window: Window, reason: AbsenceReason) -> WindowedBatterMetri
     )
 
 
-def make_event(event_date: date = date(2026, 1, 1), tracked: bool = True) -> BattedBallEvent:
+def make_event(event_date: date = date(2026, 1, 1), tracked: bool = True) -> PlateAppearanceEvent:
+    """A contact plate appearance (batted ball), tracked or untracked."""
     if tracked:
         exit_velocity = SnapshotField.present(
             ExitVelocityReading(miles_per_hour=Decimal("1.5")), SOURCE_SYNTHETIC
@@ -107,28 +108,48 @@ def make_event(event_date: date = date(2026, 1, 1), tracked: bool = True) -> Bat
     else:
         exit_velocity = SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_SYNTHETIC)
         hit_distance = SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_SYNTHETIC)
-    return BattedBallEvent(
+    return PlateAppearanceEvent(
         event_date=event_date,
         pitch_type="ZZ",
         result="synthetic_result",
+        batted_ball=True,
         exit_velocity=exit_velocity,
         hit_distance=hit_distance,
     )
 
 
+def make_non_contact_event(
+    event_date: date = date(2026, 1, 3), result: str = "synthetic_strikeout"
+) -> PlateAppearanceEvent:
+    """A non-contact plate appearance: NOT_APPLICABLE measurements on an
+    ordinary row - the trichotomy as everyday data, not an edge case."""
+    return PlateAppearanceEvent(
+        event_date=event_date,
+        pitch_type="ZZ",
+        result=result,
+        batted_ball=False,
+        exit_velocity=SnapshotField.absent(AbsenceReason.NOT_APPLICABLE),
+        hit_distance=SnapshotField.absent(AbsenceReason.NOT_APPLICABLE),
+    )
+
+
 def make_log(
-    events: tuple[BattedBallEvent, ...] | None = None, window: Window = Window.RECENT_7D
-) -> BattedBallLog:
+    events: tuple[PlateAppearanceEvent, ...] | None = None, window: Window = Window.RECENT_7D
+) -> PlateAppearanceLog:
     if events is None:
-        events = (make_event(date(2026, 1, 1)), make_event(date(2026, 1, 2), tracked=False))
-    return BattedBallLog(window=window, events=events)
+        events = (
+            make_event(date(2026, 1, 1)),
+            make_event(date(2026, 1, 2), tracked=False),
+            make_non_contact_event(date(2026, 1, 3)),
+        )
+    return PlateAppearanceLog(window=window, events=events)
 
 
 def make_batter(
     batter_id: str = "synthetic-batter-1",
     windows: tuple[WindowedBatterMetrics, ...] | None = None,
     splits: tuple[PitchTypeSplit, ...] | None = None,
-    log: SnapshotField[BattedBallLog] | None = None,
+    log: SnapshotField[PlateAppearanceLog] | None = None,
 ) -> BatterInputs:
     if windows is None:
         windows = (present_metrics(Window.RECENT_7D),)
@@ -150,7 +171,7 @@ def make_batter(
         name="Synthetic Batter",
         windows=windows,
         pitch_type_splits=splits,
-        batted_ball_log=log,
+        plate_appearance_log=log,
     )
 
 

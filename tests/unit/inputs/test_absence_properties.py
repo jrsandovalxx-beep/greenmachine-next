@@ -89,3 +89,43 @@ def test_a_present_rate_always_carries_its_denominator_beside_it(rate: Decimal, 
     assert field.display_state() is DisplayState.VALUE
     assert field.value is not None
     assert field.value.batted_ball_events == bbe  # D-014: confidence beside, never fused
+
+
+@given(
+    contact=st.integers(min_value=0, max_value=9), non_contact=st.integers(min_value=0, max_value=9)
+)
+def test_contact_rates_divide_by_bbe_never_by_plate_appearances(
+    contact: int, non_contact: int
+) -> None:
+    """The BABIP error in new clothes, guarded: a batter with strikeouts and
+    walks in the window yields the same contact rate as that batter's batted
+    balls alone, because the named denominator is the BBE subpopulation."""
+    from datetime import date
+
+    from synthetic import make_event, make_log, make_non_contact_event
+
+    events = tuple(make_event(date(2026, 1, 1)) for _ in range(contact)) + tuple(
+        make_non_contact_event(date(2026, 1, 2)) for _ in range(non_contact)
+    )
+    log = make_log(events=events)
+    bbe = log.batted_ball_events()
+    assert len(bbe) == contact
+    assert len(log.events) == contact + non_contact
+    tracked_hard = [e for e in bbe if e.exit_velocity.value is not None]
+    if contact:
+        rate_over_bbe = Decimal(len(tracked_hard)) / Decimal(len(bbe))
+        contact_only_log = make_log(
+            events=tuple(make_event(date(2026, 1, 1)) for _ in range(contact))
+        )
+        rate_contact_only = Decimal(
+            len(
+                [
+                    e
+                    for e in contact_only_log.batted_ball_events()
+                    if e.exit_velocity.value is not None
+                ]
+            )
+        ) / Decimal(len(contact_only_log.batted_ball_events()))
+        assert rate_over_bbe == rate_contact_only  # strikeouts and walks moved nothing
+    if non_contact:
+        assert len(log.events) != len(bbe)  # dividing by len(events) is the reachable trap

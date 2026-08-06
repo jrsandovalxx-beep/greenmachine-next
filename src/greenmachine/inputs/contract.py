@@ -26,11 +26,13 @@ is the product's spine: a screen renders an ``InputSnapshot`` and never fetches
   source by ``source_id``; a manual-export source carries the full
   ``ManualExportProvenance`` record, so D-057's manual-export chain is
   auditable from the snapshot alone.
-- **Event detail is snapshot data, not a fetch.** A batter's batted-ball log
-  (``BattedBallLog``) is carried in the snapshot at the same captured moment
-  as the aggregates beside it, because a detail view is a view of the same
-  instant: the log is reachable from more than one screen, so it is a shared
-  property of the batter, and a popup renders it without fetching.
+- **Event detail is snapshot data, not a fetch.** A batter's plate-appearance
+  log (``PlateAppearanceLog``) is carried in the snapshot at the same captured
+  moment as the aggregates beside it, because a detail view is a view of the
+  same instant: the log is reachable from more than one screen, so it is a
+  shared property of the batter, and a popup renders it without fetching. Its
+  population is every plate appearance; contact rates divide only by its
+  ``batted_ball_events()`` subpopulation, the named denominator.
 
 Structural identity fields (ids, names, enum members) are constructor
 arguments validated at build time; the three-way absence semantics apply to
@@ -296,20 +298,33 @@ class HitDistanceReading:
 
 
 @dataclass(frozen=True)
-class BattedBallEvent:
-    """One batted-ball event in a batter's log — display-only, never scored.
+class PlateAppearanceEvent:
+    """One plate appearance in a batter's log — display-only, never scored.
+
+    The population is **every plate appearance** — strikeouts, walks,
+    hit-by-pitches and sacrifices included (Product Owner ruling; the
+    contact-for-power trade means strikeout frequency is half the profile).
+    ``batted_ball`` is the BBE membership flag: it names whether this plate
+    appearance ended with the ball in play, and it is the **denominator
+    selector** for every contact rate (BBE stays the denominator for rates;
+    the log is a different object with a different population).
 
     ``pitch_type`` and ``result`` carry the contributing source's own
     designations verbatim (provenance over invention: an enum authored here
     would contradict the real export's vocabulary at wire-through). Each
-    measurement is a ``SnapshotField`` because real event rows arrive with
-    untracked measurements, and an untracked measurement is a named absence,
-    never a silent null.
+    measurement is a ``SnapshotField``; the trichotomy is load-bearing on
+    ordinary rows: a non-contact plate appearance carries **NOT_APPLICABLE**
+    for exit velocity and hit distance — nothing was hit, so the measurement
+    is not applicable regardless of source health — while a batted ball with
+    an untracked measurement carries ``SOURCE_UNAVAILABLE`` or
+    ``NOT_YET_OBSERVED``, and never ``NOT_APPLICABLE``. Both directions are
+    enforced.
     """
 
     event_date: date
     pitch_type: str
     result: str
+    batted_ball: bool
     exit_velocity: SnapshotField[ExitVelocityReading]
     hit_distance: SnapshotField[HitDistanceReading]
 
@@ -318,34 +333,62 @@ class BattedBallEvent:
             raise InputContractError("event pitch_type must be non-empty")
         if not self.result:
             raise InputContractError("event result must be non-empty")
+        measurements = (
+            ("exit_velocity", self.exit_velocity),
+            ("hit_distance", self.hit_distance),
+        )
+        if not self.batted_ball:
+            for name, measurement in measurements:
+                if measurement.absence is not AbsenceReason.NOT_APPLICABLE:
+                    raise InputContractError(
+                        f"a non-contact plate appearance carries NOT_APPLICABLE for {name}; "
+                        f"got value={measurement.value!r}, absence={measurement.absence!r}"
+                    )
+        else:
+            for name, measurement in measurements:
+                if measurement.absence is AbsenceReason.NOT_APPLICABLE:
+                    raise InputContractError(
+                        f"a batted ball's {name} is applicable; an untracked measurement is "
+                        "SOURCE_UNAVAILABLE or NOT_YET_OBSERVED, never NOT_APPLICABLE"
+                    )
 
 
 @dataclass(frozen=True)
-class BattedBallLog:
-    """A batter's per-event batted-ball log for one named window.
+class PlateAppearanceLog:
+    """A batter's per-event plate-appearance log for one named window.
 
     A **present, empty** log is a real observation — the source is healthy and
-    the batter had no batted balls in the window — and renders as exactly that.
-    It is distinct from the log being absent (``NOT_YET_OBSERVED``: not yet
-    captured; ``SOURCE_UNAVAILABLE``: the source failed). Events are ordered by
-    non-decreasing date so rendering is deterministic without screen-side
-    sorting.
+    the batter had no plate appearances in the window — and renders as exactly
+    that. It is distinct from the log being absent (``NOT_YET_OBSERVED``: not
+    yet captured; ``SOURCE_UNAVAILABLE``: the source failed). Events are
+    ordered by non-decreasing date so rendering is deterministic without
+    screen-side sorting.
+
+    Two populations live in this one structure, so the denominator is named
+    in the API: a contact rate computed over ``events`` divides by plate
+    appearances and comes out silently low by each batter's strikeout-and-walk
+    share — the BABIP error in new clothes. ``batted_ball_events()`` is the
+    BBE subpopulation, and every contact rate is computed over it.
     """
 
     window: Window
-    events: tuple[BattedBallEvent, ...]
+    events: tuple[PlateAppearanceEvent, ...]
 
     def __post_init__(self) -> None:
         dates = [event.event_date for event in self.events]
         if dates != sorted(dates):
-            raise InputContractError("batted-ball events must be ordered by non-decreasing date")
+            raise InputContractError("plate appearances must be ordered by non-decreasing date")
+
+    def batted_ball_events(self) -> tuple[PlateAppearanceEvent, ...]:
+        """The BBE subpopulation — the named denominator for contact rates."""
+        return tuple(event for event in self.events if event.batted_ball)
 
 
 @dataclass(frozen=True)
 class BatterInputs:
     """One batter's observed inputs at the snapshot's moment.
 
-    ``batted_ball_log`` is a shared property of what a batter is in this
+    ``plate_appearance_log`` is a shared property of what a batter is in this
     product (it is reachable from more than one screen), captured at the same
     moment as every aggregate beside it — a detail view is a view of the same
     instant, so the log lives in the snapshot and a popup renders it without
@@ -356,7 +399,7 @@ class BatterInputs:
     name: str
     windows: tuple[WindowedBatterMetrics, ...]
     pitch_type_splits: tuple[PitchTypeSplit, ...]
-    batted_ball_log: SnapshotField[BattedBallLog]
+    plate_appearance_log: SnapshotField[PlateAppearanceLog]
 
     def __post_init__(self) -> None:
         if not self.batter_id:
@@ -537,7 +580,7 @@ class InputSnapshot:
                 sweep(f"batter {batter.batter_id} {metrics.window.value}", metrics)
             for split in batter.pitch_type_splits:
                 sweep(f"batter {batter.batter_id} vs {split.pitch_type}", split)
-            log = batter.batted_ball_log.value
+            log = batter.plate_appearance_log.value
             if log is not None:
                 for index, event in enumerate(log.events):
                     sweep(f"batter {batter.batter_id} event {index}", event)

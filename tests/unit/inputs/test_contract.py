@@ -27,7 +27,6 @@ from synthetic import (
 from greenmachine.inputs import (
     PARK_VENUES,
     AbsenceReason,
-    BattedBallEvent,
     BattedBallRate,
     DisplayState,
     ExitVelocityReading,
@@ -37,6 +36,7 @@ from greenmachine.inputs import (
     ManualExportProvenance,
     ParkFactor,
     ParkInputs,
+    PlateAppearanceEvent,
     RoofStatus,
     SnapshotField,
     SourceAvailability,
@@ -207,9 +207,9 @@ def test_an_unknown_source_id_is_rejected_at_snapshot_level() -> None:
 def test_iter_fields_sweeps_every_observed_field() -> None:
     snapshot = make_snapshot()
     labels = [owner for owner, _ in snapshot.iter_fields()]
-    # batter log (1) + one window (4) + one split (2) + two log events (2 each)
-    # + one park (4)
-    assert len(labels) == 15
+    # batter log (1) + one window (4) + one split (2) + three log events
+    # (2 each) + one park (4)
+    assert len(labels) == 17
     assert any("RECENT_7D" in label for label in labels)
     assert any("vs ZZ" in label for label in labels)
     assert any("event 0" in label for label in labels)
@@ -246,6 +246,38 @@ def test_a_present_empty_log_is_a_real_observation_distinct_from_absence() -> No
     assert missing.display_state() is DisplayState.SOURCE_UNAVAILABLE
 
 
+def test_a_non_contact_row_must_carry_not_applicable_measurements() -> None:
+    with pytest.raises(InputContractError):
+        PlateAppearanceEvent(
+            event_date=date(2026, 1, 1),
+            pitch_type="ZZ",
+            result="synthetic_strikeout",
+            batted_ball=False,
+            exit_velocity=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+            hit_distance=SnapshotField.absent(AbsenceReason.NOT_APPLICABLE),
+        )
+
+
+def test_a_batted_ball_may_not_claim_not_applicable() -> None:
+    with pytest.raises(InputContractError):
+        PlateAppearanceEvent(
+            event_date=date(2026, 1, 1),
+            pitch_type="ZZ",
+            result="synthetic_result",
+            batted_ball=True,
+            exit_velocity=SnapshotField.absent(AbsenceReason.NOT_APPLICABLE),
+            hit_distance=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+        )
+
+
+def test_batted_ball_events_is_the_named_bbe_subpopulation() -> None:
+    log = make_log()
+    assert len(log.events) == 3
+    bbe = log.batted_ball_events()
+    assert len(bbe) == 2
+    assert all(event.batted_ball for event in bbe)
+
+
 def test_an_untracked_event_measurement_is_a_named_absence_never_a_null() -> None:
     event = make_event(tracked=False)
     assert event.exit_velocity.display_state() is DisplayState.SOURCE_UNAVAILABLE
@@ -255,20 +287,22 @@ def test_an_untracked_event_measurement_is_a_named_absence_never_a_null() -> Non
 
 def test_event_vocabulary_must_be_non_empty() -> None:
     with pytest.raises(InputContractError):
-        BattedBallEvent(
+        PlateAppearanceEvent(
             event_date=date(2026, 1, 1),
             pitch_type="",
             result="synthetic_result",
+            batted_ball=True,
             exit_velocity=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
             hit_distance=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
         )
 
 
 def test_an_event_with_an_unknown_source_is_rejected_at_snapshot_level() -> None:
-    event = BattedBallEvent(
+    event = PlateAppearanceEvent(
         event_date=date(2026, 1, 1),
         pitch_type="ZZ",
         result="synthetic_result",
+        batted_ball=True,
         exit_velocity=SnapshotField.present(
             ExitVelocityReading(miles_per_hour=Decimal("1")), "no-such-source"
         ),
