@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from synthetic import absent_metrics, make_batter, make_park, make_snapshot
@@ -25,6 +26,7 @@ from greenmachine.inputs import (
     AbsenceReason,
     BattedBallRate,
     DisplayState,
+    InputContractError,
     SnapshotField,
     Window,
 )
@@ -81,14 +83,26 @@ def test_park_fields_render_defined_states_under_any_absence_mix(
 
 @given(
     rate=st.decimals(min_value=Decimal("0"), max_value=Decimal("1"), places=3),
-    bbe=st.integers(min_value=0, max_value=999),
+    bbe=st.integers(min_value=1, max_value=999),
 )
-def test_a_present_rate_always_carries_its_denominator_beside_it(rate: Decimal, bbe: int) -> None:
+def test_a_present_rate_always_carries_its_positive_denominator_beside_it(
+    rate: Decimal, bbe: int
+) -> None:
     value = BattedBallRate(rate=rate, batted_ball_events=bbe)
     field = SnapshotField.present(value, "synthetic-fixture")
     assert field.display_state() is DisplayState.VALUE
     assert field.value is not None
     assert field.value.batted_ball_events == bbe  # D-014: confidence beside, never fused
+
+
+@given(rate=st.decimals(min_value=Decimal("0"), max_value=Decimal("1"), places=3))
+def test_a_rate_over_zero_batted_balls_is_never_a_value(rate: Decimal) -> None:
+    """V2 finding 2, property form: no rate — zero included — makes a
+    zero-denominator aggregate constructible. The zero-sample state travels
+    as a named absence, and the strategy that once normalised this state
+    (drawing bbe from 0 and asserting VALUE) now proves its rejection."""
+    with pytest.raises(InputContractError):
+        BattedBallRate(rate=rate, batted_ball_events=0)
 
 
 @given(

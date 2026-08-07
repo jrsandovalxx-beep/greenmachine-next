@@ -28,8 +28,11 @@ from synthetic import (
 from greenmachine.inputs import (
     PARK_VENUES,
     AbsenceReason,
+    AirBallShare,
     BattedBallRate,
+    BatterInputs,
     DisplayState,
+    ExitVelocityAverage,
     ExitVelocityReading,
     Handedness,
     InputContractError,
@@ -37,12 +40,15 @@ from greenmachine.inputs import (
     ManualExportProvenance,
     ParkFactor,
     ParkInputs,
+    PitchTypeSplit,
     PlateAppearanceEvent,
     RoofStatus,
     SnapshotField,
     SourceAvailability,
     SourceKind,
     SourceRecord,
+    SwingShare,
+    UsageShare,
     VenueType,
     Window,
 )
@@ -60,7 +66,7 @@ def test_a_field_with_neither_value_nor_absence_is_rejected() -> None:
 def test_a_field_with_both_value_and_absence_is_rejected() -> None:
     with pytest.raises(InputContractError):
         SnapshotField(
-            value=BattedBallRate(rate=Decimal("0"), batted_ball_events=0),
+            value=BattedBallRate(rate=Decimal("0"), batted_ball_events=1),
             absence=AbsenceReason.NOT_YET_OBSERVED,
             source_id="synthetic-fixture",
         )
@@ -69,7 +75,7 @@ def test_a_field_with_both_value_and_absence_is_rejected() -> None:
 def test_a_present_value_without_a_source_is_rejected() -> None:
     with pytest.raises(InputContractError):
         SnapshotField(
-            value=BattedBallRate(rate=Decimal("0"), batted_ball_events=0),
+            value=BattedBallRate(rate=Decimal("0"), batted_ball_events=1),
             absence=None,
             source_id=None,
         )
@@ -103,10 +109,56 @@ def test_batted_ball_rate_bounds(bad_rate: Decimal) -> None:
         BattedBallRate(rate=bad_rate, batted_ball_events=1)
 
 
-def test_batted_ball_rate_denominator_is_bbe_and_non_negative() -> None:
+def test_batted_ball_rate_denominator_is_bbe_and_positive() -> None:
     with pytest.raises(InputContractError):
         BattedBallRate(rate=Decimal("0"), batted_ball_events=-1)
     assert "home runs included" in (BattedBallRate.__doc__ or "")
+
+
+def test_a_zero_denominator_aggregate_cannot_be_constructed() -> None:
+    """V2 finding 2: a present aggregate needs a positive denominator — a rate
+    over no events is undefined, and a zero-sample aggregate travels as a
+    named absence, the observed zero carried by the absence reason."""
+    with pytest.raises(InputContractError):
+        BattedBallRate(rate=Decimal("0"), batted_ball_events=0)
+    with pytest.raises(InputContractError):
+        ExitVelocityAverage(miles_per_hour=Decimal("1.5"), batted_ball_events=0)
+    with pytest.raises(InputContractError):
+        SwingShare(share=Decimal("0.5"), tracked_swings=0)
+    with pytest.raises(InputContractError):
+        AirBallShare(share=Decimal("0.5"), air_balls=0)
+    with pytest.raises(InputContractError):
+        UsageShare(share=Decimal("0.5"), sample_pitches=0)
+
+
+def test_a_true_zero_usage_share_is_a_present_value_over_a_positive_sample() -> None:
+    """A pitch type genuinely not thrown is an observation, not an absence:
+    share zero, sample positive, displayed as VALUE."""
+    usage = UsageShare(share=Decimal("0"), sample_pitches=7)
+    field = SnapshotField.present(usage, "synthetic-fixture")
+    assert field.display_state() is DisplayState.VALUE
+    assert field.value is not None
+    assert field.value.sample_pitches == 7  # D-014: the sample beside the share
+
+
+@pytest.mark.parametrize("bad_share", [Decimal("-0.01"), Decimal("1.01")])
+def test_usage_share_bounds(bad_share: Decimal) -> None:
+    with pytest.raises(InputContractError):
+        UsageShare(share=bad_share, sample_pitches=1)
+
+
+def test_an_unavailable_usage_share_is_a_named_absence_on_the_split() -> None:
+    """V2 finding 4: usage is observed data, so it is a SnapshotField — an
+    unavailable usage is distinguishable from a true zero share, which a bare
+    Decimal (or omitting the split) could never express."""
+    split = PitchTypeSplit(
+        pitch_type="ZZ",
+        usage_share=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+        barrel_rate=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+        exit_velocity=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+    )
+    assert split.usage_share.display_state() is DisplayState.SOURCE_UNAVAILABLE
+    assert split.usage_share.value is None
 
 
 def test_provenance_validation() -> None:
@@ -143,10 +195,29 @@ def test_duplicate_windows_are_rejected() -> None:
         make_batter(windows=(present_metrics(Window.RECENT_7D), present_metrics(Window.RECENT_7D)))
 
 
-def test_metrics_for_returns_the_named_window_or_none() -> None:
+def test_metrics_for_is_total_over_every_named_window() -> None:
+    """V2 finding 3: no bare None leaves the contract — every named window
+    resolves to an entry, and absence lives in that entry's fields."""
     batter = make_batter(windows=(present_metrics(Window.RECENT_14D),))
-    assert batter.metrics_for(Window.RECENT_14D) is not None
-    assert batter.metrics_for(Window.SEASON_TO_DATE) is None
+    for window in Window:
+        metrics = batter.metrics_for(window)
+        assert metrics.window is window
+    assert batter.metrics_for(Window.RECENT_14D).barrel_rate.value is not None
+    absent = batter.metrics_for(Window.SEASON_TO_DATE)
+    assert absent.barrel_rate.display_state() is DisplayState.NOT_YET_OBSERVED
+
+
+def test_a_batter_omitting_a_named_window_is_rejected() -> None:
+    """The totality law: an unavailable window travels as absent fields,
+    never as a missing entry the reader must interpret."""
+    with pytest.raises(InputContractError):
+        BatterInputs(
+            batter_id="synthetic-batter-1",
+            name="Synthetic Batter",
+            windows=(present_metrics(Window.RECENT_7D),),
+            pitch_type_splits=(),
+            plate_appearance_log=SnapshotField.absent(AbsenceReason.NOT_YET_OBSERVED),
+        )
 
 
 def test_park_factor_slot_handedness_is_enforced() -> None:
@@ -255,9 +326,9 @@ def test_an_unknown_source_id_is_rejected_at_snapshot_level() -> None:
 def test_iter_fields_sweeps_every_observed_field() -> None:
     snapshot = make_snapshot()
     labels = [owner for owner, _ in snapshot.iter_fields()]
-    # batter log (1) + one window (4) + one split (2) + three log events
-    # (2 each) + one park (4)
-    assert len(labels) == 17
+    # batter log (1) + three windows (4 each, totality) + one split (3, usage
+    # now observed) + three log events (2 each) + one park (4)
+    assert len(labels) == 26
     assert any("RECENT_7D" in label for label in labels)
     assert any("vs ZZ" in label for label in labels)
     assert any("event 0" in label for label in labels)

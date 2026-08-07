@@ -16,12 +16,21 @@ is the product's spine: a screen renders an ``InputSnapshot`` and never fetches
   bare ``None`` is the defect this module exists to prevent. Evidence
   confidence stays beside the value — the denominator count travels inside each
   value type (D-014) — and is never fused into it.
-- **Denominators are named in the field.** Batted-ball rates use **BBE —
-  Statcast batted-ball events, home runs included** — never the BABIP
+- **Denominators are named in the field, and positive.** Batted-ball rates use
+  **BBE — Statcast batted-ball events, home runs included** — never the BABIP
   denominator, which excludes home runs and would silently remove the outcome
-  this product exists to study. Each value type states its unit and denominator.
-- **Pitch-type splits carry their usage share**, so GMF-003's 15% display
-  threshold is applied by the screen from data in the snapshot.
+  this product exists to study. Each value type states its unit and denominator,
+  and an aggregate's denominator is **positive by construction**: a rate over
+  zero events is not a value, so a zero-sample aggregate travels as a named
+  absence. The observed zero is not lost — it is carried by the absence reason
+  (``NOT_YET_OBSERVED`` from a healthy source means the window has accumulated
+  no events; ``SOURCE_UNAVAILABLE`` means the count is unknown), a vocabulary
+  the snapshot builder applies at ingestion and GMF-006 proves at wire-through.
+- **Pitch-type splits carry their usage share as an observed field** —
+  ``SnapshotField[UsageShare]``, the share beside the sample it was computed
+  against — so GMF-003's 15% display threshold is applied by the screen from
+  data in the snapshot, and an unavailable usage is a named absence, distinct
+  from a true zero share (which is a present value over a positive sample).
 - **Provenance travels with the data.** Every field names its contributing
   source by ``source_id``; a manual-export source carries the full
   ``ManualExportProvenance`` record, so D-057's manual-export chain is
@@ -186,28 +195,34 @@ def _require_share(name: str, share: Decimal) -> None:
         raise InputContractError(f"{name} must lie in [0, 1]; got {share}")
 
 
-def _require_count(name: str, count: int) -> None:
-    if count < 0:
-        raise InputContractError(f"{name} must be non-negative; got {count}")
+def _require_positive_count(name: str, count: int) -> None:
+    if count <= 0:
+        raise InputContractError(
+            f"{name} must be positive; got {count} — an aggregate over zero events "
+            "is not a value, so a zero-sample aggregate travels as a named absence"
+        )
 
 
 @dataclass(frozen=True)
 class BattedBallRate:
     """Unit: share in [0, 1]. Denominator: **BBE — Statcast batted-ball events,
     home runs included** (never BABIP's HR-excluding denominator). The BBE count
-    is the D-014 evidence axis and is displayed beside the rate, never fused."""
+    is the D-014 evidence axis and is displayed beside the rate, never fused.
+    It is positive by construction: a rate over zero batted balls is undefined
+    and travels as a named absence, never as a constructed zero."""
 
     rate: Decimal
     batted_ball_events: int
 
     def __post_init__(self) -> None:
         _require_share("rate", self.rate)
-        _require_count("batted_ball_events", self.batted_ball_events)
+        _require_positive_count("batted_ball_events", self.batted_ball_events)
 
 
 @dataclass(frozen=True)
 class ExitVelocityAverage:
-    """Unit: miles per hour. Denominator: BBE (home runs included)."""
+    """Unit: miles per hour. Denominator: BBE (home runs included), positive
+    by construction — an average over zero events is a named absence."""
 
     miles_per_hour: Decimal
     batted_ball_events: int
@@ -215,53 +230,75 @@ class ExitVelocityAverage:
     def __post_init__(self) -> None:
         if self.miles_per_hour <= 0:
             raise InputContractError("exit velocity must be positive")
-        _require_count("batted_ball_events", self.batted_ball_events)
+        _require_positive_count("batted_ball_events", self.batted_ball_events)
 
 
 @dataclass(frozen=True)
 class SwingShare:
     """Unit: share in [0, 1]. Denominator: tracked competitive swings (the
-    D-023/D-026 ideal-attack-angle sample basis)."""
+    D-023/D-026 ideal-attack-angle sample basis), positive by construction."""
 
     share: Decimal
     tracked_swings: int
 
     def __post_init__(self) -> None:
         _require_share("share", self.share)
-        _require_count("tracked_swings", self.tracked_swings)
+        _require_positive_count("tracked_swings", self.tracked_swings)
 
 
 @dataclass(frozen=True)
 class AirBallShare:
     """Unit: share in [0, 1]. Denominator: air balls — fly balls plus line
-    drives with valid coordinates (the D-023 Pull Air % basis)."""
+    drives with valid coordinates (the D-023 Pull Air % basis), positive by
+    construction."""
 
     share: Decimal
     air_balls: int
 
     def __post_init__(self) -> None:
         _require_share("share", self.share)
-        _require_count("air_balls", self.air_balls)
+        _require_positive_count("air_balls", self.air_balls)
+
+
+@dataclass(frozen=True)
+class UsageShare:
+    """Unit: share in [0, 1]. Denominator: all tracked pitches in the sample
+    the split was computed against, positive by construction.
+
+    A **zero share over a positive sample is a present value** — the pitch
+    type was genuinely not thrown — distinct from the usage being absent
+    (``SOURCE_UNAVAILABLE``/``NOT_YET_OBSERVED``), which omission of a bare
+    number could never express.
+    """
+
+    share: Decimal
+    sample_pitches: int
+
+    def __post_init__(self) -> None:
+        _require_share("share", self.share)
+        _require_positive_count("sample_pitches", self.sample_pitches)
 
 
 @dataclass(frozen=True)
 class PitchTypeSplit:
     """A batter's contact quality against one pitch type.
 
-    ``usage_share`` is the share of this pitch type within the sample the split
-    was computed against, carried in the snapshot so GMF-003's 15% display
-    threshold is applied by the screen, never assumed upstream (§7).
+    ``usage_share`` is observed data — a measured share with the sample it was
+    computed against — so it is a ``SnapshotField`` like every observed field
+    here, never a bare number: GMF-003's 15% display threshold is applied by
+    the screen from data in the snapshot (§7), and the screen can distinguish
+    an unavailable usage (named absence) from a true zero share (present
+    ``UsageShare`` over a positive sample).
     """
 
     pitch_type: str
-    usage_share: Decimal
+    usage_share: SnapshotField[UsageShare]
     barrel_rate: SnapshotField[BattedBallRate]
     exit_velocity: SnapshotField[ExitVelocityAverage]
 
     def __post_init__(self) -> None:
         if not self.pitch_type:
             raise InputContractError("pitch_type must be non-empty")
-        _require_share("usage_share", self.usage_share)
 
 
 @dataclass(frozen=True)
@@ -399,6 +436,14 @@ class BatterInputs:
     moment as every aggregate beside it — a detail view is a view of the same
     instant, so the log lives in the snapshot and a popup renders it without
     fetching (§7).
+
+    ``windows`` is **total over the named windows**: every batter carries all
+    three ``Window`` members exactly once, and an unavailable window travels
+    as a window whose fields are named absences — never as a missing entry.
+    A tuple that could omit a window would force ``metrics_for`` to answer
+    with a bare ``None`` (the collapsed absence this module exists to prevent)
+    or to invent a reason for the omission — and an invented reason is a
+    default, the thing the fail-closed ingestion law forbids.
     """
 
     batter_id: str
@@ -415,15 +460,25 @@ class BatterInputs:
         seen = [metrics.window for metrics in self.windows]
         if len(seen) != len(set(seen)):
             raise InputContractError(f"batter {self.batter_id!r} repeats a window")
+        omitted = [window.value for window in Window if window not in set(seen)]
+        if omitted:
+            raise InputContractError(
+                f"batter {self.batter_id!r} omits named window(s) {omitted}: the "
+                "contract is total over windows — an unavailable window travels as "
+                "absent fields, never as a missing entry"
+            )
         split_types = [split.pitch_type for split in self.pitch_type_splits]
         if len(split_types) != len(set(split_types)):
             raise InputContractError(f"batter {self.batter_id!r} repeats a pitch type")
 
-    def metrics_for(self, window: Window) -> WindowedBatterMetrics | None:
+    def metrics_for(self, window: Window) -> WindowedBatterMetrics:
+        """Total: every named window resolves — absence lives in the fields."""
         for metrics in self.windows:
             if metrics.window is window:
                 return metrics
-        return None
+        raise InputContractError(  # unreachable past __post_init__, stated anyway
+            f"batter {self.batter_id!r} has no {window.value} entry"
+        )
 
 
 @unique

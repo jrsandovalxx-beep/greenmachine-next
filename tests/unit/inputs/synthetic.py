@@ -34,6 +34,7 @@ from greenmachine.inputs import (
     SourceKind,
     SourceRecord,
     SwingShare,
+    UsageShare,
     VenueType,
     WeatherForecast,
     Window,
@@ -96,6 +97,19 @@ def absent_metrics(window: Window, reason: AbsenceReason) -> WindowedBatterMetri
     )
 
 
+def complete_windows(*given: WindowedBatterMetrics) -> tuple[WindowedBatterMetrics, ...]:
+    """Totality helper: the contract requires every named window, so the named
+    windows not overridden by the caller are filled as absent NOT_YET_OBSERVED.
+    Duplicates among ``given`` are passed through untouched, so rejection tests
+    still reach the constructor's own check."""
+    provided = {metrics.window for metrics in given}
+    return given + tuple(
+        absent_metrics(window, AbsenceReason.NOT_YET_OBSERVED)
+        for window in Window
+        if window not in provided
+    )
+
+
 def make_event(event_date: date = date(2026, 1, 1), tracked: bool = True) -> PlateAppearanceEvent:
     """A contact plate appearance (batted ball), tracked or untracked."""
     if tracked:
@@ -151,16 +165,23 @@ def make_batter(
     splits: tuple[PitchTypeSplit, ...] | None = None,
     log: SnapshotField[PlateAppearanceLog] | None = None,
 ) -> BatterInputs:
-    if windows is None:
-        windows = (present_metrics(Window.RECENT_7D),)
+    windows = (
+        complete_windows(*windows)
+        if windows is not None
+        else complete_windows(present_metrics(Window.RECENT_7D))
+    )
     if splits is None:
+        # The healthy-source, zero-balls-in-play state, encoded correctly: the
+        # usage share is a present observation over a positive sample, and the
+        # rate over zero batted balls is a NAMED ABSENCE — never a constructed
+        # zero-denominator value.
         splits = (
             PitchTypeSplit(
                 pitch_type="ZZ",
-                usage_share=Decimal("0.5"),
-                barrel_rate=SnapshotField.present(
-                    BattedBallRate(rate=Decimal("0"), batted_ball_events=0), SOURCE_EXPORT
+                usage_share=SnapshotField.present(
+                    UsageShare(share=Decimal("0.5"), sample_pitches=4), SOURCE_EXPORT
                 ),
+                barrel_rate=SnapshotField.absent(AbsenceReason.NOT_YET_OBSERVED, SOURCE_EXPORT),
                 exit_velocity=SnapshotField.absent(AbsenceReason.NOT_YET_OBSERVED),
             ),
         )
