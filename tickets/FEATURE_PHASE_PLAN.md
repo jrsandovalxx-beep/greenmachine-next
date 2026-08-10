@@ -1,4 +1,30 @@
-# FEATURE_PHASE_PLAN v6 — GMF-001 … GMF-006
+# FEATURE_PHASE_PLAN v9 — GMF-001 … GMF-006
+
+**v9 is revision r1's third candidate — it answers the one finding of the v8 rejection**: r1 is
+**two** review objects, not one — the candidate-bytes document review and the later revision-bound
+commit review are distinct objects, exactly as the original lifecycle counted "this plan" and
+§GMF-000R separately. §4c now carries both r1 rows, the exact total is **19**, the `TEAM_ROLES.md`
+mirror moves to the same number, and the r1 package must sweep the tree for any other committed
+statement of the object total, reporting rather than absorbing anything it finds.
+
+**v8 was revision r1's second candidate — it answered the four findings of the v7 rejection**: the
+ruling date v7 memorialized was false (the ruling was issued 2026-08-10, not 2026-08-11 — a wrong
+date written into the paragraph that exists to keep the record accurate); v7's r1 delta omitted
+`docs/TEAM_ROLES.md`, whose committed text mirrors §4c at 17 objects and would have contradicted
+the plan the moment r1 merged; v7's register statement blurred the reviewed submission-1 head
+against `staging`; and D-061 claimed an AppTest capability Streamlit 1.37 does not provide — the
+testing boundary is now stated falsifiably and §GMF-002's coverage criterion binds to it.
+
+**Revision r1 repairs one dangling referent, nothing else.** Executing §GMF-002 exposed
+that its phrase *"the five research-captured decisions"* had no committed referent: the GR-002 grid
+decisions were captured in Lead working notes, designated for the D-047 landing, and dropped from
+§GMF-000R's delta — an omission the plan's own "count: 57" made self-consistent, so it survived
+every prior review (D-050: a criterion whose referent is uncommitted is a criterion defect). The
+reviewer's 2026-08-10 ruling rejected both landing-without-revision vehicles and required this
+revision. r1 enumerates the five as **D-058..D-062** (§4b-r1, Product-Owner-ratified 2026-08-10),
+authorizes their landing **inside §GMF-002 submission 1** with the coupled pack-count move, and
+adds the revision's two objects to §4c (total 19). No ticket criterion outside §GMF-002 submission 1
+changes; no completed record is touched.
 
 **v6 answers the two findings of the v5 rejection**: v5 mis-stated what the v4 rejection was, and its
 version-label coupling protected only one of the two plan records. **The v4 rejection, stated
@@ -136,6 +162,41 @@ operationally in force through the entire bootstrap — are landed rather than s
 **Resulting decision count: 57 (D-001..D-057), continuous, no gap.** §GMF-000R must prove
 continuity mechanically, not assert it.
 
+### 4b-r1. Register extension at revision r1 — D-058..D-062 (the five grid decisions)
+
+From the GR-002 grid-component research brief; **Product Owner ratified all five as recommended,
+2026-08-10.** These are the referent of §GMF-002 submission 1's criterion, and that submission
+lands them in `DECISIONS.md` **verbatim from this table**, moving `CONTEXT_PACK.md`'s decision
+count 57 → 62 in the same commit (the checker binds the two together).
+
+| ID | Decision |
+|---|---|
+| **D-058** | **No inline master-detail; selection-driven detail panel.** Inline expansion forces AG Grid Enterprise licensing, an untestable iframe grid, and version-coupling risk. Row selection (`on_select`) drives a detail surface instead. |
+| **D-059** | **No `matplotlib` dependency.** Cell grading is hand-rolled via `Styler.map`; revisit only if hand-rolled grading proves inadequate, as a new decision. |
+| **D-060** | **Theming via `.streamlit/config.toml` only.** Never style against `st-emotion-cache-*` classes or `data-testid` attributes — not public API, breaks silently on upgrade. Cell colour comes from `Styler` inline styles. |
+| **D-061** | **The core table stays testable: native `st.dataframe`, with the testing boundary stated at the version floor.** An untestable core UI surface is not acceptable — and neither is a claimed test capability the floor version does not provide. At Streamlit 1.37, `AppTest` exposes the dataframe as an element and **cannot synthesize row selection** (selection state is not programmatically settable). The boundary, falsifiable at 1.37: **AppTest proves the element's handed-off data and configuration** — column set, order and visibility, density configuration, graded values, and every absence state's rendering as data; **the selection-consumption path** (the code receiving a selection and producing detail state) **is proven by direct tests as ordinary code**; **the click-to-detail interaction and visual legibility are observed at §GMF-002 submission 2** on the deployed page. No AppTest capability is claimed beyond the floor's. |
+| **D-062** | **Streamlit is version-bounded; upgrades land through `staging` first.** Floor **>= 1.37** (`on_select` arrived 1.35; `st.fragment` stable in 1.37), with a defended upper bound against third-party breakage. |
+
+**Register statement, by state.** The reviewed §GMF-002 submission-1 head itself carries the
+landing — `DECISIONS.md` through D-062 and the pack count at **62** — and that head's package and
+checker prove exactly that state, pre-merge, as the lifecycle requires. **`staging` remains at 57**
+until that approved head merges, and reads **62 (D-001..D-062), continuous, no gap** after it.
+The r1 plan-revision commit itself moves no decision: its permitted delta is exactly four
+files — `tickets/FEATURE_PHASE_PLAN.md` (this text), `scripts/check_consistency.py` (the
+`PINNED_FEATURE_PLAN_SHA256` constant only), `CONTEXT_PACK.md` (the active-plan record line
+only: version label and hash; **the decision count does not move at r1**), and
+`docs/TEAM_ROLES.md` (**the object-structure mirror only**: its
+"17 review objects" total becomes 19 and its object list gains the two r1 entries,
+mirroring §4c — nothing else in that file changes; its committed text was authored by §GMF-000R to
+mirror §4c, so §4c moving without it would leave two committed object structures in
+contradiction). **The r1 package must additionally sweep the tree for any other committed
+statement of the object total** and demonstrate `TEAM_ROLES.md` is the only mirror; a further
+mirror, if one exists, is reported as a finding — the delta does not authorize touching it.
+§GMF-002 submission 1's package proves the landing mechanically — the
+`DECISIONS.md` tail and the pack count, shown together. **Completed records keep their v6-hash
+link-backs untouched**, per the v15 → v16 precedent (§3a): a forward version bump, never
+retroactive.
+
 ### 4c. Review objects — finding 5 fix, determinate
 
 v1 stated fourteen while its own ticket text described more. Every ticket now has a **fixed** object
@@ -144,6 +205,8 @@ structure; none is builder-elective.
 | Ticket | Objects | Why |
 |---|---|---|
 | this plan | 1 | document review |
+| this plan, revision r1 — document review | 1 | candidate-bytes review of the revision text; mirrors the "this plan" row |
+| this plan, revision r1 — commit | 1 | plan-revision commit, GMF-000R shape — repairs §GMF-002's referent; delta fixed in §4b-r1 |
 | §GMF-000R | 1 | plan commit; no completed record |
 | §GMF-001 | 2 | impl + closeout; no deployed surface |
 | §GMF-002 | **3** | impl + **post-merge deployed verification** + closeout |
@@ -152,7 +215,7 @@ structure; none is builder-elective.
 | §GMF-005 | **3** | impl + **post-merge deployed verification** + closeout |
 | §GMF-006 | **3** | impl + **post-merge deployed verification** + closeout |
 
-**Exact total: 17 review objects.**
+**Exact total: 19 review objects** (17 at v6; +2: the r1 document review and the r1 commit).
 
 ### 4d. Deployed evidence — finding 6 fix, a route that exists
 
@@ -218,7 +281,7 @@ hardening or it is weaker than the rule it sits beside.
 ```
 - Plan (bootstrap, historical): REBUILD_PLAN v16, sha256 `<64 hex>` — the pinned authority for
   GMN-000A … GMR-005; no longer the active ticket source.
-- Plan (active, feature phase): FEATURE_PHASE_PLAN v6, sha256 `<64 hex>` — the pinned authority for
+- Plan (active, feature phase): FEATURE_PHASE_PLAN v9, sha256 `<64 hex>` — the pinned authority for
   GMF-001 … GMF-006.
 ```
 
@@ -240,7 +303,7 @@ version string in that plan's own title line**:
 | Pack record | Version label must equal the title version of |
 |---|---|
 | `- Plan (bootstrap, historical): REBUILD_PLAN v16 …` | `tickets/REBUILD_PLAN.md` |
-| `- Plan (active, feature phase): FEATURE_PHASE_PLAN v6 …` | `tickets/FEATURE_PHASE_PLAN.md` |
+| `- Plan (active, feature phase): FEATURE_PHASE_PLAN v9 …` | `tickets/FEATURE_PHASE_PLAN.md` |
 
 A revision that updates either plan's title without its record, or either record without its title,
 turns the checker red instead of shipping a record that misnames its own authority.
@@ -401,11 +464,15 @@ B, revision binding with full diff. Not repeated below.
 
 ### §GMF-002 — Grid component · 3 objects · closeout pointer GMF-003
 
-**Submission 1 — implementation.** Grid renders an `InputSnapshot` fixture; the five
-research-captured decisions implemented and each named with the behaviour satisfying it; sorting,
-column visibility and density user-controlled; no automated ranking or selection (D-015/D-017);
-absence states visibly distinct from zero — a blank cell that could mean either fails; AppTest
-coverage of each. Merges on approval.
+**Submission 1 — implementation.** Grid renders an `InputSnapshot` fixture; **the five grid
+decisions D-058..D-062 (§4b-r1) implemented and each named with the behaviour satisfying it — this
+submission lands them in `DECISIONS.md` verbatim from §4b-r1 and moves `CONTEXT_PACK.md`'s decision
+count 57 → 62 in the same commit, the landing proven mechanically in the package** (register tail
+and pack count together); sorting, column visibility and density user-controlled; no automated
+ranking or selection (D-015/D-017); absence states visibly distinct from zero — a blank cell that
+could mean either fails; test coverage of each **within D-061's stated boundary** — AppTest for the
+element's data and configuration, direct tests for the selection-consumption path, the interaction
+itself observed at submission 2. Merges on approval.
 
 **Submission 2 — deployed verification.** Head of record is `staging` after that merge. The grid is
 observed rendering on https://greenmachine.streamlit.app/ — **the first visible product surface** —

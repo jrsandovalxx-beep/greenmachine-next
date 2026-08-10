@@ -53,6 +53,8 @@ review object:
 | GMR-004 submissions 1, 2 + closeout PR | B |
 | GMR-005 implementation + closeout PRs | B |
 | FEATURE_PHASE_PLAN document review | document object — reviewed as pasted bytes, no PR |
+| FEATURE_PHASE_PLAN revision r1 — document review | document object — reviewed as pasted bytes, no PR |
+| FEATURE_PHASE_PLAN revision r1 — commit PR (no completed record) | B |
 | §GMF-000R plan-commit PR (no completed record) | B |
 | GMF-001 implementation + closeout PRs | B |
 | GMF-002 submission 1, deployed verification, closeout | B |
@@ -61,8 +63,9 @@ review object:
 | GMF-005 submission 1, deployed verification, closeout | B |
 | GMF-006 submission 1, deployed verification, closeout | B |
 
-The feature phase comprises **17 review objects** in total (FEATURE_PHASE_PLAN §4c: the
-plan document, §GMF-000R, and the six GMF tickets at 2 + 3 + 2 + 2 + 3 + 3). Deployed
+The feature phase comprises **19 review objects** in total (FEATURE_PHASE_PLAN §4c: the
+plan document, revision r1's document review and commit, §GMF-000R, and the six GMF
+tickets at 2 + 3 + 2 + 2 + 3 + 3). Deployed
 verification follows the GMR-004 two-submission pattern with **no D-018-style
 exception**: submission 1 merges only after its own approval, and submission 2 merges
 nothing (FEATURE_PHASE_PLAN §4d).
