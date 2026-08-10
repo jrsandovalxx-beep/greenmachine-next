@@ -43,7 +43,7 @@ _EXPECTED_STATE = {
 
 @given(reason=_REASONS)
 def test_an_absent_field_renders_its_exact_reason(reason: AbsenceReason) -> None:
-    field: SnapshotField[BattedBallRate] = SnapshotField.absent(reason)
+    field: SnapshotField[BattedBallRate] = SnapshotField.absent(reason, "synthetic-fixture")
     state = field.display_state()
     assert isinstance(state, DisplayState)
     assert state == _EXPECTED_STATE[reason]

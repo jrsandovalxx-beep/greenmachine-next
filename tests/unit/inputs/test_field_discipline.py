@@ -5,13 +5,18 @@ structural identity fields (ids, names, enum members) are constructor
 arguments. V2's finding 4 (``usage_share`` as a bare ``Decimal``) was that
 prose rule escaping enforcement — a defect class that survived two review
 passes. This module makes the rule mechanical: every dataclass field in the
-contract is classified, and anything that is not a ``SnapshotField``, a child
-structure, or an enum identity must appear in the explicit allow-list below
-with its category stated. Adding a field that skips the contract now fails CI
-until the addition is made visibly, in this list, under review.
+contract is classified, and anything that is not a ``SnapshotField`` or a
+child structure must appear in the explicit allow-list below with its
+category stated. Adding a field that skips the contract now fails CI until
+the addition is made visibly, in this list, under review.
 
 The allow-list is deliberately flat and literal. A clever classifier that
-inferred exemptions would be the same defect wearing a test's clothing.
+inferred exemptions would be the same defect wearing a test's clothing —
+and V3 proved it: this guard's first version exempted every Enum-typed field
+wholesale, and `SourceRecord.availability` (dynamic state, not identity)
+walked through exactly that hole. **An exemption is enumerated, never
+inferred from a type.** Enum-typed fields now earn their entries one by one,
+like everything else.
 """
 
 from __future__ import annotations
@@ -19,14 +24,14 @@ from __future__ import annotations
 import dataclasses
 import types
 import typing
-from enum import Enum
 
 from greenmachine.inputs import contract
 from greenmachine.inputs.contract import SnapshotField
 
 # (class, field) -> category. Every entry is a conscious exemption from the
 # "every observed field is a SnapshotField" rule, and the category names why:
-#   identity        - structural identity: ids, names, teams (constructor args)
+#   identity        - structural identity: ids, names, teams, enum taxonomy
+#                     members that say WHICH thing this is (constructor args)
 #   value-component - a component of one observed value, inside a SnapshotField
 #                     payload (the D-014 evidence axis lives here)
 #   vocabulary      - a contributing source's own designation, carried verbatim
@@ -40,6 +45,7 @@ ALLOWED_NON_SNAPSHOT_FIELDS: dict[tuple[str, str], str] = {
     ("ManualExportProvenance", "row_count"): "provenance",
     ("ManualExportProvenance", "sha256"): "provenance",
     ("SourceRecord", "source_id"): "source-table",
+    ("SourceRecord", "kind"): "source-table",
     ("SourceRecord", "description"): "source-table",
     ("BattedBallRate", "rate"): "value-component",
     ("BattedBallRate", "batted_ball_events"): "value-component",
@@ -54,6 +60,8 @@ ALLOWED_NON_SNAPSHOT_FIELDS: dict[tuple[str, str], str] = {
     ("ExitVelocityReading", "miles_per_hour"): "value-component",
     ("HitDistanceReading", "feet"): "value-component",
     ("PitchTypeSplit", "pitch_type"): "vocabulary",
+    ("WindowedBatterMetrics", "window"): "identity",
+    ("PlateAppearanceLog", "window"): "identity",
     ("PlateAppearanceEvent", "event_date"): "identity",
     ("PlateAppearanceEvent", "pitch_type"): "vocabulary",
     ("PlateAppearanceEvent", "result"): "vocabulary",
@@ -63,8 +71,10 @@ ALLOWED_NON_SNAPSHOT_FIELDS: dict[tuple[str, str], str] = {
     ("ParkVenue", "venue_id"): "identity",
     ("ParkVenue", "name"): "identity",
     ("ParkVenue", "team"): "identity",
+    ("ParkVenue", "venue_type"): "identity",
     ("ParkVenue", "savant_venue_id"): "identity",
     ("ParkFactor", "factor"): "value-component",
+    ("ParkFactor", "handedness"): "value-component",
     ("ParkFactor", "plate_appearances"): "value-component",
     ("WeatherForecast", "temperature_f"): "value-component",
     ("WeatherForecast", "wind_speed_mph"): "value-component",
@@ -107,15 +117,6 @@ def _is_contract_structure(hint: object, classes: dict[str, type]) -> bool:
     return isinstance(hint, type) and hint in classes.values()
 
 
-def _unwrap_optional(hint: object) -> object:
-    origin = typing.get_origin(hint)
-    if origin in (typing.Union, types.UnionType):
-        args = [arg for arg in typing.get_args(hint) if arg is not type(None)]
-        if len(args) == 1:
-            return args[0]
-    return hint
-
-
 def test_every_contract_field_is_a_snapshot_field_a_structure_or_allow_listed() -> None:
     classes = _contract_dataclasses()
     violations: list[str] = []
@@ -127,14 +128,14 @@ def test_every_contract_field_is_a_snapshot_field_a_structure_or_allow_listed() 
                 continue
             if _is_contract_structure(hint, classes):
                 continue
-            bare = _unwrap_optional(hint)
-            if isinstance(bare, type) and issubclass(bare, Enum):
-                continue  # enum members are structural identity by the docstring
+            # No type is exempt wholesale - not even Enum. V3's finding: an
+            # enum can carry dynamic state (SourceRecord.availability), so an
+            # exemption is enumerated in the allow-list, never inferred here.
             if (name, field.name) not in ALLOWED_NON_SNAPSHOT_FIELDS:
                 violations.append(
                     f"{name}.{field.name}: {hint!r} is not a SnapshotField, not a "
-                    "contract structure, not an enum identity, and not allow-listed "
-                    "- observed data is leaving the contract by a side door"
+                    "contract structure, and not allow-listed - observed data is "
+                    "leaving the contract by a side door"
                 )
     assert not violations, "\n".join(violations)
 

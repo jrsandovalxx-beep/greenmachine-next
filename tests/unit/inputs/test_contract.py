@@ -6,6 +6,7 @@ the constructive halves of criteria 5 and 6.
 
 from __future__ import annotations
 
+import dataclasses
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -15,6 +16,7 @@ from synthetic import (
     FIXED_VENUE,
     OPEN_AIR_VENUE,
     RETRACTABLE_VENUE,
+    SOURCE_EXPORT,
     SOURCES,
     absent_metrics,
     make_batter,
@@ -44,7 +46,6 @@ from greenmachine.inputs import (
     PlateAppearanceEvent,
     RoofStatus,
     SnapshotField,
-    SourceAvailability,
     SourceKind,
     SourceRecord,
     SwingShare,
@@ -82,7 +83,10 @@ def test_a_present_value_without_a_source_is_rejected() -> None:
 
 
 def test_display_state_maps_every_absence_reason_distinctly() -> None:
-    states = {reason: SnapshotField.absent(reason).display_state() for reason in AbsenceReason}
+    states = {
+        reason: SnapshotField.absent(reason, "synthetic-fixture").display_state()
+        for reason in AbsenceReason
+    }
     assert states == {
         AbsenceReason.NOT_APPLICABLE: DisplayState.NOT_APPLICABLE,
         AbsenceReason.NOT_YET_OBSERVED: DisplayState.NOT_YET_OBSERVED,
@@ -96,6 +100,25 @@ def test_a_present_field_displays_as_value() -> None:
         BattedBallRate(rate=Decimal("0.5"), batted_ball_events=4), "synthetic-fixture"
     )
     assert field.display_state() is DisplayState.VALUE
+
+
+@pytest.mark.parametrize(
+    "reason", [AbsenceReason.SOURCE_UNAVAILABLE, AbsenceReason.NOT_YET_OBSERVED]
+)
+def test_a_source_dependent_absence_must_name_its_source(reason: AbsenceReason) -> None:
+    """V3 finding, the provenance half: SOURCE_UNAVAILABLE and NOT_YET_OBSERVED
+    each implicate a source — one failed, one answered with nothing — and §7's
+    "provenance travels with the data" keeps the implication auditable."""
+    with pytest.raises(InputContractError):
+        SnapshotField.absent(reason)
+
+
+def test_a_not_applicable_absence_may_omit_its_source() -> None:
+    """A strikeout's exit velocity implicates no source and correctly names
+    none — NOT_APPLICABLE is the one absence that needs no provenance."""
+    field: SnapshotField[object] = SnapshotField.absent(AbsenceReason.NOT_APPLICABLE)
+    assert field.display_state() is DisplayState.NOT_APPLICABLE
+    assert field.source_id is None
 
 
 # ---------------------------------------------------------------------------
@@ -153,9 +176,9 @@ def test_an_unavailable_usage_share_is_a_named_absence_on_the_split() -> None:
     Decimal (or omitting the split) could never express."""
     split = PitchTypeSplit(
         pitch_type="ZZ",
-        usage_share=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
-        barrel_rate=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
-        exit_velocity=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+        usage_share=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"),
+        barrel_rate=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"),
+        exit_velocity=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"),
     )
     assert split.usage_share.display_state() is DisplayState.SOURCE_UNAVAILABLE
     assert split.usage_share.value is None
@@ -181,8 +204,48 @@ def test_a_manual_export_source_requires_provenance() -> None:
             source_id="x",
             kind=SourceKind.MANUAL_EXPORT,
             description="missing provenance",
-            availability=SourceAvailability.AVAILABLE,
         )
+
+
+def test_source_health_has_one_representation_the_flag_is_gone() -> None:
+    """V3 finding: `SourceRecord.availability` was dynamic state nothing bound —
+    a source could assert UNAVAILABLE beneath fields presenting values that
+    cited it. The flag is deleted rather than bound: source health is not one
+    fact per moment (an adapter can answer one query and fail another inside
+    the same capture), so it lives per observation, in the absence reasons."""
+    import greenmachine.inputs as inputs_package
+
+    assert not hasattr(inputs_package, "SourceAvailability")
+    field_names = {field.name for field in dataclasses.fields(SourceRecord)}
+    assert field_names == {"source_id", "kind", "description", "provenance"}
+
+
+def test_a_down_source_is_told_by_its_fields_not_by_a_flag() -> None:
+    """The UNAVAILABLE path, actually constructed: every field consulting the
+    export source is absent SOURCE_UNAVAILABLE naming it — a coherent outage
+    story with nothing for the fields to contradict — while the source table
+    still answers identity and provenance for that same source."""
+    splits = (
+        PitchTypeSplit(
+            pitch_type="ZZ",
+            usage_share=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_EXPORT),
+            barrel_rate=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_EXPORT),
+            exit_velocity=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_EXPORT),
+        ),
+    )
+    park = make_park(factor_reason=AbsenceReason.SOURCE_UNAVAILABLE)
+    snapshot = make_snapshot(batters=(make_batter(splits=splits),), parks=(park,))
+    export_fields = [
+        (owner, field)
+        for owner, field in snapshot.iter_fields()
+        if field.source_id == SOURCE_EXPORT
+    ]
+    assert export_fields, "the story needs fields that consult the export source"
+    assert all(
+        field.display_state() is DisplayState.SOURCE_UNAVAILABLE for _, field in export_fields
+    )
+    record = snapshot.source(SOURCE_EXPORT)
+    assert record.provenance is not None  # identity and provenance survive the outage
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +279,9 @@ def test_a_batter_omitting_a_named_window_is_rejected() -> None:
             name="Synthetic Batter",
             windows=(present_metrics(Window.RECENT_7D),),
             pitch_type_splits=(),
-            plate_appearance_log=SnapshotField.absent(AbsenceReason.NOT_YET_OBSERVED),
+            plate_appearance_log=SnapshotField.absent(
+                AbsenceReason.NOT_YET_OBSERVED, "synthetic-fixture"
+            ),
         )
 
 
@@ -228,9 +293,11 @@ def test_park_factor_slot_handedness_is_enforced() -> None:
                 ParkFactor(factor=Decimal("1"), handedness=Handedness.RIGHT, plate_appearances=3),
                 "synthetic-fixture",
             ),
-            park_factor_rhb=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+            park_factor_rhb=SnapshotField.absent(
+                AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"
+            ),
             roof_status=SnapshotField.absent(AbsenceReason.NOT_APPLICABLE),
-            forecast=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+            forecast=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"),
         )
 
 
@@ -238,10 +305,14 @@ def test_roof_status_is_not_applicable_outside_retractable_roofs() -> None:
     with pytest.raises(InputContractError):
         ParkInputs(
             venue=OPEN_AIR_VENUE,
-            park_factor_lhb=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
-            park_factor_rhb=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+            park_factor_lhb=SnapshotField.absent(
+                AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"
+            ),
+            park_factor_rhb=SnapshotField.absent(
+                AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"
+            ),
             roof_status=SnapshotField.present(RoofStatus.OPEN, "synthetic-fixture"),
-            forecast=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+            forecast=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"),
         )
 
 
@@ -266,10 +337,14 @@ def test_a_roof_that_does_not_exist_cannot_fail_or_be_pending(
     with pytest.raises(InputContractError):
         ParkInputs(
             venue=target,
-            park_factor_lhb=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
-            park_factor_rhb=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
-            roof_status=SnapshotField.absent(reason),
-            forecast=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+            park_factor_lhb=SnapshotField.absent(
+                AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"
+            ),
+            park_factor_rhb=SnapshotField.absent(
+                AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"
+            ),
+            roof_status=SnapshotField.absent(reason, "synthetic-fixture"),
+            forecast=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"),
         )
 
 
@@ -279,10 +354,14 @@ def test_a_retractable_roof_state_is_never_not_applicable() -> None:
     with pytest.raises(InputContractError):
         ParkInputs(
             venue=RETRACTABLE_VENUE,
-            park_factor_lhb=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
-            park_factor_rhb=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+            park_factor_lhb=SnapshotField.absent(
+                AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"
+            ),
+            park_factor_rhb=SnapshotField.absent(
+                AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"
+            ),
             roof_status=SnapshotField.absent(AbsenceReason.NOT_APPLICABLE),
-            forecast=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+            forecast=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"),
         )
 
 
@@ -359,7 +438,9 @@ def test_unsorted_log_events_are_rejected() -> None:
 
 def test_a_present_empty_log_is_a_real_observation_distinct_from_absence() -> None:
     empty = SnapshotField.present(make_log(events=()), "synthetic-fixture")
-    missing: SnapshotField[object] = SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE)
+    missing: SnapshotField[object] = SnapshotField.absent(
+        AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"
+    )
     assert empty.display_state() is DisplayState.VALUE
     assert empty.value is not None and empty.value.events == ()
     assert missing.display_state() is DisplayState.SOURCE_UNAVAILABLE
@@ -372,7 +453,9 @@ def test_a_non_contact_row_must_carry_not_applicable_measurements() -> None:
             pitch_type="ZZ",
             result="synthetic_strikeout",
             batted_ball=False,
-            exit_velocity=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+            exit_velocity=SnapshotField.absent(
+                AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"
+            ),
             hit_distance=SnapshotField.absent(AbsenceReason.NOT_APPLICABLE),
         )
 
@@ -385,7 +468,9 @@ def test_a_batted_ball_may_not_claim_not_applicable() -> None:
             result="synthetic_result",
             batted_ball=True,
             exit_velocity=SnapshotField.absent(AbsenceReason.NOT_APPLICABLE),
-            hit_distance=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+            hit_distance=SnapshotField.absent(
+                AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"
+            ),
         )
 
 
@@ -411,8 +496,12 @@ def test_event_vocabulary_must_be_non_empty() -> None:
             pitch_type="",
             result="synthetic_result",
             batted_ball=True,
-            exit_velocity=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
-            hit_distance=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+            exit_velocity=SnapshotField.absent(
+                AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"
+            ),
+            hit_distance=SnapshotField.absent(
+                AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"
+            ),
         )
 
 
@@ -425,7 +514,7 @@ def test_an_event_with_an_unknown_source_is_rejected_at_snapshot_level() -> None
         exit_velocity=SnapshotField.present(
             ExitVelocityReading(miles_per_hour=Decimal("1")), "no-such-source"
         ),
-        hit_distance=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE),
+        hit_distance=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"),
     )
     batter = make_batter(log=SnapshotField.present(make_log(events=(event,)), "synthetic-fixture"))
     with pytest.raises(InputContractError):

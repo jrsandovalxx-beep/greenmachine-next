@@ -31,10 +31,20 @@ is the product's spine: a screen renders an ``InputSnapshot`` and never fetches
   against — so GMF-003's 15% display threshold is applied by the screen from
   data in the snapshot, and an unavailable usage is a named absence, distinct
   from a true zero share (which is a present value over a positive sample).
-- **Provenance travels with the data.** Every field names its contributing
-  source by ``source_id``; a manual-export source carries the full
+- **Provenance travels with the data — with absences as much as with values.**
+  Every present field names its contributing source by ``source_id``, and so
+  does every **source-dependent absence**: ``SOURCE_UNAVAILABLE`` and
+  ``NOT_YET_OBSERVED`` must name the source they implicate (only
+  ``NOT_APPLICABLE`` may omit it). A manual-export source carries the full
   ``ManualExportProvenance`` record, so D-057's manual-export chain is
   auditable from the snapshot alone.
+- **Source health has one representation.** The source table carries identity
+  and provenance only — there is no availability flag, because a source's
+  health at the captured moment is not one fact (an adapter can answer one
+  query and fail another inside the same capture). Health lives per
+  observation in the absence reasons, which are self-describing:
+  ``SOURCE_UNAVAILABLE`` = consulted, did not answer; ``NOT_YET_OBSERVED`` =
+  answered, nothing accumulated. Nothing exists for the fields to contradict.
 - **Event detail is snapshot data, not a fetch.** A batter's plate-appearance
   log (``PlateAppearanceLog``) is carried in the snapshot at the same captured
   moment as the aggregates beside it, because a detail view is a view of the
@@ -104,9 +114,13 @@ class SnapshotField(Generic[T]):
     """An observed field: exactly one of ``value`` and ``absence`` is set.
 
     ``source_id`` names the contributing source in the snapshot's source table.
-    It is required with a present value (provenance travels with the data) and
-    optional with an absence (``SOURCE_UNAVAILABLE`` may still name the source
-    that failed; ``NOT_APPLICABLE`` usually has none).
+    It is required with a present value, and required with a
+    **source-dependent absence**: ``SOURCE_UNAVAILABLE`` (the source was
+    consulted and did not answer) and ``NOT_YET_OBSERVED`` (the source answered
+    and the quantity has not accumulated) each implicate a source, and §7's
+    "provenance travels with the data" keeps that implication auditable. Only
+    ``NOT_APPLICABLE`` may omit it — a strikeout's exit velocity implicates no
+    source and correctly names none.
     """
 
     value: T | None
@@ -121,6 +135,14 @@ class SnapshotField(Generic[T]):
             )
         if self.value is not None and self.source_id is None:
             raise InputContractError("a present value must name its source_id")
+        if (
+            self.absence in (AbsenceReason.SOURCE_UNAVAILABLE, AbsenceReason.NOT_YET_OBSERVED)
+            and self.source_id is None
+        ):
+            raise InputContractError(
+                f"a {self.absence.value} absence implicates a source and must name it; "
+                "only NOT_APPLICABLE may omit source_id"
+            )
 
     @classmethod
     def present(cls, value: T, source_id: str) -> SnapshotField[T]:
@@ -165,20 +187,25 @@ class SourceKind(Enum):
     SYNTHETIC = "synthetic"
 
 
-@unique
-class SourceAvailability(Enum):
-    AVAILABLE = "available"
-    UNAVAILABLE = "unavailable"
-
-
 @dataclass(frozen=True)
 class SourceRecord:
-    """The identity of one contributing source at the snapshot's moment."""
+    """The identity and provenance of one contributing source — and nothing else.
+
+    Health is deliberately not here. A source's health at the captured moment
+    is not one fact — a live adapter can answer one query and fail another
+    inside the same capture — so it lives **per observation**, in each field's
+    absence reason: ``SOURCE_UNAVAILABLE`` means this source was consulted for
+    that field and did not answer; ``NOT_YET_OBSERVED`` means it answered and
+    the quantity has not accumulated. One fact, one representation: a
+    table-level availability flag would be a second representation of the
+    fields' own story, needing a consistency law to patrol the seam — and a
+    row that can disagree with itself is the defect class this contract
+    exists to prevent.
+    """
 
     source_id: str
     kind: SourceKind
     description: str
-    availability: SourceAvailability
     provenance: ManualExportProvenance | None = None
 
     def __post_init__(self) -> None:

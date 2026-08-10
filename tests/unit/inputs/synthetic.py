@@ -30,7 +30,6 @@ from greenmachine.inputs import (
     PlateAppearanceLog,
     RoofStatus,
     SnapshotField,
-    SourceAvailability,
     SourceKind,
     SourceRecord,
     SwingShare,
@@ -51,13 +50,11 @@ SOURCES = (
         source_id=SOURCE_SYNTHETIC,
         kind=SourceKind.SYNTHETIC,
         description="synthetic fixture values - deliberately non-baseball numbers",
-        availability=SourceAvailability.AVAILABLE,
     ),
     SourceRecord(
         source_id=SOURCE_EXPORT,
         kind=SourceKind.MANUAL_EXPORT,
         description="synthetic stand-in for a manual export provenance chain",
-        availability=SourceAvailability.AVAILABLE,
         provenance=ManualExportProvenance(
             source_url="https://example.invalid/synthetic-export",
             export_date=date(2026, 1, 1),
@@ -182,7 +179,7 @@ def make_batter(
                     UsageShare(share=Decimal("0.5"), sample_pitches=4), SOURCE_EXPORT
                 ),
                 barrel_rate=SnapshotField.absent(AbsenceReason.NOT_YET_OBSERVED, SOURCE_EXPORT),
-                exit_velocity=SnapshotField.absent(AbsenceReason.NOT_YET_OBSERVED),
+                exit_velocity=SnapshotField.absent(AbsenceReason.NOT_YET_OBSERVED, SOURCE_EXPORT),
             ),
         )
     if log is None:
