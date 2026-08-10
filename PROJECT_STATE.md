@@ -68,7 +68,20 @@ Current state only. History and reasoning live in `DECISIONS.md`. Rewritten clea
 - **Phase transition (2026-08-04): the feature phase is ACTIVE.** FEATURE_PHASE_PLAN v6
   committed and pinned by §GMF-000R; REBUILD_PLAN advanced to v16 (the §GMR-005 criterion-4
   correction and the version line — two lines, nothing else); decisions D-047..D-057 landed;
-  active ticket **GMF-001**.
+  first active ticket **GMF-001**.
+- **GMF-001: implementation COMPLETE** — APPROVED WITH NOTES for SHA
+  `aa962bab2faadf90d62ab990f614985ac4f29a52` (2026-08-10), merged to `staging` as
+  `06013599435d4ef7c803357f5ae5c5aef5e495fb`. The input contract landed: `InputSnapshot`
+  with three-way absence semantics enforced at construction — positive denominators on
+  every aggregate, all three named windows mandatory with `metrics_for` total, usage
+  share an observed `SnapshotField[UsageShare]`, source health carried per observation
+  (the source table is identity and provenance only, and source-dependent absences name
+  the source they implicate); the thirty-venue park reference with venue type (D-055);
+  the pinned Savant snapshot (`2bbaee9d…`) committed with its full provenance record
+  and joined by test (D-053/D-057). Three rejections and one Lead-held wrapper preceded
+  approval — nine findings, all repaired at the approved head. Record:
+  `tickets/completed/GMF-001.md`. This closeout PR is the ticket's second review object
+  and its verdict lives in the review thread, not in this file.
 
 ## Specialist work
 - **GB-001/GB-002 (Grok): complete.** Twelve locked decisions (D-023), sample floors and rulings
