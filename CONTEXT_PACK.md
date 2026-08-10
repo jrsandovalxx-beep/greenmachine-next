@@ -18,7 +18,7 @@ automated selection. Evidence confidence is displayed alongside, never fused int
 ## Current status
 
 - Active ticket: **GMF-002** (per `tickets/ACTIVE.md` → FEATURE_PHASE_PLAN §GMF-002).
-- Decision count: **57** (D-001..D-057).
+- Decision count: **62** (D-001..D-062).
 - Plan (bootstrap, historical): REBUILD_PLAN v16, sha256 `c41b6abd5fbe64c0e9b468bea0c9a2ddb5f1b646780c017655f0295aa0b82ca2` — the pinned authority for
   GMN-000A … GMR-005; no longer the active ticket source.
 - Plan (active, feature phase): FEATURE_PHASE_PLAN v9, sha256 `83780d850e60c28a6a74fc03951428622ba8b20c9d7612998d378cd21d9c96cd` — the pinned authority for
