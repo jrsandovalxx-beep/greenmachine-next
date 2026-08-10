@@ -13,6 +13,7 @@ legibility are observed at §GMF-002 submission 2 on the deployed page.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -20,11 +21,16 @@ from streamlit.testing.v1 import AppTest
 
 from greenmachine.grid import ABSENCE_TEXT, BATTER_COLUMN, METRIC_COLUMNS
 
+# Absolute, so resolution cannot drift: inside the D-062 bound, streamlit
+# moved `from_file`'s relative-path anchor from the working directory to the
+# calling file — an absolute path is stable under both behaviours.
+_APP_PATH = Path(__file__).resolve().parents[2] / "streamlit_app.py"
+
 _TIMEOUT = 15
 
 
 def _run_app() -> AppTest:
-    at = AppTest.from_file("streamlit_app.py", default_timeout=_TIMEOUT)
+    at = AppTest.from_file(str(_APP_PATH), default_timeout=_TIMEOUT)
     at.run()
     assert not at.exception, [str(e.value) for e in at.exception]
     return at

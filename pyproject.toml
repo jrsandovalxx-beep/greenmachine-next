@@ -91,6 +91,16 @@ strict = true
 warn_unreachable = true
 enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
 
+[[tool.mypy.overrides]]
+# numpy enters the typed surface only through pandas-stubs, and current numpy
+# stubs carry PEP 695 `type` statements that cannot parse under the project's
+# 3.11 typing floor. Nothing in src/ imports numpy, so it is excluded from
+# analysis rather than the typing floor raised or a version pinned against
+# upstream stubs.
+module = "numpy.*"
+follow_imports = "skip"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
