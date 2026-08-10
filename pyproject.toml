@@ -58,13 +58,6 @@ dev = [
     # Type stubs only; pandas ships no py.typed marker, and the grid's typed
     # Styler surface needs them under mypy --strict. Not a runtime dependency.
     "pandas-stubs>=2",
-    # Transitive (pandas), pinned for the type-check toolchain only: numpy 3.x
-    # bundles stubs with PEP 695 `type` statements, which mypy cannot parse
-    # under the project's 3.11 typing floor — and mypy parses dependency stubs
-    # regardless of follow_imports (proven by local probe: an injected PEP 695
-    # line failed the build under a skip override). The pin leaves when the
-    # typing floor reaches 3.12.
-    "numpy>=2.1,<3",
 ]
 
 [tool.setuptools.packages.find]
@@ -92,7 +85,12 @@ select = [
 docstring-code-format = true
 
 [tool.mypy]
-python_version = "3.11"
+# No pinned python_version: each environment type-checks at its own
+# interpreter. The 3.11 floor is enforced where it already lives — the CI
+# matrix's 3.11 leg runs mypy (and the suite) under 3.11 on every push — so
+# a config-level duplicate adds nothing and it broke real builds: under a
+# pinned 3.11 target, mypy cannot parse the PEP 695 `type` statements newer
+# dependency stubs ship for newer interpreters (numpy 2.5+ on the 3.12 leg).
 files = ["src"]
 strict = true
 warn_unreachable = true
