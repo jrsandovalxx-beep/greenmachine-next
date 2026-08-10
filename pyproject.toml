@@ -55,6 +55,9 @@ dev = [
     "pandas>=2.1,<4",
     # Type stubs only; PyYAML ships no inline types. Not a runtime dependency.
     "types-PyYAML>=6,<7",
+    # Type stubs only; pandas ships no py.typed marker, and the grid's typed
+    # Styler surface needs them under mypy --strict. Not a runtime dependency.
+    "pandas-stubs>=2",
 ]
 
 [tool.setuptools.packages.find]
