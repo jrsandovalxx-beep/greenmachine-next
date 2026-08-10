@@ -17,7 +17,7 @@ automated selection. Evidence confidence is displayed alongside, never fused int
 
 ## Current status
 
-- Active ticket: **GMF-001** (per `tickets/ACTIVE.md` → FEATURE_PHASE_PLAN §GMF-001).
+- Active ticket: **GMF-002** (per `tickets/ACTIVE.md` → FEATURE_PHASE_PLAN §GMF-002).
 - Decision count: **57** (D-001..D-057).
 - Plan (bootstrap, historical): REBUILD_PLAN v16, sha256 `c41b6abd5fbe64c0e9b468bea0c9a2ddb5f1b646780c017655f0295aa0b82ca2` — the pinned authority for
   GMN-000A … GMR-005; no longer the active ticket source.
@@ -42,6 +42,11 @@ automated selection. Evidence confidence is displayed alongside, never fused int
   `4e6904184d02177bbf12fa5fc76f08a21f225d77`, merged to `staging`
   (`4efffc0e816e2aac691d1437663ac3bcfe69785b`) — the deselection ledger is at **zero**, no
   transplanted test left disabled. Bootstrap complete.
+- GMF-001 complete: implementation APPROVED WITH NOTES for
+  `aa962bab2faadf90d62ab990f614985ac4f29a52`, merged to `staging`
+  (`06013599435d4ef7c803357f5ae5c5aef5e495fb`) — the input contract (absence is a value,
+  enforced at construction), the thirty-venue park reference, and the pinned Savant
+  snapshot with its provenance chain. Record: `tickets/completed/GMF-001.md`.
 
 ## Read first
 
