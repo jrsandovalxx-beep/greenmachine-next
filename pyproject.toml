@@ -29,11 +29,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# The GM-030 manual-review prototype UI. Optional: nothing in src/ imports
-# streamlit (architecture-enforced); only the repository-root composition
-# root streamlit_app.py does.
+# The dashboard UI (GM-030 shell; GMF-002 grid). Optional: nothing in src/
+# imports streamlit (architecture-enforced); only the repository-root
+# composition root streamlit_app.py does. The grid's pure logic in
+# src/greenmachine/grid/ builds pandas frames and Styler styles (D-059), so
+# pandas is a direct dependency of the UI surface, declared rather than
+# ridden transitively. Streamlit floor 1.37 per D-062 (`on_select`, stable
+# `st.fragment`); the <2 ceiling is the major-version boundary, upgrades
+# landing through staging first.
 ui = [
-    "streamlit>=1.32,<2",
+    "streamlit>=1.37,<2",
+    "pandas>=2.1,<4",
 ]
 dev = [
     # Deterministic property testing for the GM-008 golden/property harness.
@@ -43,9 +49,10 @@ dev = [
     "pre-commit>=3.7",
     "pytest>=8.0",
     "ruff>=0.6,<0.16",
-    # The GM-030 app-smoke tests drive the dashboard through Streamlit's
-    # supported AppTest API, so dev needs the same bounded UI dependency.
-    "streamlit>=1.32,<2",
+    # App tests drive the dashboard through Streamlit's supported AppTest
+    # API, so dev needs the same bounded UI dependencies (D-061/D-062).
+    "streamlit>=1.37,<2",
+    "pandas>=2.1,<4",
     # Type stubs only; PyYAML ships no inline types. Not a runtime dependency.
     "types-PyYAML>=6,<7",
 ]

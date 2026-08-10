@@ -1,14 +1,17 @@
 # GM-030/GM-040 Streamlit Community Cloud runtime requirements.
 # The editable self-install line makes the host install the local project
 # itself (GM-040-HF1), so `importlib.metadata.version("greenmachine")`
-# resolves on the deployed environment exactly as it does locally. The four
+# resolves on the deployed environment exactly as it does locally. The five
 # bounded specifications below are the project's runtime dependencies
-# (pyproject.toml [project].dependencies) plus the UI dependency (the [ui]
-# extra). Development-only tools (pytest, hypothesis, ruff, mypy, pre-commit)
-# are deliberately absent: they install via `pip install -e ".[dev,ui]"` for
+# (pyproject.toml [project].dependencies) plus the UI dependencies (the [ui]
+# extra — streamlit floored at 1.37 per D-062, <2 as the major-version
+# boundary; pandas declared directly for the grid's Styler grading, D-059).
+# Development-only tools (pytest, hypothesis, ruff, mypy, pre-commit) are
+# deliberately absent: they install via `pip install -e ".[dev,ui]"` for
 # local work, never on the host.
 -e .
-streamlit>=1.32,<2
+streamlit>=1.37,<2
+pandas>=2.1,<4
 PyYAML>=6,<7
 pydantic>=2,<3
 tzdata>=2024.1

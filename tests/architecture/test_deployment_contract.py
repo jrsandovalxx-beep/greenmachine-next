@@ -23,7 +23,12 @@ EDITABLE_SELF_INSTALL = "-e ."
 
 APPROVED_REQUIREMENTS = (
     EDITABLE_SELF_INSTALL,
-    "streamlit>=1.32,<2",
+    # GMF-002 / D-062: floor 1.37 (`on_select`, stable `st.fragment`); the <2
+    # ceiling is the major-version boundary, upgrades through staging first.
+    "streamlit>=1.37,<2",
+    # GMF-002 / D-059: the grid's Styler grading makes pandas a direct
+    # dependency of the UI surface, declared rather than ridden transitively.
+    "pandas>=2.1,<4",
     "PyYAML>=6,<7",
     "pydantic>=2,<3",
     "tzdata>=2024.1",
