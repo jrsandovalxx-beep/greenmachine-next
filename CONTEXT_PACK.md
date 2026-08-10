@@ -21,7 +21,7 @@ automated selection. Evidence confidence is displayed alongside, never fused int
 - Decision count: **57** (D-001..D-057).
 - Plan (bootstrap, historical): REBUILD_PLAN v16, sha256 `c41b6abd5fbe64c0e9b468bea0c9a2ddb5f1b646780c017655f0295aa0b82ca2` — the pinned authority for
   GMN-000A … GMR-005; no longer the active ticket source.
-- Plan (active, feature phase): FEATURE_PHASE_PLAN v6, sha256 `0875a5a5bcca57ecd275f3c7deb3f743ec6cdc9a2c8ea4a7945a2d9fe920011b` — the pinned authority for
+- Plan (active, feature phase): FEATURE_PHASE_PLAN v9, sha256 `83780d850e60c28a6a74fc03951428622ba8b20c9d7612998d378cd21d9c96cd` — the pinned authority for
   GMF-001 … GMF-006.
 - GMN-000A complete: APPROVED WITH NOTES for `3d5e4fde3d6065fad1078749c85eb61b96fde9de`.
 - GMR-001 complete: implementation APPROVED for `3fc9f1e04d71cbd4ec464634d5598e16510a496d`,
