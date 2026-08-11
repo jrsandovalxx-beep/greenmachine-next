@@ -8,10 +8,15 @@ visible at render:
   visibly distinct from numeric zero and from each other. A numeric zero
   renders as a number with its sample beside it (D-014), never as an empty
   cell.
-- **Grading is hand-rolled via ``Styler.map`` (D-059)** — a per-column lookup
-  from rendered cell text to an inline CSS string. Present values get a
-  green-is-good scale normalised within their column; each absence state gets
-  its own muted, non-green style. No matplotlib anywhere.
+- **Metric columns are numeric so the component sorts numerically.** The data
+  frame carries raw ``float`` values (absences as missing); the rendered text
+  rides the ``Styler`` as display values — probed: the component receives the
+  raw data and the display values as separate payloads and sorts on the data,
+  so ``950.5`` orders below ``1000.5`` where their display strings would not.
+- **Grading is hand-rolled via ``Styler.map`` (D-059)** — a per-cell inline
+  CSS application. Present values get a green-is-good scale normalised within
+  their column; each absence state gets its own muted, non-green style. No
+  matplotlib anywhere.
 - **The initial row order is neutral and deliberate**: batter name ascending —
   an identity order, not a metric. Every metric ordering is user-initiated in
   the component itself (*sort, don't blend*, D-015/D-017).
@@ -24,7 +29,8 @@ visible at render:
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from functools import partial
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
@@ -146,7 +152,27 @@ def _numeric(
 
 
 def grid_frame(snapshot: InputSnapshot, window: Window) -> pd.DataFrame:
-    """The display frame: one row per batter, identity plus the four metrics."""
+    """The data frame the component sorts on: identity as text, metrics as
+    raw ``float`` columns with absences as missing values. Rendered text is
+    the ``Styler``'s job (`display_texts` / `graded_styler`), never this
+    frame's — a string metric column would sort lexicographically."""
+    rows: list[dict[str, object]] = []
+    for batter in _sorted_batters(snapshot):
+        metrics = batter.metrics_for(window)
+        row: dict[str, object] = {BATTER_COLUMN: batter.name}
+        for column, field in _metric_fields(metrics).items():
+            numeric = _numeric(field)
+            row[column] = float(numeric) if numeric is not None else None
+        rows.append(row)
+    frame = pd.DataFrame(rows, columns=[BATTER_COLUMN, *METRIC_COLUMNS])
+    return frame.astype(dict.fromkeys(METRIC_COLUMNS, "float64"))
+
+
+def display_texts(snapshot: InputSnapshot, window: Window) -> pd.DataFrame:
+    """Every cell's rendered text: value with its sample beside it (D-014),
+    or the absence text — never blank, never a bare number without its
+    sample. These ride the ``Styler`` as display values over `grid_frame`'s
+    numeric data."""
     rows = []
     for batter in _sorted_batters(snapshot):
         metrics = batter.metrics_for(window)
@@ -169,6 +195,11 @@ def state_frame(snapshot: InputSnapshot, window: Window) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=[BATTER_COLUMN, *METRIC_COLUMNS])
 
 
+def _fixed_text(text: str, _value: object) -> str:
+    """A constant per-cell formatter: the display text, whatever the value."""
+    return text
+
+
 def _green(intensity: float) -> str:
     """Hand-rolled green-is-good scale: 0.0 = palest, 1.0 = strongest."""
     clamped = min(max(intensity, 0.0), 1.0)
@@ -178,46 +209,54 @@ def _green(intensity: float) -> str:
     return f"color: #0a3622; background-color: rgb({red}, {green}, {blue})"
 
 
-def style_lookup(snapshot: InputSnapshot, window: Window) -> dict[str, dict[str, str]]:
-    """Per-column map from rendered cell text to its inline CSS.
+def style_frame(snapshot: InputSnapshot, window: Window) -> pd.DataFrame:
+    """Per-cell inline CSS, positionally aligned with `grid_frame`.
 
-    Present values are graded on a column-normalised green scale — a lone
-    present value grades mid-scale rather than dividing by zero spread. Each
-    absence state maps to its own fixed, non-green style. Identity cells carry
-    no style. Two batters with identical cell text share a grade by
-    construction: same text means same value and same sample.
+    Present values grade on a column-normalised green scale — a lone present
+    value grades mid-scale rather than dividing by zero spread. Each absence
+    state carries its own fixed, non-green style, applied by position: a
+    numeric frame cannot key styles by cell text, because every absence is
+    the same missing value. Identity cells carry no style.
     """
     batters = _sorted_batters(snapshot)
-    lookup: dict[str, dict[str, str]] = {BATTER_COLUMN: {}}
+    rows: list[dict[str, str]] = [{BATTER_COLUMN: ""} for _ in batters]
     for column in METRIC_COLUMNS:
         fields = [_metric_fields(b.metrics_for(window))[column] for b in batters]
         numerics = [_numeric(field) for field in fields]
         present = [float(n) for n in numerics if n is not None]
         low, high = (min(present), max(present)) if present else (0.0, 0.0)
         spread = high - low
-        column_map: dict[str, str] = {}
-        for field, numeric in zip(fields, numerics, strict=True):
-            text = _display_text(field)
+        for row, field, numeric in zip(rows, fields, numerics, strict=True):
             if numeric is None:
-                assert field.absence is not None
-                column_map[text] = _ABSENCE_CSS[field.absence]
+                assert field.absence is not None  # the contract's exactly-one law
+                row[column] = _ABSENCE_CSS[field.absence]
             elif spread == 0.0:
-                column_map[text] = _green(0.5)
+                row[column] = _green(0.5)
             else:
-                column_map[text] = _green((float(numeric) - low) / spread)
-        lookup[column] = column_map
-    return lookup
+                row[column] = _green((float(numeric) - low) / spread)
+    return pd.DataFrame(rows, columns=[BATTER_COLUMN, *METRIC_COLUMNS])
 
 
-def graded_styler(display: pd.DataFrame, lookup: dict[str, dict[str, str]]) -> Styler:
-    """The ``Styler.map`` application (D-059): one lookup per column, no matplotlib."""
-    styler = display.style
-    for column in display.columns:
-        column_map = lookup.get(str(column), {})
-        styler = styler.map(
-            lambda text, m=column_map: m.get(str(text), ""),
-            subset=[column],
-        )
+def graded_styler(numeric: pd.DataFrame, texts: pd.DataFrame, styles: pd.DataFrame) -> Styler:
+    """The ``Styler`` over the numeric frame: per-cell display text via
+    ``format`` (an absent cell's text is its reason, applied as that cell's
+    ``na_rep``) and per-cell CSS via ``Styler.map`` (D-059). Per-cell subsets
+    keep text and style exact even when two cells share a value with
+    different samples."""
+    styler = numeric.style
+    for row in range(len(numeric)):
+        for column in METRIC_COLUMNS:
+            # The runtime accepts a (rows, columns) subset tuple; the stubs
+            # model a narrower union, so the slice is typed Any deliberately.
+            cell: Any = pd.IndexSlice[[row], [column]]
+            text = str(texts.at[row, column])
+            if pd.isna(numeric.at[row, column]):
+                styler = styler.format(na_rep=text, subset=cell)
+            else:
+                styler = styler.format(partial(_fixed_text, text), subset=cell)
+            css = str(styles.at[row, column])
+            if css:
+                styler = styler.map(lambda _v, c=css: c, subset=cell)
     return styler
 
 

@@ -12,9 +12,15 @@ its whole vocabulary (the absence-versus-zero criterion has teeth):
 - **Batter Delta** — every metric absent ``SOURCE_UNAVAILABLE``.
 - **Batter Echo** — every metric absent ``NOT_APPLICABLE``.
 
+The exit-velocity column carries the **sort-divergence pair** (reviewer's
+requirement): Alpha's ``1000.5`` against Bravo's ``950.5`` straddles a
+digit-count boundary, so textual order ("1000.5…" before "950.5…") and
+numeric order disagree — a lexicographic sort cannot pass by accident. The
+fixture's job is to make defects visible.
+
 Every value is a deliberately non-baseball validation artifact (OQ-4): shares
-at extremes, a 1.5 mph "exit velocity", single-digit samples. The snapshot is
-data for a screen, not a claim about baseball.
+at extremes, four-digit "exit velocities", single-digit samples. The snapshot
+is data for a screen, not a claim about baseball.
 """
 
 from __future__ import annotations
@@ -52,7 +58,7 @@ _SOURCES = (
 # Alpha's per-window spread: the same four metrics, different magnitudes, so a
 # window switch is visible in every cell.
 _ALPHA_RATES = {
-    Window.RECENT_7D: (Decimal("0.900"), Decimal("1.5"), Decimal("0.850"), Decimal("0.100")),
+    Window.RECENT_7D: (Decimal("0.900"), Decimal("1000.5"), Decimal("0.850"), Decimal("0.100")),
     Window.RECENT_14D: (Decimal("0.500"), Decimal("3.5"), Decimal("0.450"), Decimal("0.550")),
     Window.SEASON_TO_DATE: (Decimal("0.050"), Decimal("9.5"), Decimal("0.010"), Decimal("0.990")),
 }
@@ -83,7 +89,7 @@ def _zero_metrics(window: Window) -> WindowedBatterMetrics:
             BattedBallRate(rate=Decimal("0"), batted_ball_events=6), SOURCE_ID
         ),
         exit_velocity=SnapshotField.present(
-            ExitVelocityAverage(miles_per_hour=Decimal("2.5"), batted_ball_events=6), SOURCE_ID
+            ExitVelocityAverage(miles_per_hour=Decimal("950.5"), batted_ball_events=6), SOURCE_ID
         ),
         ideal_attack_angle_share=SnapshotField.present(
             SwingShare(share=Decimal("0"), tracked_swings=7), SOURCE_ID

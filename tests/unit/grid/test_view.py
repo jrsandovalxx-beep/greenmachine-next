@@ -1,9 +1,10 @@
 """GMF-002 direct tests: the grid's view logic as ordinary code (D-061).
 
-These tests prove the pure half of the boundary — frames, absence rendering,
-grading, visibility, density — with no Streamlit in sight. The AppTest half
-(`tests/app/test_grid_page.py`) proves what the composition root hands the
-element; nothing anywhere claims to synthesize a click.
+These tests prove the pure half of the boundary — the numeric data frame,
+display texts, absence rendering, grading, visibility, density — with no
+Streamlit in sight. The AppTest half (`tests/app/test_grid_page.py`) proves
+what the composition root hands the element; nothing anywhere claims to
+synthesize a click.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from greenmachine.fixtures import grid_demo_snapshot
@@ -20,12 +22,13 @@ from greenmachine.grid import (
     BATTER_COLUMN,
     DENSITY_ROWS,
     METRIC_COLUMNS,
+    display_texts,
     frame_height,
     graded_styler,
     grid_frame,
     row_batter_ids,
     state_frame,
-    style_lookup,
+    style_frame,
     visible_columns,
 )
 from greenmachine.inputs import AbsenceReason, Window
@@ -60,76 +63,105 @@ def test_the_pure_side_of_the_boundary_imports_no_streamlit(module: Path) -> Non
 
 
 # ---------------------------------------------------------------------------
-# The display frame: neutral order, no blanks, absence texts with teeth
+# The data frame: numeric metrics (the sort substrate), neutral order
 # ---------------------------------------------------------------------------
+
+
+def test_metric_columns_are_numeric_so_the_component_sorts_numerically() -> None:
+    """Finding-2 repair at its root: the component sorts on the data payload,
+    so the data payload must be numeric. A regression to string metric
+    columns fails here before it can sort lexicographically anywhere."""
+    data = grid_frame(SNAPSHOT, Window.RECENT_7D)
+    for column in METRIC_COLUMNS:
+        assert pd.api.types.is_float_dtype(data[column]), f"{column} is not numeric"
+
+
+def test_the_sort_divergence_pair_orders_numerically_not_textually() -> None:
+    """The reviewer's divergence case: textual and numeric order disagree on
+    the exit-velocity column (1000.5 vs 950.5 straddles a digit-count
+    boundary), so a lexicographic implementation cannot pass by accident."""
+    data = grid_frame(SNAPSHOT, Window.RECENT_7D)
+    ev = data["Exit velocity"].dropna()
+    numeric_order = list(ev.sort_values().index)
+    textual_order = list(ev.astype(str).sort_values().index)
+    assert numeric_order != textual_order, "the fixture no longer exposes the divergence"
+    texts = display_texts(SNAPSHOT, Window.RECENT_7D)
+    shown = [texts.loc[i, "Exit velocity"] for i in numeric_order]
+    assert shown == ["950.5 mph · BBE 6", "1000.5 mph · BBE 4"]
 
 
 def test_initial_row_order_is_neutral_identity_order() -> None:
     """Sort, don't blend: the first render orders by batter name, never a
     metric. Every metric ordering is user-initiated in the component."""
-    display = grid_frame(SNAPSHOT, Window.RECENT_7D)
-    names = list(display[BATTER_COLUMN])
+    data = grid_frame(SNAPSHOT, Window.RECENT_7D)
+    names = list(data[BATTER_COLUMN])
     assert names == sorted(names)
     assert names[0] == "Batter Alpha"
 
 
-def test_no_cell_is_ever_blank() -> None:
+def test_absences_are_missing_in_data_and_named_in_text() -> None:
+    """One absence fact, two payloads: missing in the numeric data (so it
+    sorts as absent, never as zero) and a named reason in the display text."""
+    data = grid_frame(SNAPSHOT, Window.RECENT_7D).set_index(BATTER_COLUMN)
+    texts = display_texts(SNAPSHOT, Window.RECENT_7D).set_index(BATTER_COLUMN)
+    for name, reason in [
+        ("Batter Charlie", AbsenceReason.NOT_YET_OBSERVED),
+        ("Batter Delta", AbsenceReason.SOURCE_UNAVAILABLE),
+        ("Batter Echo", AbsenceReason.NOT_APPLICABLE),
+    ]:
+        for column in METRIC_COLUMNS:
+            assert pd.isna(data.loc[name, column])
+            assert texts.loc[name, column] == ABSENCE_TEXT[reason]
+
+
+def test_a_true_zero_is_numeric_zero_with_its_sample_in_the_text() -> None:
+    """Batter Bravo: 0.0 in the data — a value that sorts as a value — and
+    `0 · BBE 6` in the display (D-014), never a blank, never absence text."""
+    data = grid_frame(SNAPSHOT, Window.RECENT_7D).set_index(BATTER_COLUMN)
+    texts = display_texts(SNAPSHOT, Window.RECENT_7D).set_index(BATTER_COLUMN)
+    assert data.loc["Batter Bravo", "Barrel rate"] == 0.0
+    assert texts.loc["Batter Bravo", "Barrel rate"] == "0 · BBE 6"
+    assert texts.loc["Batter Bravo", "Ideal attack angle"] == "0 · swings 7"
+
+
+def test_no_display_text_is_ever_blank() -> None:
     for window in Window:
-        display = grid_frame(SNAPSHOT, window)
-        for column in display.columns:
-            for cell in display[column]:
+        texts = display_texts(SNAPSHOT, window)
+        for column in texts.columns:
+            for cell in texts[column]:
                 assert isinstance(cell, str) and cell.strip(), (
                     f"blank cell in {column!r} at window {window.value}"
                 )
 
 
 def test_absence_texts_are_distinct_from_each_other_and_from_every_value() -> None:
-    """The criterion with teeth: three absence texts, mutually distinct, and
-    no present rendering — the true zero included — collides with any."""
     absence_texts = set(ABSENCE_TEXT.values())
     assert len(absence_texts) == 3
-    display = grid_frame(SNAPSHOT, Window.RECENT_7D)
+    texts = display_texts(SNAPSHOT, Window.RECENT_7D)
     states = state_frame(SNAPSHOT, Window.RECENT_7D)
     for column in METRIC_COLUMNS:
-        for cell, state in zip(display[column], states[column], strict=True):
+        for cell, state in zip(texts[column], states[column], strict=True):
             if state == "value":
                 assert cell not in absence_texts
             else:
                 assert cell in absence_texts
 
 
-def test_a_true_zero_renders_as_a_number_with_its_sample_beside_it() -> None:
-    """Batter Bravo's zero barrel rate over six BBE: a present observation —
-    a number and its denominator (D-014), never a blank, never absence text."""
-    display = grid_frame(SNAPSHOT, Window.RECENT_7D)
-    bravo = display[display[BATTER_COLUMN] == "Batter Bravo"].iloc[0]
-    assert bravo["Barrel rate"] == "0 · BBE 6"
-    assert bravo["Ideal attack angle"] == "0 · swings 7"
-
-
-def test_every_absence_state_appears_in_the_demo_frame_distinctly() -> None:
-    display = grid_frame(SNAPSHOT, Window.RECENT_7D)
-    by_name = display.set_index(BATTER_COLUMN)
-    assert by_name.loc["Batter Charlie", "Barrel rate"] == "not yet observed"
-    assert by_name.loc["Batter Delta", "Barrel rate"] == "source unavailable"
-    assert by_name.loc["Batter Echo", "Barrel rate"] == "not applicable"
-
-
 def test_switching_windows_changes_present_data() -> None:
     seven = grid_frame(SNAPSHOT, Window.RECENT_7D).set_index(BATTER_COLUMN)
     fourteen = grid_frame(SNAPSHOT, Window.RECENT_14D).set_index(BATTER_COLUMN)
-    assert seven.loc["Batter Alpha", "Barrel rate"] == "0.900 · BBE 4"
-    assert fourteen.loc["Batter Alpha", "Barrel rate"] == "0.500 · BBE 4"
+    assert seven.loc["Batter Alpha", "Barrel rate"] == 0.9
+    assert fourteen.loc["Batter Alpha", "Barrel rate"] == 0.5
 
 
 def test_state_frame_mirrors_the_contract_display_states() -> None:
     """The state frame's identity column carries the token ``identity`` by
-    design, so rows are addressed through the display frame's names — the two
+    design, so rows are addressed through the data frame's names — the two
     frames share row order by construction."""
-    display = grid_frame(SNAPSHOT, Window.RECENT_7D)
+    data = grid_frame(SNAPSHOT, Window.RECENT_7D)
     states = state_frame(SNAPSHOT, Window.RECENT_7D)
     assert set(states[BATTER_COLUMN]) == {"identity"}
-    states = states.set_axis(display[BATTER_COLUMN], axis=0)
+    states = states.set_axis(data[BATTER_COLUMN], axis=0)
     assert set(states.loc["Batter Alpha", list(METRIC_COLUMNS)]) == {"value"}
     assert set(states.loc["Batter Charlie", list(METRIC_COLUMNS)]) == {"not_yet_observed"}
     assert set(states.loc["Batter Delta", list(METRIC_COLUMNS)]) == {"source_unavailable"}
@@ -137,42 +169,62 @@ def test_state_frame_mirrors_the_contract_display_states() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Grading: hand-rolled, green-is-good, absences never green
+# Grading: hand-rolled, green-is-good, absences never green, by position
 # ---------------------------------------------------------------------------
 
 
 def test_absence_styles_are_mutually_distinct_and_never_green() -> None:
-    lookup = style_lookup(SNAPSHOT, Window.RECENT_7D)
-    column_map = lookup["Barrel rate"]
-    styles = {reason: column_map[text] for reason, text in ABSENCE_TEXT.items()}
-    assert len(set(styles.values())) == 3
-    for style in styles.values():
+    styles = style_frame(SNAPSHOT, Window.RECENT_7D).set_axis(
+        grid_frame(SNAPSHOT, Window.RECENT_7D)[BATTER_COLUMN], axis=0
+    )
+    per_reason = {
+        "Batter Echo": styles.loc["Batter Echo", "Barrel rate"],
+        "Batter Charlie": styles.loc["Batter Charlie", "Barrel rate"],
+        "Batter Delta": styles.loc["Batter Delta", "Barrel rate"],
+    }
+    assert len(set(per_reason.values())) == 3
+    for style in per_reason.values():
         assert "rgb(" not in style  # the green scale is rgb(); absences never use it
 
 
 def test_present_values_grade_within_their_column() -> None:
-    """Alpha's 0.900 outgrades Bravo's zero; both carry the green scale; the
+    """Alpha's 0.9 outgrades Bravo's zero; both carry the green scale; the
     zero still gets a style — pale is not blank."""
-    lookup = style_lookup(SNAPSHOT, Window.RECENT_7D)
-    column_map = lookup["Barrel rate"]
-    strong = column_map["0.900 · BBE 4"]
-    pale = column_map["0 · BBE 6"]
+    styles = style_frame(SNAPSHOT, Window.RECENT_7D).set_axis(
+        grid_frame(SNAPSHOT, Window.RECENT_7D)[BATTER_COLUMN], axis=0
+    )
+    strong = styles.loc["Batter Alpha", "Barrel rate"]
+    pale = styles.loc["Batter Bravo", "Barrel rate"]
     assert strong != pale
     assert strong.startswith("color: #0a3622") and pale.startswith("color: #0a3622")
     assert "rgb(111, 183, 121)" in strong  # full intensity at the column max
     assert "rgb(233, 247, 233)" in pale  # palest green at the column min
 
 
-def test_the_styler_applies_the_lookup_via_map() -> None:
-    """D-059's named mechanism, exercised end to end: the rendered HTML
-    carries the absence styles and the graded greens — no matplotlib."""
-    display = grid_frame(SNAPSHOT, Window.RECENT_7D)
-    styler = graded_styler(display, style_lookup(SNAPSHOT, Window.RECENT_7D))
+def test_the_styler_carries_display_texts_and_styles_via_map() -> None:
+    """D-059's named mechanism over the numeric frame: the rendered HTML
+    carries every display text (values with samples, all three absence
+    texts) and the graded and absence styles — no matplotlib."""
+    data = grid_frame(SNAPSHOT, Window.RECENT_7D)
+    styler = graded_styler(
+        data,
+        display_texts(SNAPSHOT, Window.RECENT_7D),
+        style_frame(SNAPSHOT, Window.RECENT_7D),
+    )
     html = styler.to_html()
-    assert "background-color: #fff3cd" in html  # not yet observed
-    assert "background-color: #f8d7da" in html  # source unavailable
-    assert "background-color: #e9ecef" in html  # not applicable
-    assert "rgb(111, 183, 121)" in html  # the strongest green in the frame
+    for needle in (
+        "0 · BBE 6",
+        "1000.5 mph · BBE 4",
+        "950.5 mph · BBE 6",
+        "not applicable",
+        "not yet observed",
+        "source unavailable",
+        "background-color: #fff3cd",
+        "background-color: #f8d7da",
+        "background-color: #e9ecef",
+        "rgb(111, 183, 121)",
+    ):
+        assert needle in html, needle
 
 
 def test_matplotlib_is_not_installed_with_the_project() -> None:

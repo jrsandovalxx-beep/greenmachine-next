@@ -29,12 +29,13 @@ from greenmachine.grid import (
     DENSITY_ROWS,
     METRIC_COLUMNS,
     detail_handle,
+    display_texts,
     frame_height,
     graded_styler,
     grid_frame,
     row_batter_ids,
     selected_batter_id,
-    style_lookup,
+    style_frame,
     visible_columns,
 )
 from greenmachine.inputs import Window
@@ -163,12 +164,12 @@ def render_grid() -> None:
         key="grid_density",
         help="Rows in view before the grid scrolls (the 1.37-floor control).",
     )
-    display = grid_frame(snapshot, window)
-    styler = graded_styler(display, style_lookup(snapshot, window))
+    data = grid_frame(snapshot, window)
+    styler = graded_styler(data, display_texts(snapshot, window), style_frame(snapshot, window))
     event = st.dataframe(
         styler,
         column_order=visible_columns(tuple(chosen)),
-        height=frame_height(density, len(display)),
+        height=frame_height(density, len(data)),
         hide_index=True,
         on_select="rerun",
         selection_mode="single-row",
