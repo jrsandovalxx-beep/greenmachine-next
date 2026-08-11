@@ -61,6 +61,36 @@ def _element(at: AppTest) -> Any:
     return at.dataframe[0]
 
 
+def _arrow_surface(proto: Any) -> Any:
+    """The one schema-tolerant accessor: the message carrying the Arrow
+    payloads (`data`, `styler`), resolved across both proto schemas.
+
+    The Dataframe proto forked **inside the D-062 bound** — the third
+    inside-the-bound float move this ticket has caught (after
+    `AppTest.from_file`'s path anchor and the height field itself): at the
+    1.37 floor the element proto *is* the Arrow message (`data`, `styler`,
+    `height`, … sit directly on it); the float nests them under an
+    `arrow_data` message and drops `height` entirely. Every element
+    assertion resolves its surface here, so the committed suite executes at
+    the floor D-061 anchors to *and* on the float CI resolves — whoever
+    meets the fourth fork, extend this accessor, not the call sites.
+    """
+    field_names = {f.name for f in proto.DESCRIPTOR.fields}
+    if "arrow_data" in field_names:
+        return proto.arrow_data
+    assert "styler" in field_names, "unrecognised Dataframe proto schema"
+    return proto
+
+
+def _height_surface(proto: Any) -> Any | None:
+    """Where the widget height is observable, if anywhere: the proto itself
+    at the 1.37 floor; nowhere on the float (the reported gap)."""
+    for candidate in (proto, _arrow_surface(proto)):
+        if "height" in {f.name for f in candidate.DESCRIPTOR.fields}:
+            return candidate
+    return None
+
+
 def _element_data(at: AppTest) -> pd.DataFrame:
     """The raw data payload the component sorts on."""
     value: Any = _element(at).value
@@ -71,8 +101,7 @@ def _element_data(at: AppTest) -> pd.DataFrame:
 
 def _styler_payload(at: AppTest) -> tuple[str, pd.DataFrame]:
     """The element's Styler as serialized: (styles CSS, display-value frame)."""
-    proto = _element(at).proto
-    styler = proto.arrow_data.styler
+    styler = _arrow_surface(_element(at).proto).styler
     display = pa.ipc.open_stream(io.BytesIO(styler.display_values)).read_all().to_pandas()
     return styler.styles, display
 
@@ -135,9 +164,7 @@ def test_the_element_height_follows_the_density_control_where_observable() -> No
     installed version's does not. The skip is loud by design: the gap is a
     reported plan question, never a silent substitution."""
     at = _run_app()
-    proto = _element(at).proto
-    field_names = {f.name for f in proto.DESCRIPTOR.fields}
-    if "height" not in field_names:
+    if _height_surface(_element(at).proto) is None:
         pytest.skip(
             "this streamlit's Dataframe proto exposes no height field (probed: "
             "present at the 1.37 floor, absent here) — the density-height "
@@ -146,7 +173,9 @@ def test_the_element_height_follows_the_density_control_where_observable() -> No
         )
     at.radio(key="grid_density").set_value("Compact").run()
     assert not at.exception
-    assert _element(at).proto.height == frame_height("Compact", len(_element_data(at)))
+    surface = _height_surface(_element(at).proto)
+    assert surface is not None
+    assert surface.height == frame_height("Compact", len(_element_data(at)))
 
 
 def test_the_window_control_swaps_the_element_data_and_display() -> None:
