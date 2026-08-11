@@ -1566,3 +1566,34 @@ Owner, and §GMF-006 must prove no code path fetches from an MLB host — and **
 remains excluded** (D-051). Reversible: withdrawal means removing the committed snapshot and
 MLB-derived surfaces from the deployment, which the manual-export path and the adapter seam
 keep recoverable.
+
+## D-058 - No inline master-detail; selection-driven detail panel
+**No inline master-detail; selection-driven detail panel.** Inline expansion forces AG Grid
+Enterprise licensing, an untestable iframe grid, and version-coupling risk. Row selection
+(`on_select`) drives a detail surface instead.
+
+## D-059 - No `matplotlib` dependency
+**No `matplotlib` dependency.** Cell grading is hand-rolled via `Styler.map`; revisit only if
+hand-rolled grading proves inadequate, as a new decision.
+
+## D-060 - Theming via `.streamlit/config.toml` only
+**Theming via `.streamlit/config.toml` only.** Never style against `st-emotion-cache-*` classes or
+`data-testid` attributes — not public API, breaks silently on upgrade. Cell colour comes from
+`Styler` inline styles.
+
+## D-061 - The core table stays testable: native `st.dataframe`, with the testing boundary stated at the version floor
+**The core table stays testable: native `st.dataframe`, with the testing boundary stated at the
+version floor.** An untestable core UI surface is not acceptable — and neither is a claimed test
+capability the floor version does not provide. At Streamlit 1.37, `AppTest` exposes the dataframe
+as an element and **cannot synthesize row selection** (selection state is not programmatically
+settable). The boundary, falsifiable at 1.37: **AppTest proves the element's handed-off data and
+configuration** — column set, order and visibility, density configuration, graded values, and
+every absence state's rendering as data; **the selection-consumption path** (the code receiving a
+selection and producing detail state) **is proven by direct tests as ordinary code**; **the
+click-to-detail interaction and visual legibility are observed at §GMF-002 submission 2** on the
+deployed page. No AppTest capability is claimed beyond the floor's.
+
+## D-062 - Streamlit is version-bounded; upgrades land through `staging` first
+**Streamlit is version-bounded; upgrades land through `staging` first.** Floor **>= 1.37**
+(`on_select` arrived 1.35; `st.fragment` stable in 1.37), with a defended upper bound against
+third-party breakage.

@@ -1,9 +1,18 @@
-"""GreenMachine deployment shell — name, environment, version, commit.
+"""GreenMachine composition root — deployment shell plus the batter grid.
 
-GMR-004 submission 1 (REBUILD_PLAN §GMR-004): a minimal Streamlit page that
-renders exactly four fields and no product screens. GreenMachine tallies
-criteria met and thresholds passed (D-015/D-017); this shell displays none of
-that — it exists so the staging deployment can be verified end to end.
+Through GMR-004 this page was a shell with no product screens; GMF-002 adds
+the first visible product surface (FEATURE_PHASE_PLAN §GMF-002): a batter
+grid rendering an ``InputSnapshot`` fixture. The page still renders the
+shell's deployment fields — environment, version, commit — because the
+staging deployment is verified end to end through them.
+
+Every widget lives here and only here: ``src/`` imports no streamlit
+(architecture-enforced), and the grid's logic — frames, grading, selection
+consumption — is ordinary importable code under ``greenmachine.grid``,
+proven by direct tests within D-061's stated boundary. The page renders a
+snapshot; it never fetches (§7). No automated ranking or selection
+(D-015/D-017): the initial order is neutral identity order, and every metric
+ordering, column choice and density change is user-initiated.
 """
 
 from __future__ import annotations
@@ -15,12 +24,28 @@ from pathlib import Path
 
 import streamlit as st
 
+from greenmachine.fixtures import grid_demo_snapshot
+from greenmachine.grid import (
+    DENSITY_ROWS,
+    METRIC_COLUMNS,
+    detail_handle,
+    display_texts,
+    frame_height,
+    graded_styler,
+    grid_frame,
+    row_batter_ids,
+    selected_batter_id,
+    style_frame,
+    visible_columns,
+)
+from greenmachine.inputs import Window
+
 REPO_ROOT = Path(__file__).resolve().parent
 
-# The canonical non-production configuration directory (GM-041.5). The shell
-# loads no configuration and renders no product screen; this constant exists
-# because the config-location contract pins every repository-root consumer to
-# the canonical path — never to a copy under the test tree.
+# The canonical non-production configuration directory (GM-041.5). The page
+# loads no configuration; this constant exists because the config-location
+# contract pins every repository-root consumer to the canonical path — never
+# to a copy under the test tree.
 NONPRODUCTION_CONFIG_DIR = REPO_ROOT / "config" / "nonproduction"
 
 
@@ -28,7 +53,7 @@ def _secret(key: str) -> str:
     """Read one value from Streamlit secrets, tolerating their absence.
 
     Local runs have no secrets source, and Streamlit raises on any secrets
-    access when none exists; a missing secret must never crash the shell.
+    access when none exists; a missing secret must never crash the page.
     """
     try:
         return str(st.secrets.get(key, "")).strip()
@@ -56,7 +81,7 @@ def resolve_environment() -> str:
     """The configured environment label, with an explicit ``local`` fallback.
 
     ``staging`` and ``production`` are configuration values (``GM_ENVIRONMENT``);
-    when nothing is configured the shell says ``local`` rather than guessing.
+    when nothing is configured the page says ``local`` rather than guessing.
     """
     return os.environ.get("GM_ENVIRONMENT", "").strip() or "local"
 
@@ -98,14 +123,82 @@ def resolve_commit() -> str:
     return "unknown"
 
 
-def main() -> None:
-    st.set_page_config(page_title="GreenMachine", layout="centered")
-    bridge_secrets_into_environment()
-    st.title("GreenMachine")
-    st.caption("Deployment shell (REBUILD_PLAN §GMR-004) — no product screens.")
+def render_shell_fields() -> None:
+    """The GMR-004 deployment-verification fields, unchanged in substance."""
     st.markdown(f"**Environment:** {resolve_environment()}")
     st.markdown(f"**Version:** {resolve_version()}")
     st.markdown(f"**Commit:** {resolve_commit()}")
+
+
+def render_grid() -> None:
+    """The batter grid — the §GMF-002 product surface, fixtures only."""
+    snapshot = grid_demo_snapshot()
+    st.subheader("Batter grid")
+    st.caption(
+        "Synthetic fixture data (OQ-4): deliberately non-baseball values. "
+        "Initial order is neutral — batter name — and every metric ordering "
+        "is yours to apply in the column headers. A value always shows its "
+        "sample beside it; an absent value names its reason and is never a "
+        "blank or a zero."
+    )
+    window_value = st.selectbox(
+        "Window",
+        options=[window.value for window in Window],
+        index=0,
+        key="grid_window",
+        help="Named windows per D-025 — the screen does no date arithmetic.",
+    )
+    window = Window(window_value)
+    chosen = st.multiselect(
+        "Columns",
+        options=list(METRIC_COLUMNS),
+        default=list(METRIC_COLUMNS),
+        key="grid_columns",
+        help="The batter column always shows, so a selection stays readable.",
+    )
+    density = st.radio(
+        "Density",
+        options=list(DENSITY_ROWS),
+        index=1,
+        horizontal=True,
+        key="grid_density",
+        help="Rows in view before the grid scrolls (the 1.37-floor control).",
+    )
+    data = grid_frame(snapshot, window)
+    styler = graded_styler(data, display_texts(snapshot, window), style_frame(snapshot, window))
+    event = st.dataframe(
+        styler,
+        column_order=visible_columns(tuple(chosen)),
+        height=frame_height(density, len(data)),
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key="grid",
+    )
+    ids = row_batter_ids(snapshot)
+    selected = selected_batter_id(tuple(event.selection.rows), ids)
+    if selected is None:
+        st.caption("Select a row to open its detail surface (content arrives with GMF-003).")
+    else:
+        handle = detail_handle(snapshot, selected)
+        st.markdown(f"**Selected:** {handle.name}")
+        st.caption(
+            "Selection-driven detail (D-058): the mechanism lands here; the "
+            "panel's content is GMF-003's scope."
+        )
+
+
+def main() -> None:
+    st.set_page_config(page_title="GreenMachine", layout="wide")
+    bridge_secrets_into_environment()
+    st.title("GreenMachine")
+    st.caption(
+        "First product surface (FEATURE_PHASE_PLAN §GMF-002) — synthetic "
+        "fixtures only; criteria tallies, never predictions (D-015/D-017)."
+    )
+    render_shell_fields()
+    st.divider()
+    render_grid()
 
 
 if __name__ == "__main__":
