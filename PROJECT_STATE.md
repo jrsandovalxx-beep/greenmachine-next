@@ -82,6 +82,23 @@ Current state only. History and reasoning live in `DECISIONS.md`. Rewritten clea
   approval — nine findings, all repaired at the approved head. Record:
   `tickets/completed/GMF-001.md`. This closeout PR is the ticket's second review object
   and its verdict lives in the review thread, not in this file.
+- **GMF-002: implementation and deployed verification COMPLETE** — submission 1 APPROVED
+  WITH NOTES for SHA `ef28d3219d773a487f633dd72a1982ea161a7972` (2026-08-11), merged to
+  `staging` as `31f3cd53f6d2872b8b7619f5a3b13df5cb4240e6`; submission 2 (deployed
+  verification) APPROVED WITH NOTES at head of record `31f3cd53…`, an observation object
+  that merged nothing (§4d). **The grid is the first visible product surface**, live at
+  https://greenmachine.streamlit.app/ and observed rendering there: five synthetic
+  batters, user-controlled sorting/columns/density, numeric metric ordering, and the
+  D-058 selection-driven detail mechanism driven by a real click. D-058..D-062 landed in
+  the same commit as the pack-count move 57 → 62. **Recorded non-blocking product
+  defect:** absent metric cells render on the deployed canvas as `None` rather than their
+  three committed reasons, which survive visually only as distinct backgrounds; the
+  reviewer ruled it a semantic/accessibility defect that does not falsify the GMF-002
+  criterion, and authorized GMF-003's existing selection-driven detail *content* as the
+  remedy vehicle — **changing the GMF-002 grid-cell representation itself is not
+  authorized without plan-level authorization**. Record: `tickets/completed/GMF-002.md`,
+  which carries both verdicts verbatim. This closeout PR is the ticket's third review
+  object and its verdict lives in the review thread, not in this file.
 
 ## Specialist work
 - **GB-001/GB-002 (Grok): complete.** Twelve locked decisions (D-023), sample floors and rulings
