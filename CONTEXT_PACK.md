@@ -17,7 +17,7 @@ automated selection. Evidence confidence is displayed alongside, never fused int
 
 ## Current status
 
-- Active ticket: **GMF-002** (per `tickets/ACTIVE.md` → FEATURE_PHASE_PLAN §GMF-002).
+- Active ticket: **GMF-003** (per `tickets/ACTIVE.md` → FEATURE_PHASE_PLAN §GMF-003).
 - Decision count: **62** (D-001..D-062).
 - Plan (bootstrap, historical): REBUILD_PLAN v16, sha256 `c41b6abd5fbe64c0e9b468bea0c9a2ddb5f1b646780c017655f0295aa0b82ca2` — the pinned authority for
   GMN-000A … GMR-005; no longer the active ticket source.
@@ -47,6 +47,14 @@ automated selection. Evidence confidence is displayed alongside, never fused int
   (`06013599435d4ef7c803357f5ae5c5aef5e495fb`) — the input contract (absence is a value,
   enforced at construction), the thirty-venue park reference, and the pinned Savant
   snapshot with its provenance chain. Record: `tickets/completed/GMF-001.md`.
+- GMF-002 complete: submission 1 APPROVED WITH NOTES for
+  `ef28d3219d773a487f633dd72a1982ea161a7972`, merged to `staging`
+  (`31f3cd53f6d2872b8b7619f5a3b13df5cb4240e6`); submission 2 (deployed verification)
+  APPROVED WITH NOTES at that same head of record, merging nothing. The batter grid is
+  the first visible product surface, observed live. Recorded non-blocking defect: absent
+  cells render as `None` on the canvas; the authorized remedy vehicle is GMF-003's
+  selection-driven detail content, **not** a change to the GMF-002 grid-cell
+  representation. Record: `tickets/completed/GMF-002.md`.
 
 ## Read first
 

@@ -1,2 +1,2 @@
-Active: GMF-002 per FEATURE_PHASE_PLAN §GMF-002
+Active: GMF-003 per FEATURE_PHASE_PLAN §GMF-003
 Completed records: tickets/completed/ — order table in FEATURE_PHASE_PLAN (lifecycle, closeout rule c).
