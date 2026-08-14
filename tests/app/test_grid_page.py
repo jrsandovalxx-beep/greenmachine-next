@@ -230,18 +230,29 @@ def test_with_no_selection_the_page_invites_one_and_claims_nothing() -> None:
     """The no-selection state renders the invitation caption; the detail
     mechanism's resolution path is direct-tested, not clicked.
 
-    This test previously also asserted the caption's promise that the panel's
-    content "arrives with GMF-003". GMF-003 has now delivered that content, so
-    the promise is gone from the page and the assertion with it — the caption
-    would otherwise be advertising work already done.
+    The caption keeps its invitation and loses only the stale parenthetical
+    that promised the panel's content would "arrive with GMF-003" — GMF-003 has
+    now delivered it, so the promise would be advertising work already done.
+    The invitation itself stays: it is what tells an unselected grid's reader
+    what to do, and its presence-and-replacement was observed evidence in
+    GMF-002 submission 2's approved deployed verification.
     """
     at = _run_app()
     captions = " | ".join(c.value for c in at.caption)
-    assert "Select a row" in captions
-    # No pitch-type surface renders until a row is selected: at the 1.37 floor
-    # AppTest cannot synthesize the selection (D-061), so its absence here is
-    # the observable half, and the content itself is direct-tested.
-    assert "Pitch-type metrics" not in " | ".join(m.value for m in at.markdown)
+    assert "Select a row to open its detail surface." in captions
+    # Only the stale parenthetical is gone. Scoped to that phrase, not to
+    # "GMF-003" anywhere in captions: the page's own header caption cites
+    # §GMF-002 and §GMF-003 legitimately, and a broader assertion would fail
+    # for a reason that has nothing to do with this invitation.
+    assert "content arrives with" not in captions
+    # The *detail panel* is what a selection opens, so its content is what must
+    # be absent here. The metrics screen below is deliberately NOT selection-
+    # gated (criterion 6 needs it AppTest-reachable), so asserting its absence
+    # would assert something false — and would have passed anyway, because a
+    # subheader is not an at.markdown element. Assert the panel, not the screen.
+    body = " | ".join(m.value for m in at.markdown)
+    assert "**Selected:**" not in body
+    assert "**Grid metrics —" not in body
 
 
 def test_the_shell_fields_survive_beside_the_grid() -> None:
