@@ -1,18 +1,25 @@
-"""GreenMachine composition root — deployment shell plus the batter grid.
+"""GreenMachine composition root — deployment shell, batter grid, metrics screen.
 
-Through GMR-004 this page was a shell with no product screens; GMF-002 adds
-the first visible product surface (FEATURE_PHASE_PLAN §GMF-002): a batter
-grid rendering an ``InputSnapshot`` fixture. The page still renders the
-shell's deployment fields — environment, version, commit — because the
-staging deployment is verified end to end through them.
+Through GMR-004 this page was a shell with no product screens; GMF-002 added
+the first visible product surface (FEATURE_PHASE_PLAN §GMF-002), a batter grid
+rendering an ``InputSnapshot`` fixture, and §GMF-003 adds the metrics screen —
+pitch types against seven metrics, each over its own named denominator — plus
+the selection-driven detail panel D-058 established. The page still renders the
+shell's deployment fields — environment, version, commit — because the staging
+deployment is verified end to end through them.
 
 Every widget lives here and only here: ``src/`` imports no streamlit
-(architecture-enforced), and the grid's logic — frames, grading, selection
-consumption — is ordinary importable code under ``greenmachine.grid``,
-proven by direct tests within D-061's stated boundary. The page renders a
-snapshot; it never fetches (§7). No automated ranking or selection
-(D-015/D-017): the initial order is neutral identity order, and every metric
-ordering, column choice and density change is user-initiated.
+(architecture-enforced), and both screens' logic — frames, grading, selection
+consumption, eligibility — is ordinary importable code under
+``greenmachine.grid`` and ``greenmachine.splits``, proven by direct tests within
+D-061's stated boundary. The page renders a snapshot; it never fetches (§7).
+
+No automated ranking or selection (D-015/D-017): both screens open in neutral
+identity order — batter name, pitch-type name — and every metric ordering,
+column choice, density change, window choice and batter choice is user-initiated.
+The metrics screen's 15% usage threshold is not a ranking but §GMF-003
+criterion 3's stated display rule: it is printed on the screen, and every pitch
+type it removes is named rather than dropped.
 """
 
 from __future__ import annotations
@@ -28,6 +35,7 @@ from greenmachine.fixtures import grid_demo_snapshot
 from greenmachine.grid import (
     DENSITY_ROWS,
     METRIC_COLUMNS,
+    batter_for,
     detail_handle,
     display_texts,
     frame_height,
@@ -38,7 +46,21 @@ from greenmachine.grid import (
     style_frame,
     visible_columns,
 )
-from greenmachine.inputs import Window
+from greenmachine.inputs import InputSnapshot, Window
+from greenmachine.splits import ABSENCE_WORDS as SPLIT_ABSENCE_WORDS
+from greenmachine.splits import METRIC_COLUMNS as SPLIT_METRIC_COLUMNS
+from greenmachine.splits import (
+    PITCH_TYPE_COLUMN,
+    absence_notes,
+    absent_metric_notes,
+    build_screen,
+    denominator_notes,
+    provenance_notes,
+    screen_frames,
+    suppression_notes,
+    threshold_statement,
+    window_label,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent
 
@@ -178,13 +200,120 @@ def render_grid() -> None:
     ids = row_batter_ids(snapshot)
     selected = selected_batter_id(tuple(event.selection.rows), ids)
     if selected is None:
-        st.caption("Select a row to open its detail surface (content arrives with GMF-003).")
+        st.caption("Select a row to open its detail surface.")
     else:
-        handle = detail_handle(snapshot, selected)
-        st.markdown(f"**Selected:** {handle.name}")
+        render_detail(snapshot, selected, window)
+
+
+def render_detail(snapshot: InputSnapshot, batter_id: str, window: Window) -> None:
+    """The selection-driven detail surface (D-058) — GMF-003's content.
+
+    Every grid metric's state, **in words**. The deployed component renders a
+    null-data cell as its own ``None`` and discards the Styler's display value
+    there, so the grid's three absence reasons survive on the canvas only as
+    background colours. The payload was always correct; this panel is where the
+    reason can be read.
+
+    The interaction that opens this panel is not AppTest-observable at the 1.37
+    floor (D-061), which is why the metrics screen below does **not** live behind
+    it: a surface reachable only by an unsynthesizable click could not discharge
+    criterion 6, which asks for AppTest and offers no deployed submission to fall
+    back on. What this panel computes is direct-tested as ordinary code.
+    """
+    handle = detail_handle(snapshot, batter_id)
+    batter = batter_for(snapshot, batter_id)
+    st.markdown(f"**Selected:** {handle.name}")
+    st.markdown(f"**Grid metrics — {window.value}, in words**")
+    for note in absent_metric_notes(batter, window):
+        st.markdown(f"- {note}")
+    st.caption(
+        "Each metric's state stated in words, so an absent value's reason is "
+        "readable rather than inferred from a cell's colour."
+    )
+
+
+def render_metrics_screen(snapshot: InputSnapshot) -> None:
+    """The §GMF-003 metrics screen: pitch types against seven metrics.
+
+    The window is **fixed** — this screen requests SEASON_TO_DATE and names it.
+    Criterion 2 asks for the window to be named rather than implied, and the
+    name is read off the split set that produced the rows, so the label cannot
+    drift away from the data it describes. There is deliberately no window
+    control here; the one on the batter grid belongs to that screen.
+
+    Choosing whose splits to read is the user's, through an ordinary control.
+    The product neither picks a batter nor orders the pitch types by any metric
+    (D-015/D-017) — rows arrive in the pitch type's own name order.
+    """
+    st.subheader("Pitch-type metrics")
+    names = [batter.name for batter in snapshot.batters]
+    chosen_name = st.selectbox(
+        "Batter",
+        options=names,
+        index=0,
+        key="splits_batter",
+        help="Whose pitch-type splits to read. A filter you compose, never a ranking.",
+    )
+    batter = next(b for b in snapshot.batters if b.name == chosen_name)
+    screen = build_screen(batter.splits_for(Window.SEASON_TO_DATE))
+    st.markdown(f"**Window:** {window_label(screen)} — current season")
+    st.caption(
+        f"Window: {window_label(screen)} (current season), named here and taken "
+        "from the split set that produced these rows. "
+        f"{threshold_statement(screen)} Row order is neutral — the pitch type's "
+        "own name — and every metric ordering is yours to apply in the headers."
+    )
+
+    if screen.set_absence is not None:
+        st.info(
+            f"No pitch-type splits to show for {window_label(screen)}: "
+            f"{SPLIT_ABSENCE_WORDS[screen.set_absence]}."
+        )
+    elif screen.observed_no_pitches:
+        st.info(
+            f"Observed: this batter faced no tracked pitches in "
+            f"{window_label(screen)}. The source answered — this is a "
+            "measurement, not a missing one."
+        )
+
+    if screen.has_rows:
+        data, texts, styles = screen_frames(screen)
+        st.dataframe(
+            graded_styler(data, texts, styles, SPLIT_METRIC_COLUMNS),
+            column_order=visible_columns(
+                SPLIT_METRIC_COLUMNS, PITCH_TYPE_COLUMN, SPLIT_METRIC_COLUMNS
+            ),
+            height=frame_height("Cozy", len(data)),
+            hide_index=True,
+            key=f"splits_{batter.batter_id}",
+        )
+
+    for note in suppression_notes(screen):
+        st.markdown(f"- {note}")
+
+    missing = absence_notes(screen)
+    if missing:
+        st.markdown("**Absent metrics on the rows above, in words**")
+        for note in missing:
+            st.markdown(f"- {note}")
         st.caption(
-            "Selection-driven detail (D-058): the mechanism lands here; the "
-            "panel's content is GMF-003's scope."
+            "The component renders a null-data cell as its own `None` and drops "
+            "the display value carried for it, so an absent cell's reason is "
+            "stated here rather than left to a cell's background colour. The "
+            "data behind those cells is absent-with-a-reason, never zero."
+        )
+
+    with st.expander("Denominators — what each rate is over"):
+        for note in denominator_notes():
+            st.markdown(f"- {note}")
+    with st.expander("Provenance — sourced or derived, per metric"):
+        for note in provenance_notes(screen):
+            st.markdown(f"- {note}")
+        st.caption(
+            "Read from each field's own derivation record, not asserted here. "
+            "Whiff% and SwStr% share a numerator and differ only in denominator, "
+            "so either could be computed from the other — a computed value would "
+            "say so on this list."
         )
 
 
@@ -193,12 +322,15 @@ def main() -> None:
     bridge_secrets_into_environment()
     st.title("GreenMachine")
     st.caption(
-        "First product surface (FEATURE_PHASE_PLAN §GMF-002) — synthetic "
-        "fixtures only; criteria tallies, never predictions (D-015/D-017)."
+        "Product surfaces per FEATURE_PHASE_PLAN §GMF-002 and §GMF-003 — "
+        "synthetic fixtures only; criteria tallies, never predictions "
+        "(D-015/D-017)."
     )
     render_shell_fields()
     st.divider()
     render_grid()
+    st.divider()
+    render_metrics_screen(grid_demo_snapshot())
 
 
 if __name__ == "__main__":

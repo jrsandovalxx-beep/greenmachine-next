@@ -57,8 +57,17 @@ def _run_app() -> AppTest:
 
 
 def _element(at: AppTest) -> Any:
-    assert len(at.dataframe) == 1, "exactly one grid element on the page"
-    return at.dataframe[0]
+    """The **batter grid** element, selected by its own key.
+
+    The page carried exactly one dataframe through GMF-002; §GMF-003 adds the
+    pitch-type metrics grid below it. Selecting by key rather than by position
+    keeps every assertion in this file pointed at the surface it was written
+    for — a positional index would have silently started asserting GMF-002's
+    criteria against GMF-003's element.
+    """
+    grids = [element for element in at.dataframe if element.proto.id.endswith("-grid")]
+    assert len(grids) == 1, f"expected one batter grid, found {len(grids)}"
+    return grids[0]
 
 
 def _arrow_surface(proto: Any) -> Any:
@@ -208,16 +217,31 @@ def test_the_initial_order_is_neutral_and_no_ranking_widget_exists() -> None:
     names = list(frame[BATTER_COLUMN])
     assert names == sorted(names)
     labels = [w.label for w in [*at.selectbox, *at.multiselect, *at.radio]]
-    assert labels == ["Window", "Columns", "Density"]
+    # "Batter" is §GMF-003's chooser for whose pitch-type splits to read: a
+    # filter the user composes, in the shape the plan's "filters are
+    # user-composed, scores are product-composed" line permits. Every control on
+    # the page still names a view choice; none ranks, scores or picks.
+    # Grouped by widget type, not by page order: both selectboxes, then the
+    # multiselect, then the radio.
+    assert labels == ["Window", "Batter", "Columns", "Density"]
 
 
 def test_with_no_selection_the_page_invites_one_and_claims_nothing() -> None:
     """The no-selection state renders the invitation caption; the detail
-    mechanism's resolution path is direct-tested, not clicked."""
+    mechanism's resolution path is direct-tested, not clicked.
+
+    This test previously also asserted the caption's promise that the panel's
+    content "arrives with GMF-003". GMF-003 has now delivered that content, so
+    the promise is gone from the page and the assertion with it — the caption
+    would otherwise be advertising work already done.
+    """
     at = _run_app()
     captions = " | ".join(c.value for c in at.caption)
     assert "Select a row" in captions
-    assert "GMF-003" in captions
+    # No pitch-type surface renders until a row is selected: at the 1.37 floor
+    # AppTest cannot synthesize the selection (D-061), so its absence here is
+    # the observable half, and the content itself is direct-tested.
+    assert "Pitch-type metrics" not in " | ".join(m.value for m in at.markdown)
 
 
 def test_the_shell_fields_survive_beside_the_grid() -> None:
