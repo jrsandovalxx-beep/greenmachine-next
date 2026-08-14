@@ -41,6 +41,7 @@ from greenmachine.inputs import (
     SwingShare,
     Window,
     WindowedBatterMetrics,
+    WindowedPitchTypeSplits,
 )
 
 CAPTURED_AT = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
@@ -110,12 +111,27 @@ def _absent_metrics(window: Window, reason: AbsenceReason) -> WindowedBatterMetr
     )
 
 
+def _no_splits() -> tuple[WindowedPitchTypeSplits, ...]:
+    """This snapshot feeds the GMF-002 batter grid, which renders no pitch-type
+    split data at all. The splits are therefore absent rather than empty: an
+    empty set would claim this batter was observed to face no tracked pitches,
+    which is a measurement nobody took. ``NOT_YET_OBSERVED`` says the true
+    thing — the fixture has not captured them."""
+    return tuple(
+        WindowedPitchTypeSplits(
+            window=window,
+            splits=SnapshotField.absent(AbsenceReason.NOT_YET_OBSERVED, SOURCE_ID),
+        )
+        for window in Window
+    )
+
+
 def _batter(batter_id: str, name: str, windows: tuple[WindowedBatterMetrics, ...]) -> BatterInputs:
     return BatterInputs(
         batter_id=batter_id,
         name=name,
         windows=windows,
-        pitch_type_splits=(),
+        pitch_type_splits=_no_splits(),
         plate_appearance_log=SnapshotField.absent(AbsenceReason.NOT_YET_OBSERVED, SOURCE_ID),
     )
 
