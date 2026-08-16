@@ -241,19 +241,30 @@ def render_metrics_screen(snapshot: InputSnapshot) -> None:
     drift away from the data it describes. There is deliberately no window
     control here; the one on the batter grid belongs to that screen.
 
-    Choosing whose splits to read is the user's, through an ordinary control.
-    The product neither picks a batter nor orders the pitch types by any metric
-    (D-015/D-017) — rows arrive in the pitch type's own name order.
+    Choosing whose splits to read is the user's, through an ordinary control —
+    and **the initial state chooses nobody**. `index=None` renders the control
+    empty until the user picks: a default of "the first neutral item" would
+    still be a product-composed initial choice of one hitter, which
+    D-015/D-017 prohibit as automated selection, not merely as ranking. Until a
+    user-composed choice exists, an invitation renders in place of the metric
+    surface — the same shape as the grid's own no-selection state, which is
+    already approved product language. The product neither picks a batter nor
+    orders the pitch types by any metric — rows arrive in the pitch type's own
+    name order.
     """
     st.subheader("Pitch-type metrics")
     names = [batter.name for batter in snapshot.batters]
     chosen_name = st.selectbox(
         "Batter",
         options=names,
-        index=0,
+        index=None,
+        placeholder="Choose a batter",
         key="splits_batter",
         help="Whose pitch-type splits to read. A filter you compose, never a ranking.",
     )
+    if chosen_name is None:
+        st.caption("Choose a batter to read their pitch-type splits. Nothing is selected for you.")
+        return
     batter = next(b for b in snapshot.batters if b.name == chosen_name)
     screen = build_screen(batter.splits_for(Window.SEASON_TO_DATE))
     st.markdown(f"**Window:** {window_label(screen)} — current season")

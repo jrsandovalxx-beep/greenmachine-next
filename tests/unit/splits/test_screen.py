@@ -15,11 +15,12 @@ import pytest
 
 from greenmachine.fixtures import grid_demo_snapshot
 from greenmachine.grid import batter_for
-from greenmachine.inputs import AbsenceReason, Window
+from greenmachine.inputs import AbsenceReason, SnapshotField, Window
 from greenmachine.splits import (
     DENOMINATORS,
     METRIC_COLUMNS,
     PITCH_TYPE_COLUMN,
+    SplitScreen,
     absence_notes,
     absent_metric_notes,
     build_screen,
@@ -189,18 +190,14 @@ def test_each_cell_carries_its_own_denominator_count() -> None:
 def test_every_metric_states_its_provenance() -> None:
     notes = provenance_notes(_screen())
     assert len(notes) == len(METRIC_COLUMNS)
-    assert all("from source, not computed" in note for note in notes)
+    assert all("from source for every shown pitch type" in note for note in notes)
+    assert not any("MIXED" in note for note in notes)
 
 
-def test_a_derived_metric_would_say_so() -> None:
-    """The claim is read off the data, so it is falsifiable: give a field a
-    derivation and the statement changes without touching the view."""
-    import dataclasses
-
-    from greenmachine.inputs import SnapshotField
-
-    screen = _screen()
-    original = screen.qualifying[0]
+def _with_derived_whiff(screen: SplitScreen, row_index: int) -> SplitScreen:
+    """The given screen with one row's Whiff% replaced by a derived value —
+    the mixed state the first provenance implementation collapsed."""
+    original = screen.qualifying[row_index]
     derived_field = SnapshotField.derived(
         original.whiff_rate.value,
         formula="swinging strikes / swings",
@@ -208,9 +205,56 @@ def test_a_derived_metric_would_say_so() -> None:
         source_id="grid-demo-synthetic",
     )
     patched = dataclasses.replace(original, whiff_rate=derived_field)
-    patched_screen = dataclasses.replace(screen, qualifying=(patched, *screen.qualifying[1:]))
-    notes = provenance_notes(patched_screen)
-    assert any("Whiff% — derived: swinging strikes / swings" in note for note in notes)
+    qualifying = list(screen.qualifying)
+    qualifying[row_index] = patched
+    return dataclasses.replace(screen, qualifying=tuple(qualifying))
+
+
+def test_a_mixed_column_identifies_the_derived_row_and_the_sourced_rows() -> None:
+    """The property, not the text: with one derived Whiff% beside two sourced
+    ones, the derived row must be identifiable by name AND the sourced rows
+    must be identifiable as sourced by name. The first implementation emitted
+    one column-level line, which passed a text-presence test while collapsing
+    exactly this distinction — a computed number sitting beside sourced numbers
+    looking identical. This test fails against that implementation."""
+    screen = _with_derived_whiff(_screen(), 0)  # CH is row 0 of (CH, FF, SL)
+    whiff_note = next(note for note in provenance_notes(screen) if note.startswith("Whiff%"))
+    # The derived row, by name, with its formula attached to that name.
+    assert "MIXED" in whiff_note
+    assert "CH (swinging strikes / swings)" in whiff_note
+    # The sourced rows, by name, as an explicit complement — not an implication.
+    assert "from source for FF, SL" in whiff_note
+    # And the derived claim must not leak onto the sourced rows' names.
+    derived_clause = whiff_note.split("from source for", 1)[0]
+    assert "FF" not in derived_clause
+    assert "SL" not in derived_clause
+
+
+def test_a_mixed_state_in_one_column_does_not_touch_the_others() -> None:
+    """The mixed statement is per column: deriving one Whiff% says nothing
+    about ISO, xwOBA, or any other column's provenance."""
+    screen = _with_derived_whiff(_screen(), 1)
+    notes = provenance_notes(screen)
+    mixed = [note for note in notes if "MIXED" in note]
+    assert len(mixed) == 1
+    assert mixed[0].startswith("Whiff%")
+    assert sum("from source for every shown pitch type" in note for note in notes) == (
+        len(METRIC_COLUMNS) - 1
+    )
+
+
+def test_an_all_derived_column_names_every_row_with_its_formula() -> None:
+    """The third state: every shown value computed. Not "MIXED" — there is no
+    sourced complement to name — and still per-row, so two rows derived by the
+    same formula cannot blur into one anonymous claim."""
+    screen = _screen()
+    for index in range(len(screen.qualifying)):
+        screen = _with_derived_whiff(screen, index)
+    whiff_note = next(note for note in provenance_notes(screen) if note.startswith("Whiff%"))
+    assert "derived for every shown pitch type" in whiff_note
+    for pitch_type in ("CH", "FF", "SL"):
+        assert f"{pitch_type}: swinging strikes / swings" in whiff_note
+    assert "MIXED" not in whiff_note
 
 
 # ---------------------------------------------------------------------------

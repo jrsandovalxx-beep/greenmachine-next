@@ -43,9 +43,14 @@ def _splits_element(at: AppTest) -> Any:
 
 
 def _arrow_surface(proto: Any) -> Any:
-    """The Arrow-carrying message, across both proto schemas (see the GMF-002
-    suite's accessor for why the fork exists)."""
-    return proto.arrow_data if proto.HasField("arrow_data") else proto
+    """The Arrow-carrying message, across both proto schemas — resolved by
+    DESCRIPTOR, exactly as the GMF-002 suite's accessor does and for the same
+    reason: at the 1.37 floor the field is absent from the SCHEMA, so
+    ``HasField`` raises ValueError instead of returning False. This module's
+    first version used ``HasField`` and the floor run caught it — the
+    probe-binds-code rule doing precisely what it exists to do."""
+    field_names = {f.name for f in proto.DESCRIPTOR.fields}
+    return proto.arrow_data if "arrow_data" in field_names else proto
 
 
 def _read(payload: bytes) -> pd.DataFrame:
@@ -58,14 +63,46 @@ def _select_batter(at: AppTest, name: str) -> AppTest:
     return at
 
 
-def test_the_page_renders_the_metrics_screen_without_a_row_selection() -> None:
+def _run_selected(name: str = "Batter Alpha") -> AppTest:
+    """The screen after a user-composed choice — which is the only way any
+    split data renders: the initial state selects nobody (D-015/D-017)."""
+    return _select_batter(_run_app(), name)
+
+
+def test_the_screen_is_reachable_without_a_grid_row_selection() -> None:
+    """Criterion 6's reachability: the ordinary Batter control opens the
+    surface — no grid row selection (which AppTest cannot synthesize at the
+    1.37 floor) is involved anywhere on this path."""
+    at = _run_selected()
+    assert _splits_element(at) is not None
+
+
+def test_the_initial_state_selects_nobody():  # D-015/D-017
+    """Before the user acts, the product has chosen no hitter. index=0 was an
+    automated selection of one batter — neutral ordering does not cure it,
+    because "the first neutral item" is still a product-composed choice. The
+    control starts empty and an invitation renders in place of the surface."""
     at = _run_app()
+    assert at.selectbox(key="splits_batter").value is None
+    captions = " | ".join(c.value for c in at.caption)
+    assert "Choose a batter to read their pitch-type splits." in captions
+    assert "Nothing is selected for you." in captions
+    # No split surface exists yet: no second dataframe, no window statement.
+    assert not [e for e in at.dataframe if not e.proto.id.endswith("-grid")]
+    body = " | ".join(m.value for m in at.markdown)
+    assert "**Window:** SEASON_TO_DATE" not in body
+
+
+def test_selecting_a_batter_replaces_the_invitation() -> None:
+    at = _run_selected()
+    captions = " | ".join(c.value for c in at.caption)
+    assert "Nothing is selected for you." not in captions
     assert _splits_element(at) is not None
 
 
 def test_the_window_is_named_on_the_screen() -> None:
     """Criterion 2 at the page: the window is stated, not implied."""
-    at = _run_app()
+    at = _run_selected()
     body = " | ".join(m.value for m in at.markdown)
     assert "**Window:** SEASON_TO_DATE" in body
     assert "current season" in body
@@ -81,19 +118,19 @@ def test_no_window_control_exists_on_the_metrics_screen() -> None:
 
 def test_the_threshold_is_stated_on_the_screen() -> None:
     """Criterion 3: the threshold is a number the reader can see."""
-    at = _run_app()
+    at = _run_selected()
     captions = " | ".join(c.value for c in at.caption)
     assert "at or above 15% usage share" in captions
 
 
 def test_the_element_carries_only_qualifying_pitch_types() -> None:
-    at = _run_app()
+    at = _run_selected()
     frame = _splits_element(at).value
     assert list(frame[PITCH_TYPE_COLUMN]) == ["CH", "FF", "SL"]
 
 
 def test_the_element_columns_are_the_seven_metrics_in_canonical_order() -> None:
-    at = _run_app()
+    at = _run_selected()
     proto = _splits_element(at).proto
     assert list(proto.column_order) == [PITCH_TYPE_COLUMN, *METRIC_COLUMNS]
 
@@ -101,7 +138,7 @@ def test_the_element_columns_are_the_seven_metrics_in_canonical_order() -> None:
 def test_the_element_metric_data_is_numeric_so_header_sort_is_numeric() -> None:
     """The same discipline the batter grid proved: raw values ride the data and
     the rendered text rides the Styler, so sorting is numeric."""
-    at = _run_app()
+    at = _run_selected()
     surface = _arrow_surface(_splits_element(at).proto)
     data = _read(surface.data)
     for column in METRIC_COLUMNS:
@@ -111,7 +148,7 @@ def test_the_element_metric_data_is_numeric_so_header_sort_is_numeric() -> None:
 def test_the_element_display_values_name_each_denominator() -> None:
     """Criterion 4 at the element: every rendered cell carries its own
     denominator, and the two near-identical ones stay apart."""
-    at = _run_app()
+    at = _run_selected()
     surface = _arrow_surface(_splits_element(at).proto)
     rendered = _read(surface.styler.display_values)
     flat = " ".join(str(v) for v in rendered.to_numpy().ravel())
@@ -125,7 +162,7 @@ def test_the_element_display_values_name_each_denominator() -> None:
 
 def test_the_element_renders_an_absent_metric_as_its_reason() -> None:
     """SL qualifies with an unavailable xwOBA: the row stays, the cell says why."""
-    at = _run_app()
+    at = _run_selected()
     surface = _arrow_surface(_splits_element(at).proto)
     rendered = _read(surface.styler.display_values)
     flat = " ".join(str(v) for v in rendered.to_numpy().ravel())
@@ -133,7 +170,7 @@ def test_the_element_renders_an_absent_metric_as_its_reason() -> None:
 
 
 def test_the_suppressed_types_are_acknowledged_by_name_on_the_page() -> None:
-    at = _run_app()
+    at = _run_selected()
     body = " | ".join(m.value for m in at.markdown)
     assert "CU" in body and "SI" in body  # measured and below the threshold
     assert "KC" in body and "FS" in body  # usage never observed
@@ -141,11 +178,13 @@ def test_the_suppressed_types_are_acknowledged_by_name_on_the_page() -> None:
 
 
 def test_the_page_states_each_metrics_denominator_and_provenance() -> None:
-    at = _run_app()
+    at = _run_selected()
     body = " | ".join(m.value for m in at.markdown)
     for column in METRIC_COLUMNS:
         assert f"{column} —" in body
-    assert "from source, not computed" in body
+    assert "from source for every shown pitch type, not computed" in body
+    # Nothing in the fixture derives, so no column may claim a mixed state.
+    assert "MIXED" not in body
 
 
 @pytest.mark.parametrize(
@@ -177,7 +216,7 @@ def test_a_batter_who_faced_no_pitches_reads_as_an_observation() -> None:
 
 def test_the_batter_control_changes_the_rendered_screen() -> None:
     """The chooser is real: switching batters changes what the element shows."""
-    at = _run_app()
+    at = _run_selected()
     before = list(_splits_element(at).value[PITCH_TYPE_COLUMN])
     at = _select_batter(at, "Batter Charlie")
     remaining = [e for e in at.dataframe if not e.proto.id.endswith("-grid")]
@@ -188,7 +227,7 @@ def test_the_batter_control_changes_the_rendered_screen() -> None:
 def test_the_page_states_absent_cells_in_words_beneath_the_grid() -> None:
     """The canvas renders a null-data cell as the component's own ``None``
     (observed on the local render), so the reason is also stated as text."""
-    at = _run_app()
+    at = _run_selected()
     body = " | ".join(m.value for m in at.markdown)
     assert "**Absent metrics on the rows above, in words**" in body
     assert "SL — xwOBA (source unavailable" in body

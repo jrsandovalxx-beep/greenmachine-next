@@ -295,25 +295,42 @@ def denominator_notes() -> tuple[str, ...]:
 
 
 def provenance_notes(screen: SplitScreen) -> tuple[str, ...]:
-    """Per metric: sourced, or derived with the formula that produced it.
+    """Per metric, per row: which values are derived, and which are sourced.
 
-    Read off the fields themselves. A metric with no recorded derivation came
-    from the source; one with a derivation says so and shows its formula, so a
-    computed rate can never sit beside a sourced one looking identical.
+    Read off the fields themselves — a value with no recorded derivation came
+    from the source; one with a derivation is a computation this product made.
+
+    **The statement is per row, never a column-level summary.** This function's
+    first version gathered every formula in a column and emitted one line —
+    `Whiff% — derived: <formula>` — which collapsed the mixed state: with one
+    derived Whiff% beside two sourced ones, a computed number sat next to
+    sourced numbers looking identical, and the note said neither which row was
+    derived nor that the others were not. The distinction the contract preserves
+    per field (`SnapshotField.derivation`) was being flattened at exactly the
+    point of presentation. So a mixed state now names the rows on **both**
+    sides: the derived rows with their formulas, and the sourced rows by name —
+    an explicit complement, not an implied one.
     """
     notes: list[str] = []
     for column in METRIC_COLUMNS:
-        formulas = sorted(
-            {
-                field.derivation.formula
-                for _identity, fields in screen_rows(screen)
-                if (field := fields[column]).derivation is not None
-            }
-        )
-        if formulas:
-            notes.append(f"{column} — derived: {'; '.join(formulas)}")
+        derived: list[tuple[str, str]] = []
+        sourced: list[str] = []
+        for pitch_type, fields_by_column in screen_rows(screen):
+            derivation = fields_by_column[column].derivation
+            if derivation is None:
+                sourced.append(pitch_type)
+            else:
+                derived.append((pitch_type, derivation.formula))
+        if not derived:
+            notes.append(f"{column} — from source for every shown pitch type, not computed")
+        elif not sourced:
+            per_row = "; ".join(f"{pitch_type}: {formula}" for pitch_type, formula in derived)
+            notes.append(f"{column} — derived for every shown pitch type — {per_row}")
         else:
-            notes.append(f"{column} — from source, not computed")
+            per_row = "; ".join(f"{pitch_type} ({formula})" for pitch_type, formula in derived)
+            notes.append(
+                f"{column} — MIXED: derived for {per_row}; from source for {', '.join(sourced)}"
+            )
     return tuple(notes)
 
 
