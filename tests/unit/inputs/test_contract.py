@@ -17,14 +17,21 @@ from synthetic import (
     OPEN_AIR_VENUE,
     RETRACTABLE_VENUE,
     SOURCE_EXPORT,
+    SOURCE_SYNTHETIC,
     SOURCES,
     absent_metrics,
+    absent_windowed_splits,
+    complete_windows,
+    fully_absent_split,
     make_batter,
     make_event,
     make_log,
     make_park,
     make_snapshot,
     present_metrics,
+    present_split,
+    split_with_absent_usage,
+    windowed_splits,
 )
 
 from greenmachine.inputs import (
@@ -174,14 +181,13 @@ def test_an_unavailable_usage_share_is_a_named_absence_on_the_split() -> None:
     """V2 finding 4: usage is observed data, so it is a SnapshotField — an
     unavailable usage is distinguishable from a true zero share, which a bare
     Decimal (or omitting the split) could never express."""
-    split = PitchTypeSplit(
-        pitch_type="ZZ",
-        usage_share=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"),
-        barrel_rate=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"),
-        exit_velocity=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, "synthetic-fixture"),
-    )
+    split = split_with_absent_usage(reason=AbsenceReason.SOURCE_UNAVAILABLE)
     assert split.usage_share.display_state() is DisplayState.SOURCE_UNAVAILABLE
     assert split.usage_share.value is None
+    # Every metric beside it is present: an unavailable usage is a fact about
+    # usage alone, and says nothing about whether the metrics have numbers.
+    assert split.expected_woba.display_state() is DisplayState.VALUE
+    assert split.swinging_strike_rate.display_state() is DisplayState.VALUE
 
 
 def test_provenance_validation() -> None:
@@ -220,21 +226,9 @@ def test_source_health_has_one_representation_the_flag_is_gone() -> None:
     assert field_names == {"source_id", "kind", "description", "provenance"}
 
 
-def test_a_down_source_is_told_by_its_fields_not_by_a_flag() -> None:
-    """The UNAVAILABLE path, actually constructed: every field consulting the
-    export source is absent SOURCE_UNAVAILABLE naming it — a coherent outage
-    story with nothing for the fields to contradict — while the source table
-    still answers identity and provenance for that same source."""
-    splits = (
-        PitchTypeSplit(
-            pitch_type="ZZ",
-            usage_share=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_EXPORT),
-            barrel_rate=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_EXPORT),
-            exit_velocity=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_EXPORT),
-        ),
-    )
-    park = make_park(factor_reason=AbsenceReason.SOURCE_UNAVAILABLE)
-    snapshot = make_snapshot(batters=(make_batter(splits=splits),), parks=(park,))
+def _assert_coherent_export_outage(snapshot: InputSnapshot) -> None:
+    """Every field consulting the export source is absent SOURCE_UNAVAILABLE,
+    while the source table still answers identity and provenance for it."""
     export_fields = [
         (owner, field)
         for owner, field in snapshot.iter_fields()
@@ -246,6 +240,46 @@ def test_a_down_source_is_told_by_its_fields_not_by_a_flag() -> None:
     )
     record = snapshot.source(SOURCE_EXPORT)
     assert record.provenance is not None  # identity and provenance survive the outage
+
+
+def test_a_down_source_is_told_by_its_fields_not_by_a_flag() -> None:
+    """The UNAVAILABLE path, actually constructed: a coherent outage story with
+    nothing for the fields to contradict.
+
+    The pitch types were enumerated from a healthy source and the export that
+    supplies their values failed, so the split *rows* exist with nothing in
+    them. Fields carry their own ``source_id``, which is exactly what lets one
+    snapshot hold two source stories at once — and is why a table-level health
+    flag could not express this state without contradicting itself.
+    """
+    splits = (
+        # Enumerated by the healthy source; the values inside name the export.
+        windowed_splits(Window.SEASON_TO_DATE, (fully_absent_split(),), source_id=SOURCE_SYNTHETIC),
+        absent_windowed_splits(Window.RECENT_7D, AbsenceReason.NOT_YET_OBSERVED, SOURCE_SYNTHETIC),
+        absent_windowed_splits(Window.RECENT_14D, AbsenceReason.NOT_YET_OBSERVED, SOURCE_SYNTHETIC),
+    )
+    park = make_park(factor_reason=AbsenceReason.SOURCE_UNAVAILABLE)
+    snapshot = make_snapshot(batters=(make_batter(splits=splits),), parks=(park,))
+    _assert_coherent_export_outage(snapshot)
+
+
+def test_a_down_source_may_also_take_the_whole_split_set_with_it() -> None:
+    """The second outage shape, one level up: the export is also what enumerates
+    the pitch types, so nothing can be listed at all.
+
+    Distinct from the case above, and both are real. There the row exists and is
+    empty; here no row exists to be empty. Collapsing the two would lose the
+    difference between "we know of this pitch type and have no numbers for it"
+    and "we cannot tell you which pitch types there were".
+    """
+    splits = tuple(
+        absent_windowed_splits(window, AbsenceReason.SOURCE_UNAVAILABLE) for window in Window
+    )
+    park = make_park(factor_reason=AbsenceReason.SOURCE_UNAVAILABLE)
+    snapshot = make_snapshot(batters=(make_batter(splits=splits),), parks=(park,))
+    _assert_coherent_export_outage(snapshot)
+    # The distinguishing assertion: no split-level field exists in this shape.
+    assert not [owner for owner, _ in snapshot.iter_fields() if " vs " in owner]
 
 
 # ---------------------------------------------------------------------------
@@ -405,13 +439,112 @@ def test_an_unknown_source_id_is_rejected_at_snapshot_level() -> None:
 def test_iter_fields_sweeps_every_observed_field() -> None:
     snapshot = make_snapshot()
     labels = [owner for owner, _ in snapshot.iter_fields()]
-    # batter log (1) + three windows (4 each, totality) + one split (3, usage
-    # now observed) + three log events (2 each) + one park (4)
-    assert len(labels) == 26
+    # batter log (1) + three windows (4 each, totality) + three windowed split
+    # sets (1 each, the set's own absence field) + one split in SEASON_TO_DATE
+    # (7 metrics) + three log events (2 each) + one park (4)
+    assert len(labels) == 1 + 12 + 3 + 7 + 6 + 4
+    assert len(labels) == 33
     assert any("RECENT_7D" in label for label in labels)
     assert any("vs ZZ" in label for label in labels)
     assert any("event 0" in label for label in labels)
     assert any("venue synthetic-open" in label for label in labels)
+    # Every label identifies exactly one field. A pitch type now appears once
+    # per window, so a label without its window would name three fields at once.
+    assert len(labels) == len(set(labels))
+    assert "batter synthetic-batter-1 SEASON_TO_DATE vs ZZ.whiff_rate" in labels
+
+
+def test_splits_nested_under_a_present_set_are_swept() -> None:
+    """The sweep reaches inside the split set's SnapshotField payload.
+
+    It has to: ``InputSnapshot.__post_init__`` validates source ids over
+    exactly what ``iter_fields`` returns, so a split whose fields the sweep
+    missed could name a source that does not exist and never be caught.
+    """
+    batter = make_batter(
+        splits=(windowed_splits(Window.SEASON_TO_DATE, (present_split(pitch_type="QQ"),)),)
+    )
+    snapshot = make_snapshot(batters=(batter,))
+    labels = {owner for owner, _ in snapshot.iter_fields()}
+    for metric in (
+        "usage_share",
+        "barrel_rate",
+        "exit_velocity",
+        "isolated_power",
+        "expected_woba",
+        "whiff_rate",
+        "swinging_strike_rate",
+    ):
+        assert f"batter synthetic-batter-1 SEASON_TO_DATE vs QQ.{metric}" in labels
+
+
+def test_a_split_naming_an_unknown_source_is_rejected_through_the_set() -> None:
+    """The consequence of the sweep reaching inside, stated as a rejection."""
+    stranger = PitchTypeSplit(
+        pitch_type="QQ",
+        usage_share=SnapshotField.absent(AbsenceReason.SOURCE_UNAVAILABLE, "no-such-source"),
+        barrel_rate=SnapshotField.absent(AbsenceReason.NOT_APPLICABLE),
+        exit_velocity=SnapshotField.absent(AbsenceReason.NOT_APPLICABLE),
+        isolated_power=SnapshotField.absent(AbsenceReason.NOT_APPLICABLE),
+        expected_woba=SnapshotField.absent(AbsenceReason.NOT_APPLICABLE),
+        whiff_rate=SnapshotField.absent(AbsenceReason.NOT_APPLICABLE),
+        swinging_strike_rate=SnapshotField.absent(AbsenceReason.NOT_APPLICABLE),
+    )
+    batter = make_batter(splits=(windowed_splits(Window.SEASON_TO_DATE, (stranger,)),))
+    with pytest.raises(InputContractError):
+        make_snapshot(batters=(batter,))
+
+
+def test_splits_are_total_over_named_windows() -> None:
+    """The same totality law the metrics carry, for the same reason: an
+    uncaptured window travels as an absent set, never as a missing entry."""
+    with pytest.raises(InputContractError):
+        BatterInputs(
+            batter_id="synthetic-batter-1",
+            name="Synthetic Batter",
+            windows=complete_windows(present_metrics(Window.RECENT_7D)),
+            pitch_type_splits=(windowed_splits(Window.SEASON_TO_DATE),),
+            plate_appearance_log=SnapshotField.absent(
+                AbsenceReason.NOT_YET_OBSERVED, "synthetic-fixture"
+            ),
+        )
+
+
+def test_splits_for_is_total_and_never_answers_none() -> None:
+    batter = make_batter()
+    for window in Window:
+        assert batter.splits_for(window).window is window
+
+
+def test_a_present_empty_split_set_is_an_observation_not_an_absence() -> None:
+    """The fourth thing: the source answered and this batter faced no tracked
+    pitches. It needs no fourth absence state, and it is not the same as the
+    set being absent — which is exactly why the set is a SnapshotField."""
+    empty = windowed_splits(Window.SEASON_TO_DATE)
+    assert empty.splits.display_state() is DisplayState.VALUE
+    assert empty.splits.value == ()
+    absent = absent_windowed_splits(Window.SEASON_TO_DATE, AbsenceReason.NOT_YET_OBSERVED)
+    assert absent.splits.display_state() is DisplayState.NOT_YET_OBSERVED
+    assert absent.splits.value is None
+
+
+def test_a_window_repeating_a_pitch_type_is_rejected() -> None:
+    with pytest.raises(InputContractError):
+        windowed_splits(
+            Window.SEASON_TO_DATE, (present_split(pitch_type="QQ"), present_split(pitch_type="QQ"))
+        )
+
+
+def test_the_same_pitch_type_may_appear_once_per_window() -> None:
+    """Uniqueness is per window, not per batter: the same pitch type measured
+    in two windows is two observations, not a repeat."""
+    batter = make_batter(
+        splits=(
+            windowed_splits(Window.SEASON_TO_DATE, (present_split(pitch_type="QQ"),)),
+            windowed_splits(Window.RECENT_7D, (present_split(pitch_type="QQ"),)),
+        )
+    )
+    assert batter.splits_for(Window.RECENT_7D).splits.value is not None
 
 
 def test_every_absence_reason_is_constructible_through_the_snapshot() -> None:

@@ -28,6 +28,7 @@ visible at render:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from decimal import Decimal
 from functools import partial
 from typing import TYPE_CHECKING, Any
@@ -40,9 +41,14 @@ from greenmachine.inputs import (
     BattedBallRate,
     BatterInputs,
     ExitVelocityAverage,
+    ExpectedWeightedOnBase,
     InputSnapshot,
+    IsolatedPower,
     SnapshotField,
+    SwingingStrikeRate,
     SwingShare,
+    UsageShare,
+    WhiffRate,
     Window,
     WindowedBatterMetrics,
 )
@@ -97,15 +103,20 @@ def row_batter_ids(snapshot: InputSnapshot) -> tuple[str, ...]:
     return tuple(batter.batter_id for batter in _sorted_batters(snapshot))
 
 
-def _metric_fields(
-    metrics: WindowedBatterMetrics,
-) -> dict[
-    str,
-    SnapshotField[BattedBallRate]
-    | SnapshotField[ExitVelocityAverage]
-    | SnapshotField[SwingShare]
-    | SnapshotField[AirBallShare],
-]:
+# A metric cell's field. ``Any`` rather than a union of nine concrete
+# ``SnapshotField`` instantiations: the generic frame builders carry rows whose
+# columns hold different value types at once, and ``SnapshotField`` is invariant,
+# so no union admits them together. The looseness is repaid immediately — the
+# value dispatch below is total and raises on a type it does not know.
+MetricField = SnapshotField[Any]
+
+# One row for the frame builders: its identity text, and its columns' fields.
+# This is the whole of what a grid row is, which is why one set of builders
+# serves batters keyed by window and pitch types keyed by usage alike.
+FieldRow = tuple[str, dict[str, MetricField]]
+
+
+def metric_fields(metrics: WindowedBatterMetrics) -> dict[str, MetricField]:
     return {
         "Barrel rate": metrics.barrel_rate,
         "Exit velocity": metrics.exit_velocity,
@@ -114,13 +125,21 @@ def _metric_fields(
     }
 
 
-def _display_text(
-    field: SnapshotField[BattedBallRate]
-    | SnapshotField[ExitVelocityAverage]
-    | SnapshotField[SwingShare]
-    | SnapshotField[AirBallShare],
-) -> str:
-    """The cell text: value with its sample beside it (D-014), or absence text."""
+def cell_text(field: MetricField) -> str:
+    """The cell text: value with its sample beside it (D-014), or absence text.
+
+    Every branch names the denominator the number is over, because two metrics
+    on the GMF-003 surface share a numerator and differ only in denominator
+    (whiff rate over swings, swinging-strike rate over pitches of that type) and
+    a third divides by a different population again (usage, over every tracked
+    pitch of every type). A cell that printed a bare share would leave those
+    three indistinguishable.
+
+    The dispatch is total and raises on an unrecognised type. It previously fell
+    through to ``AirBallShare``'s format, which meant a value type nobody had
+    considered would render as an air-ball share rather than fail — the exact
+    trap this surface's near-identical denominators set.
+    """
     value = field.value
     if value is None:
         assert field.absence is not None  # the contract's exactly-one law
@@ -131,16 +150,31 @@ def _display_text(
         return f"{value.miles_per_hour} mph · BBE {value.batted_ball_events}"
     if isinstance(value, SwingShare):
         return f"{value.share} · swings {value.tracked_swings}"
-    return f"{value.share} · air balls {value.air_balls}"
+    if isinstance(value, AirBallShare):
+        return f"{value.share} · air balls {value.air_balls}"
+    if isinstance(value, UsageShare):
+        return f"{value.share} · {value.sample_pitches} pitches, all types"
+    if isinstance(value, IsolatedPower):
+        return f"{value.points} · AB {value.at_bats}"
+    if isinstance(value, ExpectedWeightedOnBase):
+        return f"{value.value} · PA {value.plate_appearances}"
+    if isinstance(value, WhiffRate):
+        return f"{value.rate} · {value.swings} swings"
+    if isinstance(value, SwingingStrikeRate):
+        return f"{value.rate} · {value.pitches} pitches, this type"
+    raise TypeError(  # no silent fall-through onto another metric's format
+        f"no display format for value type {type(value).__name__!r}: a metric "
+        "renders with its own denominator named, or it does not render"
+    )
 
 
-def _numeric(
-    field: SnapshotField[BattedBallRate]
-    | SnapshotField[ExitVelocityAverage]
-    | SnapshotField[SwingShare]
-    | SnapshotField[AirBallShare],
-) -> Decimal | None:
-    """The gradable magnitude of a present value; ``None`` for any absence."""
+def _numeric(field: MetricField) -> Decimal | None:
+    """The gradable magnitude of a present value; ``None`` for any absence.
+
+    Total for the same reason ``cell_text`` is: the old trailing
+    ``value.share`` silently claimed every unrecognised type had a ``share``
+    attribute meaning the same thing.
+    """
     value = field.value
     if value is None:
         return None
@@ -148,51 +182,86 @@ def _numeric(
         return value.rate
     if isinstance(value, ExitVelocityAverage):
         return value.miles_per_hour
-    return value.share
+    if isinstance(value, SwingShare | AirBallShare | UsageShare):
+        return value.share
+    if isinstance(value, IsolatedPower):
+        return value.points
+    if isinstance(value, ExpectedWeightedOnBase):
+        return value.value
+    if isinstance(value, WhiffRate | SwingingStrikeRate):
+        return value.rate
+    raise TypeError(f"no gradable magnitude for value type {type(value).__name__!r}")
+
+
+def _batter_rows(snapshot: InputSnapshot, window: Window) -> list[FieldRow]:
+    """The batter grid's rows, in neutral identity order."""
+    return [
+        (batter.name, metric_fields(batter.metrics_for(window)))
+        for batter in _sorted_batters(snapshot)
+    ]
+
+
+def numeric_frame(
+    rows: Sequence[FieldRow], identity_column: str, columns: Sequence[str]
+) -> pd.DataFrame:
+    """The data frame the component sorts on: identity as text, metrics as
+    raw ``float`` columns with absences as missing values. Rendered text is
+    the ``Styler``'s job (`text_frame` / `graded_styler`), never this
+    frame's — a string metric column would sort lexicographically."""
+    built: list[dict[str, object]] = []
+    for identity, fields_by_column in rows:
+        row: dict[str, object] = {identity_column: identity}
+        for column in columns:
+            numeric = _numeric(fields_by_column[column])
+            row[column] = float(numeric) if numeric is not None else None
+        built.append(row)
+    frame = pd.DataFrame(built, columns=[identity_column, *columns])
+    return frame.astype(dict.fromkeys(columns, "float64"))
+
+
+def text_frame(
+    rows: Sequence[FieldRow], identity_column: str, columns: Sequence[str]
+) -> pd.DataFrame:
+    """Every cell's rendered text: value with its sample beside it (D-014),
+    or the absence text — never blank, never a bare number without its
+    sample. These ride the ``Styler`` as display values over `numeric_frame`'s
+    numeric data."""
+    built = []
+    for identity, fields_by_column in rows:
+        row: dict[str, str] = {identity_column: identity}
+        for column in columns:
+            row[column] = cell_text(fields_by_column[column])
+        built.append(row)
+    return pd.DataFrame(built, columns=[identity_column, *columns])
+
+
+def display_state_frame(
+    rows: Sequence[FieldRow], identity_column: str, columns: Sequence[str]
+) -> pd.DataFrame:
+    """The display-state tokens behind each cell — the testable semantics."""
+    built = []
+    for _identity, fields_by_column in rows:
+        row: dict[str, str] = {identity_column: "identity"}
+        for column in columns:
+            row[column] = fields_by_column[column].display_state().value
+        built.append(row)
+    return pd.DataFrame(built, columns=[identity_column, *columns])
 
 
 def grid_frame(snapshot: InputSnapshot, window: Window) -> pd.DataFrame:
-    """The data frame the component sorts on: identity as text, metrics as
-    raw ``float`` columns with absences as missing values. Rendered text is
-    the ``Styler``'s job (`display_texts` / `graded_styler`), never this
-    frame's — a string metric column would sort lexicographically."""
-    rows: list[dict[str, object]] = []
-    for batter in _sorted_batters(snapshot):
-        metrics = batter.metrics_for(window)
-        row: dict[str, object] = {BATTER_COLUMN: batter.name}
-        for column, field in _metric_fields(metrics).items():
-            numeric = _numeric(field)
-            row[column] = float(numeric) if numeric is not None else None
-        rows.append(row)
-    frame = pd.DataFrame(rows, columns=[BATTER_COLUMN, *METRIC_COLUMNS])
-    return frame.astype(dict.fromkeys(METRIC_COLUMNS, "float64"))
+    """The batter grid's numeric frame. Unchanged in behaviour: the row source
+    moved out, the assembly did not."""
+    return numeric_frame(_batter_rows(snapshot, window), BATTER_COLUMN, METRIC_COLUMNS)
 
 
 def display_texts(snapshot: InputSnapshot, window: Window) -> pd.DataFrame:
-    """Every cell's rendered text: value with its sample beside it (D-014),
-    or the absence text — never blank, never a bare number without its
-    sample. These ride the ``Styler`` as display values over `grid_frame`'s
-    numeric data."""
-    rows = []
-    for batter in _sorted_batters(snapshot):
-        metrics = batter.metrics_for(window)
-        row: dict[str, str] = {BATTER_COLUMN: batter.name}
-        for column, field in _metric_fields(metrics).items():
-            row[column] = _display_text(field)
-        rows.append(row)
-    return pd.DataFrame(rows, columns=[BATTER_COLUMN, *METRIC_COLUMNS])
+    """The batter grid's cell texts."""
+    return text_frame(_batter_rows(snapshot, window), BATTER_COLUMN, METRIC_COLUMNS)
 
 
 def state_frame(snapshot: InputSnapshot, window: Window) -> pd.DataFrame:
-    """The display-state tokens behind each cell — the testable semantics."""
-    rows = []
-    for batter in _sorted_batters(snapshot):
-        metrics = batter.metrics_for(window)
-        row: dict[str, str] = {BATTER_COLUMN: "identity"}
-        for column, field in _metric_fields(metrics).items():
-            row[column] = field.display_state().value
-        rows.append(row)
-    return pd.DataFrame(rows, columns=[BATTER_COLUMN, *METRIC_COLUMNS])
+    """The batter grid's display-state tokens."""
+    return display_state_frame(_batter_rows(snapshot, window), BATTER_COLUMN, METRIC_COLUMNS)
 
 
 def _fixed_text(text: str, _value: object) -> str:
@@ -209,8 +278,10 @@ def _green(intensity: float) -> str:
     return f"color: #0a3622; background-color: rgb({red}, {green}, {blue})"
 
 
-def style_frame(snapshot: InputSnapshot, window: Window) -> pd.DataFrame:
-    """Per-cell inline CSS, positionally aligned with `grid_frame`.
+def style_frame_for(
+    rows: Sequence[FieldRow], identity_column: str, columns: Sequence[str]
+) -> pd.DataFrame:
+    """Per-cell inline CSS, positionally aligned with `numeric_frame`.
 
     Present values grade on a column-normalised green scale — a lone present
     value grades mid-scale rather than dividing by zero spread. Each absence
@@ -218,15 +289,14 @@ def style_frame(snapshot: InputSnapshot, window: Window) -> pd.DataFrame:
     numeric frame cannot key styles by cell text, because every absence is
     the same missing value. Identity cells carry no style.
     """
-    batters = _sorted_batters(snapshot)
-    rows: list[dict[str, str]] = [{BATTER_COLUMN: ""} for _ in batters]
-    for column in METRIC_COLUMNS:
-        fields = [_metric_fields(b.metrics_for(window))[column] for b in batters]
+    built: list[dict[str, str]] = [{identity_column: ""} for _ in rows]
+    for column in columns:
+        fields = [fields_by_column[column] for _identity, fields_by_column in rows]
         numerics = [_numeric(field) for field in fields]
         present = [float(n) for n in numerics if n is not None]
         low, high = (min(present), max(present)) if present else (0.0, 0.0)
         spread = high - low
-        for row, field, numeric in zip(rows, fields, numerics, strict=True):
+        for row, field, numeric in zip(built, fields, numerics, strict=True):
             if numeric is None:
                 assert field.absence is not None  # the contract's exactly-one law
                 row[column] = _ABSENCE_CSS[field.absence]
@@ -234,18 +304,32 @@ def style_frame(snapshot: InputSnapshot, window: Window) -> pd.DataFrame:
                 row[column] = _green(0.5)
             else:
                 row[column] = _green((float(numeric) - low) / spread)
-    return pd.DataFrame(rows, columns=[BATTER_COLUMN, *METRIC_COLUMNS])
+    return pd.DataFrame(built, columns=[identity_column, *columns])
 
 
-def graded_styler(numeric: pd.DataFrame, texts: pd.DataFrame, styles: pd.DataFrame) -> Styler:
+def style_frame(snapshot: InputSnapshot, window: Window) -> pd.DataFrame:
+    """The batter grid's per-cell CSS."""
+    return style_frame_for(_batter_rows(snapshot, window), BATTER_COLUMN, METRIC_COLUMNS)
+
+
+def graded_styler(
+    numeric: pd.DataFrame,
+    texts: pd.DataFrame,
+    styles: pd.DataFrame,
+    columns: Sequence[str] = METRIC_COLUMNS,
+) -> Styler:
     """The ``Styler`` over the numeric frame: per-cell display text via
     ``format`` (an absent cell's text is its reason, applied as that cell's
     ``na_rep``) and per-cell CSS via ``Styler.map`` (D-059). Per-cell subsets
     keep text and style exact even when two cells share a value with
-    different samples."""
+    different samples.
+
+    ``columns`` defaults to the batter grid's four metric columns, which is
+    what this function iterated before it took the parameter at all.
+    """
     styler = numeric.style
     for row in range(len(numeric)):
-        for column in METRIC_COLUMNS:
+        for column in columns:
             # The runtime accepts a (rows, columns) subset tuple; the stubs
             # model a narrower union, so the slice is typed Any deliberately.
             cell: Any = pd.IndexSlice[[row], [column]]
@@ -260,10 +344,18 @@ def graded_styler(numeric: pd.DataFrame, texts: pd.DataFrame, styles: pd.DataFra
     return styler
 
 
-def visible_columns(chosen_metrics: tuple[str, ...]) -> list[str]:
+def visible_columns(
+    chosen_metrics: tuple[str, ...],
+    identity_column: str = BATTER_COLUMN,
+    columns: Sequence[str] = METRIC_COLUMNS,
+) -> list[str]:
     """The identity column always shows (selection stays readable); chosen
-    metrics follow in canonical order regardless of pick order."""
-    return [BATTER_COLUMN, *[c for c in METRIC_COLUMNS if c in chosen_metrics]]
+    metrics follow in canonical order regardless of pick order.
+
+    The defaults are the batter grid's own identity column and metric set —
+    the exact values this function closed over before it took parameters.
+    """
+    return [identity_column, *[c for c in columns if c in chosen_metrics]]
 
 
 def frame_height(density: str, row_count: int) -> int:

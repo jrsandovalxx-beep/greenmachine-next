@@ -79,9 +79,11 @@ class StrictConfigLoader(yaml.SafeLoader):
     """
 
     def compose_node(self, parent: yaml.Node | None, index: int) -> yaml.Node | None:
-        # `check_event`/`peek_event` are untyped in types-PyYAML; the ignores are
-        # narrow and cover a stub gap, not a weakness in this code.
-        if self.check_event(yaml.events.AliasEvent):  # type: ignore[no-untyped-call]
+        # types-PyYAML 6.0.12.20260815 typed `check_event`, so the ignore that
+        # covered its stub gap became an error under --strict's
+        # warn_unused_ignores on every fresh install; `peek_event` is still
+        # untyped there and keeps its narrow ignore.
+        if self.check_event(yaml.events.AliasEvent):
             event = self.peek_event()  # type: ignore[no-untyped-call]
             raise _AliasNotAllowed(
                 context="while composing configuration",

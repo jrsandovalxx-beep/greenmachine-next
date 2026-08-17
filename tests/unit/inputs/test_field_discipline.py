@@ -17,6 +17,16 @@ wholesale, and `SourceRecord.availability` (dynamic state, not identity)
 walked through exactly that hole. **An exemption is enumerated, never
 inferred from a type.** Enum-typed fields now earn their entries one by one,
 like everything else.
+
+**One hole is left open deliberately, and is named here so it is not
+rediscovered as a defect.** ``_contract_dataclasses`` excludes ``SnapshotField``
+itself as the absence machinery, so a field added to *that* class is not swept
+by this guard at all. ``SnapshotField.derivation`` (GMF-003) is such a field.
+It is guarded instead by ``test_derivation.py`` and, more strongly, by
+``InputSnapshot.__post_init__``, which rejects a derivation whose named inputs
+do not resolve to fields of the same snapshot — an invariant rather than a
+test. A future slot on ``SnapshotField`` gets no guard from this module and
+must bring its own.
 """
 
 from __future__ import annotations
@@ -39,6 +49,9 @@ from greenmachine.inputs.contract import SnapshotField
 #   provenance      - the D-053/D-057 manual-export provenance record
 #   source-table    - the snapshot's source identity table
 #   timestamp       - the snapshot's single captured moment
+#   derivation      - the audit trail of a computed value: how it was computed
+#                     and from which fields, carried so a derived value cannot
+#                     be presented as a sourced one
 ALLOWED_NON_SNAPSHOT_FIELDS: dict[tuple[str, str], str] = {
     ("ManualExportProvenance", "source_url"): "provenance",
     ("ManualExportProvenance", "export_date"): "provenance",
@@ -57,10 +70,21 @@ ALLOWED_NON_SNAPSHOT_FIELDS: dict[tuple[str, str], str] = {
     ("AirBallShare", "air_balls"): "value-component",
     ("UsageShare", "share"): "value-component",
     ("UsageShare", "sample_pitches"): "value-component",
+    ("IsolatedPower", "points"): "value-component",
+    ("IsolatedPower", "at_bats"): "value-component",
+    ("ExpectedWeightedOnBase", "value"): "value-component",
+    ("ExpectedWeightedOnBase", "plate_appearances"): "value-component",
+    ("WhiffRate", "rate"): "value-component",
+    ("WhiffRate", "swings"): "value-component",
+    ("SwingingStrikeRate", "rate"): "value-component",
+    ("SwingingStrikeRate", "pitches"): "value-component",
     ("ExitVelocityReading", "miles_per_hour"): "value-component",
     ("HitDistanceReading", "feet"): "value-component",
     ("PitchTypeSplit", "pitch_type"): "vocabulary",
+    ("Derivation", "formula"): "derivation",
+    ("Derivation", "inputs"): "derivation",
     ("WindowedBatterMetrics", "window"): "identity",
+    ("WindowedPitchTypeSplits", "window"): "identity",
     ("PlateAppearanceLog", "window"): "identity",
     ("PlateAppearanceEvent", "event_date"): "identity",
     ("PlateAppearanceEvent", "pitch_type"): "vocabulary",

@@ -18,9 +18,11 @@ from greenmachine.inputs import (
     BatterInputs,
     ExitVelocityAverage,
     ExitVelocityReading,
+    ExpectedWeightedOnBase,
     Handedness,
     HitDistanceReading,
     InputSnapshot,
+    IsolatedPower,
     ManualExportProvenance,
     ParkFactor,
     ParkInputs,
@@ -32,12 +34,15 @@ from greenmachine.inputs import (
     SnapshotField,
     SourceKind,
     SourceRecord,
+    SwingingStrikeRate,
     SwingShare,
     UsageShare,
     VenueType,
     WeatherForecast,
+    WhiffRate,
     Window,
     WindowedBatterMetrics,
+    WindowedPitchTypeSplits,
 )
 
 CAPTURED_AT = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
@@ -156,10 +161,161 @@ def make_log(
     return PlateAppearanceLog(window=window, events=events)
 
 
+def present_split(
+    pitch_type: str = "ZZ",
+    share: Decimal = Decimal("0.5"),
+    sample_pitches: int = 4,
+) -> PitchTypeSplit:
+    """All seven metrics present: a qualifying, fully available pitch type.
+
+    Every number is an OQ-4 validation artifact — an ISO of 2.998 and an xwOBA
+    of 3.997 are impossible in baseball and legal in the contract, which is the
+    point: they exercise the bound without ever reading as a judgment.
+    """
+    return PitchTypeSplit(
+        pitch_type=pitch_type,
+        usage_share=SnapshotField.present(
+            UsageShare(share=share, sample_pitches=sample_pitches), SOURCE_EXPORT
+        ),
+        barrel_rate=SnapshotField.present(
+            BattedBallRate(rate=Decimal("0.999"), batted_ball_events=1), SOURCE_EXPORT
+        ),
+        exit_velocity=SnapshotField.present(
+            ExitVelocityAverage(miles_per_hour=Decimal("1.5"), batted_ball_events=1),
+            SOURCE_EXPORT,
+        ),
+        isolated_power=SnapshotField.present(
+            IsolatedPower(points=Decimal("2.998"), at_bats=1), SOURCE_EXPORT
+        ),
+        expected_woba=SnapshotField.present(
+            ExpectedWeightedOnBase(value=Decimal("3.997"), plate_appearances=1), SOURCE_EXPORT
+        ),
+        whiff_rate=SnapshotField.present(WhiffRate(rate=Decimal("0.001"), swings=2), SOURCE_EXPORT),
+        swinging_strike_rate=SnapshotField.present(
+            SwingingStrikeRate(rate=Decimal("0.002"), pitches=3), SOURCE_EXPORT
+        ),
+    )
+
+
+def split_with_absent_metrics(
+    pitch_type: str = "ZZ",
+    reason: AbsenceReason = AbsenceReason.NOT_YET_OBSERVED,
+    share: Decimal = Decimal("0.5"),
+    sample_pitches: int = 4,
+) -> PitchTypeSplit:
+    """Usage observed, every metric a named absence.
+
+    The healthy-source, nothing-accumulated state, encoded correctly: the usage
+    share is a present observation over a positive sample, and a rate over zero
+    events is a NAMED ABSENCE — never a constructed zero-denominator value.
+    It is also the case that proves availability cannot reach eligibility: this
+    pitch type qualifies on usage alone, with nothing to show in any column.
+    """
+    return PitchTypeSplit(
+        pitch_type=pitch_type,
+        usage_share=SnapshotField.present(
+            UsageShare(share=share, sample_pitches=sample_pitches), SOURCE_EXPORT
+        ),
+        barrel_rate=SnapshotField.absent(reason, SOURCE_EXPORT),
+        exit_velocity=SnapshotField.absent(reason, SOURCE_EXPORT),
+        isolated_power=SnapshotField.absent(reason, SOURCE_EXPORT),
+        expected_woba=SnapshotField.absent(reason, SOURCE_EXPORT),
+        whiff_rate=SnapshotField.absent(reason, SOURCE_EXPORT),
+        swinging_strike_rate=SnapshotField.absent(reason, SOURCE_EXPORT),
+    )
+
+
+def split_with_absent_usage(
+    pitch_type: str = "ZZ",
+    reason: AbsenceReason = AbsenceReason.SOURCE_UNAVAILABLE,
+) -> PitchTypeSplit:
+    """Usage itself absent, every metric present.
+
+    Eligibility is *unevaluable* here — not "below threshold", which would be a
+    claim about a share nobody measured. The metrics are deliberately present:
+    a fixture where both were absent could not tell the two questions apart.
+    """
+    metrics = present_split(pitch_type=pitch_type)
+    return PitchTypeSplit(
+        pitch_type=pitch_type,
+        usage_share=SnapshotField.absent(reason, SOURCE_EXPORT),
+        barrel_rate=metrics.barrel_rate,
+        exit_velocity=metrics.exit_velocity,
+        isolated_power=metrics.isolated_power,
+        expected_woba=metrics.expected_woba,
+        whiff_rate=metrics.whiff_rate,
+        swinging_strike_rate=metrics.swinging_strike_rate,
+    )
+
+
+def fully_absent_split(
+    pitch_type: str = "ZZ",
+    reason: AbsenceReason = AbsenceReason.SOURCE_UNAVAILABLE,
+    source_id: str = SOURCE_EXPORT,
+) -> PitchTypeSplit:
+    """Every field absent, usage included, all naming one source.
+
+    The shape a split takes when the source supplying its *values* failed but
+    the pitch type was still enumerable — so the row exists and has nothing in
+    it. Distinct from the split set itself being absent, where no row exists at
+    all to have fields."""
+    return PitchTypeSplit(
+        pitch_type=pitch_type,
+        usage_share=SnapshotField.absent(reason, source_id),
+        barrel_rate=SnapshotField.absent(reason, source_id),
+        exit_velocity=SnapshotField.absent(reason, source_id),
+        isolated_power=SnapshotField.absent(reason, source_id),
+        expected_woba=SnapshotField.absent(reason, source_id),
+        whiff_rate=SnapshotField.absent(reason, source_id),
+        swinging_strike_rate=SnapshotField.absent(reason, source_id),
+    )
+
+
+def windowed_splits(
+    window: Window,
+    splits: tuple[PitchTypeSplit, ...] = (),
+    source_id: str = SOURCE_EXPORT,
+) -> WindowedPitchTypeSplits:
+    """A window's split set, present. An empty tuple is a *present, empty*
+    observation — the source answered and this batter faced no tracked pitches
+    in the window — and is not the same thing as the set being absent.
+
+    ``source_id`` names whichever source enumerated the pitch types, which need
+    not be the source that supplied the metrics inside them: fields carry their
+    own provenance, so one snapshot can hold a healthy enumeration and a failed
+    metric export at the same time."""
+    return WindowedPitchTypeSplits(window=window, splits=SnapshotField.present(splits, source_id))
+
+
+def absent_windowed_splits(
+    window: Window, reason: AbsenceReason, source_id: str = SOURCE_EXPORT
+) -> WindowedPitchTypeSplits:
+    """A window whose split set is absent, with the reason named: the window
+    was never captured, or the source failed. Never an empty tuple, which would
+    make an uncaptured window indistinguishable from a batter who faced
+    nothing."""
+    return WindowedPitchTypeSplits(window=window, splits=SnapshotField.absent(reason, source_id))
+
+
+def complete_split_windows(
+    *given: WindowedPitchTypeSplits,
+) -> tuple[WindowedPitchTypeSplits, ...]:
+    """Totality helper, mirroring ``complete_windows``: the contract requires a
+    split entry for every named window, so windows the caller did not supply are
+    filled as an absent set naming NOT_YET_OBSERVED. Duplicates among ``given``
+    pass through untouched, so rejection tests still reach the constructor."""
+    provided = {windowed.window for windowed in given}
+    return given + tuple(
+        absent_windowed_splits(window, AbsenceReason.NOT_YET_OBSERVED)
+        for window in Window
+        if window not in provided
+    )
+
+
 def make_batter(
     batter_id: str = "synthetic-batter-1",
     windows: tuple[WindowedBatterMetrics, ...] | None = None,
-    splits: tuple[PitchTypeSplit, ...] | None = None,
+    splits: tuple[WindowedPitchTypeSplits, ...] | None = None,
     log: SnapshotField[PlateAppearanceLog] | None = None,
 ) -> BatterInputs:
     windows = (
@@ -167,21 +323,13 @@ def make_batter(
         if windows is not None
         else complete_windows(present_metrics(Window.RECENT_7D))
     )
-    if splits is None:
-        # The healthy-source, zero-balls-in-play state, encoded correctly: the
-        # usage share is a present observation over a positive sample, and the
-        # rate over zero batted balls is a NAMED ABSENCE — never a constructed
-        # zero-denominator value.
-        splits = (
-            PitchTypeSplit(
-                pitch_type="ZZ",
-                usage_share=SnapshotField.present(
-                    UsageShare(share=Decimal("0.5"), sample_pitches=4), SOURCE_EXPORT
-                ),
-                barrel_rate=SnapshotField.absent(AbsenceReason.NOT_YET_OBSERVED, SOURCE_EXPORT),
-                exit_velocity=SnapshotField.absent(AbsenceReason.NOT_YET_OBSERVED, SOURCE_EXPORT),
-            ),
+    splits = (
+        complete_split_windows(*splits)
+        if splits is not None
+        else complete_split_windows(
+            windowed_splits(Window.SEASON_TO_DATE, (split_with_absent_metrics(),))
         )
+    )
     if log is None:
         log = SnapshotField.present(make_log(), SOURCE_SYNTHETIC)
     return BatterInputs(

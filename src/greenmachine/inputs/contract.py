@@ -31,6 +31,22 @@ is the product's spine: a screen renders an ``InputSnapshot`` and never fetches
   against — so GMF-003's 15% display threshold is applied by the screen from
   data in the snapshot, and an unavailable usage is a named absence, distinct
   from a true zero share (which is a present value over a positive sample).
+- **Pitch-type splits are bound to the window that produced them.**
+  ``WindowedPitchTypeSplits`` carries the window once, for the whole set, at
+  the level at which it is true — a window describes a computation, not an
+  individual pitch type — so a screen naming its window reads that name off the
+  structure that produced its rows. Each split's seven metrics carry their own
+  denominators, which are **not** all the same population: barrel rate and exit
+  velocity divide by BBE, ISO by at-bats, xwOBA by plate appearances, whiff rate
+  by swings, swinging-strike rate by pitches of that type, and usage by every
+  tracked pitch of every type. Several of those counts are arithmetically
+  related, and none substitutes for another.
+- **Sourced and derived values stay distinguishable.** A value the source
+  supplied carries no ``Derivation``; a value this product computed carries one,
+  naming its formula and the fields it consumed, and the snapshot checks those
+  inputs resolve. ``SnapshotField.present`` cannot make the derived claim and
+  ``SnapshotField.derived`` cannot avoid it, so a computed rate cannot reach a
+  screen dressed as a sourced one.
 - **Provenance travels with the data — with absences as much as with values.**
   Every present field names its contributing source by ``source_id``, and so
   does every **source-dependent absence**: ``SOURCE_UNAVAILABLE`` and
@@ -110,6 +126,42 @@ _ABSENCE_TO_DISPLAY = {
 
 
 @dataclass(frozen=True)
+class Derivation:
+    """How a derived value was computed — the audit trail that keeps a derived
+    value from being presented as a sourced one.
+
+    A rate computed from other fields and displayed beside sourced rates is
+    indistinguishable from them unless the data says otherwise, and this metric
+    surface is dense with arithmetic identities that make such a computation
+    easy and quiet: ``SwStr% = Whiff% * Swing%`` determines any one of the three
+    from the other two, and ``UsageShare``'s two components multiply out to the
+    pitch count that is ``SwingingStrikeRate``'s denominator. Wherever two
+    columns' denominators are arithmetically related, one column can be
+    manufactured from another; carrying the derivation is what makes that
+    visible instead of invisible.
+
+    ``inputs`` names the fields consumed, by their ``InputSnapshot.iter_fields``
+    labels, and the snapshot checks that every one resolves to a field that
+    actually exists — so "auditable" is a property the contract enforces rather
+    than a claim a string makes.
+    """
+
+    formula: str
+    inputs: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.formula.strip():
+            raise InputContractError("a derivation must state the formula it applied")
+        if not self.inputs:
+            raise InputContractError(
+                "a derivation must name at least one input field: a value derived "
+                "from nothing is either a sourced value or an invention"
+            )
+        if any(not label.strip() for label in self.inputs):
+            raise InputContractError("a derivation's input labels must each be non-empty")
+
+
+@dataclass(frozen=True)
 class SnapshotField(Generic[T]):
     """An observed field: exactly one of ``value`` and ``absence`` is set.
 
@@ -121,11 +173,19 @@ class SnapshotField(Generic[T]):
     "provenance travels with the data" keeps that implication auditable. Only
     ``NOT_APPLICABLE`` may omit it — a strikeout's exit velocity implicates no
     source and correctly names none.
+
+    ``derivation`` separates a **sourced** value from a **derived** one. It is
+    ``None`` for every value the source supplied directly — which is what
+    ``present()`` constructs, so no existing field changes meaning — and
+    ``derived()`` is the only way to make the other claim. A derived field may
+    also be absent: a derivation propagates its inputs' absence with the reason
+    intact, and the derivation record survives to say which input was missing.
     """
 
     value: T | None
     absence: AbsenceReason | None
     source_id: str | None
+    derivation: Derivation | None = None
 
     def __post_init__(self) -> None:
         if (self.value is None) == (self.absence is None):
@@ -146,11 +206,31 @@ class SnapshotField(Generic[T]):
 
     @classmethod
     def present(cls, value: T, source_id: str) -> SnapshotField[T]:
+        """A value the source supplied directly. Never a derived value."""
         return cls(value=value, absence=None, source_id=source_id)
 
     @classmethod
-    def absent(cls, reason: AbsenceReason, source_id: str | None = None) -> SnapshotField[T]:
-        return cls(value=None, absence=reason, source_id=source_id)
+    def absent(
+        cls,
+        reason: AbsenceReason,
+        source_id: str | None = None,
+        derivation: Derivation | None = None,
+    ) -> SnapshotField[T]:
+        return cls(value=None, absence=reason, source_id=source_id, derivation=derivation)
+
+    @classmethod
+    def derived(
+        cls, value: T, formula: str, inputs: tuple[str, ...], source_id: str
+    ) -> SnapshotField[T]:
+        """A value this product computed. The only constructor that makes the
+        derived claim, so a derived value cannot reach a screen wearing a
+        sourced value's clothes."""
+        return cls(
+            value=value,
+            absence=None,
+            source_id=source_id,
+            derivation=Derivation(formula=formula, inputs=inputs),
+        )
 
     def display_state(self) -> DisplayState:
         """Total over every constructible field; no default branch."""
@@ -289,8 +369,17 @@ class AirBallShare:
 
 @dataclass(frozen=True)
 class UsageShare:
-    """Unit: share in [0, 1]. Denominator: all tracked pitches in the sample
-    the split was computed against, positive by construction.
+    """Unit: share in [0, 1]. Denominator: **every tracked pitch of every type**
+    in the sample the split was computed against — that whole-sample
+    denominator is what makes usage a share of the batter's pitch mix.
+    Positive by construction.
+
+    ``sample_pitches`` is **not** the count of pitches of this one type, which
+    is what ``SwingingStrikeRate`` divides by. The two sit in adjacent columns,
+    both are "pitches", and they are different populations: this one counts
+    across every type, that one counts within one. Their product with ``share``
+    is precisely the other's denominator, so they are related by arithmetic and
+    still not interchangeable.
 
     A **zero share over a positive sample is a present value** — the pitch
     type was genuinely not thrown — distinct from the usage being absent
@@ -307,8 +396,107 @@ class UsageShare:
 
 
 @dataclass(frozen=True)
+class IsolatedPower:
+    """Unit: isolated power (slugging minus batting average), in points of
+    extra-base power per at-bat. Denominator: **at-bats** — never plate
+    appearances, which include walks and hit-by-pitch and would deflate the
+    figure by each batter's walk share, the BABIP error transposed.
+
+    **Not a share.** ISO's ceiling is 3.000 — every at-bat a home run gives
+    slugging 4.000 against a 1.000 average — so ``_require_share``'s [0, 1]
+    bound is wrong here and is deliberately not used. The bound below is exact,
+    not a plausibility judgement.
+    """
+
+    points: Decimal
+    at_bats: int
+
+    def __post_init__(self) -> None:
+        if not Decimal("0") <= self.points <= Decimal("3"):
+            raise InputContractError(
+                f"isolated power must lie in [0, 3]; got {self.points} — the ceiling "
+                "is 3.000 (every at-bat a home run), and ISO is not a [0, 1] share"
+            )
+        _require_positive_count("at_bats", self.at_bats)
+
+
+@dataclass(frozen=True)
+class ExpectedWeightedOnBase:
+    """Unit: xwOBA, on the wOBA scale. Denominator: **plate appearances**
+    ending on this pitch type.
+
+    This is xwOBA in the standard meaning of the name, and specifically **not
+    xwOBACON**, which divides by batted-ball events. The two share a name-stem,
+    are both published per pitch type, and are different numbers over different
+    populations — one counts every plate appearance the pitch type ended,
+    the other only those that produced contact.
+
+    **Not a share.** The wOBA scale is a weighted average whose largest event
+    weight exceeds 1, so [0, 1] is the wrong bound. The bound below is a scale
+    guard whose purpose is to catch a units mix-up — 400 or 40.0 where 0.400
+    was meant — not to police baseball plausibility.
+    """
+
+    value: Decimal
+    plate_appearances: int
+
+    def __post_init__(self) -> None:
+        if not Decimal("0") <= self.value <= Decimal("4"):
+            raise InputContractError(
+                f"xwOBA must lie on the wOBA scale in [0, 4]; got {self.value} — this "
+                "bound catches a units mix-up, and xwOBA is not a [0, 1] share"
+            )
+        _require_positive_count("plate_appearances", self.plate_appearances)
+
+
+@dataclass(frozen=True)
+class WhiffRate:
+    """Unit: share in [0, 1]. Denominator: **swings** at this pitch type.
+
+    ``WhiffRate`` and ``SwingingStrikeRate`` carry the *same numerator* —
+    swinging strikes — over different denominators, so ``SwStr% = Whiff% *
+    Swing%`` and any two of the three determine the third. That identity makes
+    either rate computable from the other, which is exactly why neither may be
+    computed and presented as sourced: a derived value says so through
+    ``SnapshotField.derived``, or it does not appear.
+
+    The denominator is not recoverable from the other rate's field, which is
+    the correct behaviour rather than a gap: a rate over a denominator that was
+    never observed cannot be derived at all.
+    """
+
+    rate: Decimal
+    swings: int
+
+    def __post_init__(self) -> None:
+        _require_share("rate", self.rate)
+        _require_positive_count("swings", self.swings)
+
+
+@dataclass(frozen=True)
+class SwingingStrikeRate:
+    """Unit: share in [0, 1]. Denominator: **pitches of this pitch type** —
+    not swings, which is ``WhiffRate``'s denominator, and not the whole-sample
+    pitch count in ``UsageShare.sample_pitches``, which spans every type.
+
+    Three counts within reach of this one screen are all called "pitches" or
+    "swings" and none may stand in for another. See ``WhiffRate`` for the
+    identity that links the two rates, and ``UsageShare`` for the product that
+    reconstructs this denominator from usage's two components.
+    """
+
+    rate: Decimal
+    pitches: int
+
+    def __post_init__(self) -> None:
+        _require_share("rate", self.rate)
+        _require_positive_count("pitches", self.pitches)
+
+
+@dataclass(frozen=True)
 class PitchTypeSplit:
-    """A batter's contact quality against one pitch type.
+    """A batter's measured performance against one pitch type: seven metrics,
+    each over its own named denominator.
 
     ``usage_share`` is observed data — a measured share with the sample it was
     computed against — so it is a ``SnapshotField`` like every observed field
@@ -316,16 +504,70 @@ class PitchTypeSplit:
     the screen from data in the snapshot (§7), and the screen can distinguish
     an unavailable usage (named absence) from a true zero share (present
     ``UsageShare`` over a positive sample).
+
+    **Eligibility and availability are separate questions**, and the structure
+    keeps them separate. Whether this pitch type is shown at all is decided by
+    ``usage_share`` alone; whether any one metric has a number is each field's
+    own business. A qualifying pitch type with an unavailable xwOBA is a
+    displayed row with one absent cell — one missing metric never suppresses
+    the type, and an unevaluable usage is not a metric-level question at all.
+
+    **No field defaults.** Every metric is supplied explicitly at construction,
+    so a metric that was never considered cannot arrive looking like a metric
+    that was considered and found absent.
     """
 
     pitch_type: str
     usage_share: SnapshotField[UsageShare]
     barrel_rate: SnapshotField[BattedBallRate]
     exit_velocity: SnapshotField[ExitVelocityAverage]
+    isolated_power: SnapshotField[IsolatedPower]
+    expected_woba: SnapshotField[ExpectedWeightedOnBase]
+    whiff_rate: SnapshotField[WhiffRate]
+    swinging_strike_rate: SnapshotField[SwingingStrikeRate]
 
     def __post_init__(self) -> None:
         if not self.pitch_type:
             raise InputContractError("pitch_type must be non-empty")
+
+
+@dataclass(frozen=True)
+class WindowedPitchTypeSplits:
+    """The pitch-type split set one named window produced.
+
+    **The window binds here, not on each split.** A window is a property of the
+    computation that produced the whole set, not of an individual pitch type,
+    and a per-split window field would let one batter's splits disagree with
+    each other — a row that can disagree with itself, needing a consistency law
+    to patrol the seam. This mirrors ``WindowedBatterMetrics``, which is the
+    contract's already-established answer to the same question.
+
+    A screen therefore reads the window it is displaying off ``window``, from
+    the same structure that produced its rows, rather than from a separate
+    constant that can drift out of agreement with them.
+
+    ``splits`` is itself a ``SnapshotField`` because the set has its own absence
+    story, one level above any metric's: a **present, empty** set is a real
+    observation — the source answered and this batter faced no tracked pitches
+    in the window — and is distinct from the set being absent
+    (``NOT_YET_OBSERVED``: the window was never captured; ``SOURCE_UNAVAILABLE``:
+    the source failed). Without the wrapper an empty tuple would have to carry
+    both stories, which is the blank cell that could mean either.
+    """
+
+    window: Window
+    splits: SnapshotField[tuple[PitchTypeSplit, ...]]
+
+    def __post_init__(self) -> None:
+        present = self.splits.value
+        if present is None:
+            return
+        pitch_types = [split.pitch_type for split in present]
+        if len(pitch_types) != len(set(pitch_types)):
+            raise InputContractError(
+                f"{self.window.value} splits repeat a pitch type: a pitch type is "
+                "one row in one window, and a repeat is two answers to one question"
+            )
 
 
 @dataclass(frozen=True)
@@ -471,12 +713,17 @@ class BatterInputs:
     with a bare ``None`` (the collapsed absence this module exists to prevent)
     or to invent a reason for the omission — and an invented reason is a
     default, the thing the fail-closed ingestion law forbids.
+
+    ``pitch_type_splits`` is total over the named windows for exactly the same
+    reason, and ``splits_for`` is total for exactly the same reason. Each entry
+    binds its window to the split set that window produced, so a screen naming
+    a window names it from the structure that produced its rows.
     """
 
     batter_id: str
     name: str
     windows: tuple[WindowedBatterMetrics, ...]
-    pitch_type_splits: tuple[PitchTypeSplit, ...]
+    pitch_type_splits: tuple[WindowedPitchTypeSplits, ...]
     plate_appearance_log: SnapshotField[PlateAppearanceLog]
 
     def __post_init__(self) -> None:
@@ -494,9 +741,17 @@ class BatterInputs:
                 "contract is total over windows — an unavailable window travels as "
                 "absent fields, never as a missing entry"
             )
-        split_types = [split.pitch_type for split in self.pitch_type_splits]
-        if len(split_types) != len(set(split_types)):
-            raise InputContractError(f"batter {self.batter_id!r} repeats a pitch type")
+        split_windows = [windowed.window for windowed in self.pitch_type_splits]
+        if len(split_windows) != len(set(split_windows)):
+            raise InputContractError(f"batter {self.batter_id!r} repeats a split window")
+        split_omitted = [window.value for window in Window if window not in set(split_windows)]
+        if split_omitted:
+            raise InputContractError(
+                f"batter {self.batter_id!r} omits pitch-type splits for named "
+                f"window(s) {split_omitted}: splits are total over windows for the "
+                "same reason the metrics are — an uncaptured window travels as an "
+                "absent split set naming its reason, never as a missing entry"
+            )
 
     def metrics_for(self, window: Window) -> WindowedBatterMetrics:
         """Total: every named window resolves — absence lives in the fields."""
@@ -505,6 +760,21 @@ class BatterInputs:
                 return metrics
         raise InputContractError(  # unreachable past __post_init__, stated anyway
             f"batter {self.batter_id!r} has no {window.value} entry"
+        )
+
+    def splits_for(self, window: Window) -> WindowedPitchTypeSplits:
+        """Total: every named window resolves — absence lives in the split set.
+
+        Totality is what lets this return a structure rather than ``None``. A
+        bare ``None`` would be the collapsed absence this module exists to
+        prevent: the caller could not tell an uncaptured window from a batter
+        who faced nothing, and would have to invent a reason for the gap.
+        """
+        for windowed in self.pitch_type_splits:
+            if windowed.window is window:
+                return windowed
+        raise InputContractError(  # unreachable past __post_init__, stated anyway
+            f"batter {self.batter_id!r} has no {window.value} split entry"
         )
 
 
@@ -675,11 +945,28 @@ class InputSnapshot:
         if len(venue_ids) != len(set(venue_ids)):
             raise InputContractError("venue ids must be unique")
         known = set(source_ids)
-        for owner, snapshot_field in self.iter_fields():
+        swept = self.iter_fields()
+        known_labels = {owner for owner, _ in swept}
+        for owner, snapshot_field in swept:
             if snapshot_field.source_id is not None and snapshot_field.source_id not in known:
                 raise InputContractError(
                     f"{owner} names unknown source_id {snapshot_field.source_id!r}"
                 )
+            derivation = snapshot_field.derivation
+            if derivation is None:
+                continue
+            # "Auditable" is enforced, not asserted: a derivation's named inputs
+            # must resolve to fields that exist in this same snapshot, so the
+            # audit trail cannot be a plausible-looking string.
+            unresolved = [label for label in derivation.inputs if label not in known_labels]
+            if unresolved:
+                raise InputContractError(
+                    f"{owner} derives from input(s) {unresolved} that name no field in "
+                    "this snapshot; a derivation's inputs are iter_fields labels and "
+                    "must resolve, or the audit trail is unverifiable"
+                )
+            if owner in derivation.inputs:
+                raise InputContractError(f"{owner} names itself among its derivation inputs")
 
     def source(self, source_id: str) -> SourceRecord:
         for record in self.sources:
@@ -706,8 +993,26 @@ class InputSnapshot:
             sweep(f"batter {batter.batter_id}", batter)
             for metrics in batter.windows:
                 sweep(f"batter {batter.batter_id} {metrics.window.value}", metrics)
-            for split in batter.pitch_type_splits:
-                sweep(f"batter {batter.batter_id} vs {split.pitch_type}", split)
+            for windowed in batter.pitch_type_splits:
+                # The window enters the label because a pitch type now appears
+                # once per window: without it the three would collide and a
+                # label would no longer identify one field.
+                #
+                # CHANGING THIS FORMAT HAS A COST BEYOND READABILITY. These
+                # labels are what `Derivation.inputs` names, and what
+                # `__post_init__` resolves them against, so a format change
+                # invalidates every derivation recorded in the old format. That
+                # is not hypothetical: this very line's format changed in the
+                # same revision that introduced the coupling, and had a
+                # derivation existed then, it would have broken. Deliberately
+                # not pinned by a test — the format must stay free to change —
+                # so the obligation is to migrate recorded derivations with it.
+                stem = f"batter {batter.batter_id} {windowed.window.value}"
+                sweep(f"{stem} splits", windowed)
+                splits = windowed.splits.value
+                if splits is not None:
+                    for split in splits:
+                        sweep(f"{stem} vs {split.pitch_type}", split)
             log = batter.plate_appearance_log.value
             if log is not None:
                 for index, event in enumerate(log.events):

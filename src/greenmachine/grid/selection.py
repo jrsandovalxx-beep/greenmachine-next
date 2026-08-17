@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from greenmachine.inputs import InputSnapshot
+from greenmachine.inputs import BatterInputs, InputSnapshot
 
 
 def selected_batter_id(rows: Sequence[int], ids: Sequence[str]) -> str | None:
@@ -50,13 +50,19 @@ class DetailHandle:
     name: str
 
 
-def detail_handle(snapshot: InputSnapshot, batter_id: str) -> DetailHandle:
-    """Resolve a selected batter id to its handle.
+def batter_for(snapshot: InputSnapshot, batter_id: str) -> BatterInputs:
+    """Resolve a selected batter id to its inputs.
 
     Total over the snapshot's batters; an unknown id means the selection and
     the snapshot disagree — a programming error, raised rather than defaulted.
     """
     for batter in snapshot.batters:
         if batter.batter_id == batter_id:
-            return DetailHandle(batter_id=batter.batter_id, name=batter.name)
+            return batter
     raise LookupError(f"batter id {batter_id!r} is not in the rendered snapshot")
+
+
+def detail_handle(snapshot: InputSnapshot, batter_id: str) -> DetailHandle:
+    """Resolve a selected batter id to its handle — identity, not content."""
+    batter = batter_for(snapshot, batter_id)
+    return DetailHandle(batter_id=batter.batter_id, name=batter.name)
