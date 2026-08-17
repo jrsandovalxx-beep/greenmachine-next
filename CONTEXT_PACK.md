@@ -17,7 +17,7 @@ automated selection. Evidence confidence is displayed alongside, never fused int
 
 ## Current status
 
-- Active ticket: **GMF-003** (per `tickets/ACTIVE.md` → FEATURE_PHASE_PLAN §GMF-003).
+- Active ticket: **GMF-004** (per `tickets/ACTIVE.md` → FEATURE_PHASE_PLAN §GMF-004).
 - Decision count: **62** (D-001..D-062).
 - Plan (bootstrap, historical): REBUILD_PLAN v16, sha256 `c41b6abd5fbe64c0e9b468bea0c9a2ddb5f1b646780c017655f0295aa0b82ca2` — the pinned authority for
   GMN-000A … GMR-005; no longer the active ticket source.
@@ -55,6 +55,15 @@ automated selection. Evidence confidence is displayed alongside, never fused int
   cells render as `None` on the canvas; the authorized remedy vehicle is GMF-003's
   selection-driven detail content, **not** a change to the GMF-002 grid-cell
   representation. Record: `tickets/completed/GMF-002.md`.
+- GMF-003 complete: implementation APPROVED WITH NOTES for
+  `161161457957ab7b178ba8ab802aa4e8ea5525a4`, merged to `staging`
+  (`dae0b42031d5d3c1d487fdb5972930f8ffd41c59`) — the pitch-type metrics screen on
+  the GMF-002 grid: named `SEASON_TO_DATE` window, stated ≥15% usage threshold
+  with suppressed types acknowledged, per-row provenance, batter selection only
+  by user action. Shipped the authorized additive remedy — absence reasons in
+  words on its own surface and in the detail panel — while the component-level
+  `None` rendering remains as recorded at GMF-002; the grid-cell representation
+  is untouched in both directions. Record: `tickets/completed/GMF-003.md`.
 
 ## Read first
 
