@@ -99,6 +99,20 @@ Current state only. History and reasoning live in `DECISIONS.md`. Rewritten clea
   authorized without plan-level authorization**. Record: `tickets/completed/GMF-002.md`,
   which carries both verdicts verbatim. This closeout PR is the ticket's third review
   object and its verdict lives in the review thread, not in this file.
+- **GMF-003: implementation COMPLETE** — APPROVED WITH NOTES for SHA
+  `161161457957ab7b178ba8ab802aa4e8ea5525a4` (2026-08-16), merged to `staging` as
+  `dae0b42031d5d3c1d487fdb5972930f8ffd41c59`. The pitch-type metrics screen on the
+  GMF-002 grid: seven metrics per qualifying pitch type against the named
+  `SEASON_TO_DATE` window, the ≥15% usage threshold stated on screen with
+  suppressed types named and counted, three-way absence carried to the surface,
+  per-row provenance notes distinguishing sourced from derived values, and batter
+  selection only by user action (`index=None` with an explicit invitation).
+  **GMF-003 shipped the authorized additive remedy** for the GMF-002 `None`
+  finding — absence reasons in words on its own surface and in the detail panel —
+  while the component-level `None` rendering remains as recorded at GMF-002: the
+  grid-cell representation is untouched in both directions. Record:
+  `tickets/completed/GMF-003.md`. This closeout PR is the ticket's second review
+  object and its verdict lives in the review thread, not in this file.
 
 ## Specialist work
 - **GB-001/GB-002 (Grok): complete.** Twelve locked decisions (D-023), sample floors and rulings
