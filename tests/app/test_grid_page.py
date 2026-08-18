@@ -219,11 +219,13 @@ def test_the_initial_order_is_neutral_and_no_ranking_widget_exists() -> None:
     labels = [w.label for w in [*at.selectbox, *at.multiselect, *at.radio]]
     # "Batter" is §GMF-003's chooser for whose pitch-type splits to read: a
     # filter the user composes, in the shape the plan's "filters are
-    # user-composed, scores are product-composed" line permits. Every control on
-    # the page still names a view choice; none ranks, scores or picks.
-    # Grouped by widget type, not by page order: both selectboxes, then the
-    # multiselect, then the radio.
-    assert labels == ["Window", "Batter", "Columns", "Density"]
+    # user-composed, scores are product-composed" line permits. The second
+    # "Columns" is §GMF-004's column chooser on the parks table — the same view
+    # choice as the grid's, on another screen. Every control on the page still
+    # names a view choice; none ranks, scores or picks.
+    # Grouped by widget type, not by page order: both selectboxes, then both
+    # multiselects, then the radio.
+    assert labels == ["Window", "Batter", "Columns", "Columns", "Density"]
 
 
 def test_with_no_selection_the_page_invites_one_and_claims_nothing() -> None:

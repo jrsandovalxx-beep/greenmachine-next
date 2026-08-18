@@ -8,5 +8,15 @@ provider-data question arises (D-051/D-052 untouched).
 """
 
 from greenmachine.fixtures.grid_demo import grid_demo_snapshot
+from greenmachine.fixtures.parks_demo import (
+    CONDITIONS_SOURCE_ID,
+    FixtureWeatherAdapter,
+    parks_demo_snapshot,
+)
 
-__all__ = ["grid_demo_snapshot"]
+__all__ = [
+    "CONDITIONS_SOURCE_ID",
+    "FixtureWeatherAdapter",
+    "grid_demo_snapshot",
+    "parks_demo_snapshot",
+]

@@ -1,12 +1,21 @@
-"""GreenMachine composition root — deployment shell, batter grid, metrics screen.
+"""GreenMachine composition root — shell, batter grid, metrics screen, parks.
 
 Through GMR-004 this page was a shell with no product screens; GMF-002 added
 the first visible product surface (FEATURE_PHASE_PLAN §GMF-002), a batter grid
-rendering an ``InputSnapshot`` fixture, and §GMF-003 adds the metrics screen —
+rendering an ``InputSnapshot`` fixture, §GMF-003 added the metrics screen —
 pitch types against seven metrics, each over its own named denominator — plus
-the selection-driven detail panel D-058 established. The page still renders the
-shell's deployment fields — environment, version, commit — because the staging
-deployment is verified end to end through them.
+the selection-driven detail panel D-058 established, and §GMF-004 adds the
+parks screen: thirty venues with park factors per handedness beside venue
+type, the weather seam bound to a fixture, and D-055's roof states each
+rendering as its own. The page still renders the shell's deployment fields —
+environment, version, commit — because the staging deployment is verified end
+to end through them.
+
+**The parks screen carries two provenances and says so.** Its factor columns
+render the pinned Savant manual export with its export date; its roof and
+forecast columns are fixture-bound until §GMF-005 binds a live adapter behind
+the same seam. Real and fixture data share a table here, which is exactly why
+neither is left to be inferred.
 
 Every widget lives here and only here: ``src/`` imports no streamlit
 (architecture-enforced), and both screens' logic — frames, grading, selection
@@ -31,7 +40,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from greenmachine.fixtures import grid_demo_snapshot
+from greenmachine.fixtures import grid_demo_snapshot, parks_demo_snapshot
 from greenmachine.grid import (
     DENSITY_ROWS,
     METRIC_COLUMNS,
@@ -47,6 +56,18 @@ from greenmachine.grid import (
     visible_columns,
 )
 from greenmachine.inputs import InputSnapshot, Window
+from greenmachine.inputs.savant_park_factors import basis_statement
+from greenmachine.parks import ALL_COLUMNS as PARK_COLUMNS
+from greenmachine.parks import FACTOR_COLUMNS as PARK_FACTOR_COLUMNS
+from greenmachine.parks import (
+    VENUE_COLUMN,
+    factor_absence_notes,
+    forecast_suppression_notes,
+    unavailable_forecast_notes,
+)
+from greenmachine.parks import (
+    screen_frames as park_frames,
+)
 from greenmachine.splits import ABSENCE_WORDS as SPLIT_ABSENCE_WORDS
 from greenmachine.splits import METRIC_COLUMNS as SPLIT_METRIC_COLUMNS
 from greenmachine.splits import (
@@ -328,6 +349,78 @@ def render_metrics_screen(snapshot: InputSnapshot) -> None:
         )
 
 
+def render_parks_screen() -> None:
+    """The §GMF-004 parks screen: thirty venues, factors per handedness.
+
+    **Two provenances, stated apart.** The factor columns are the pinned Savant
+    export — real values, digest-verified on read, with the manual export date
+    on screen so the page can never imply fresher data than it holds. The roof
+    and forecast columns are fixture-bound: the weather seam exists as one
+    adapter interface (criterion 3) and §GMF-005 is where a live source binds
+    behind it. Mixing the two silently would be the most expensive kind of
+    correct, so the captions name which is which.
+
+    No ranking and nothing pre-selected: rows open in the venue's own name
+    order, and sorting by a factor is the user's click in the header
+    (D-015/D-017). The ticket's name invites a target list; the product does
+    not compose one.
+    """
+    snapshot = parks_demo_snapshot()
+    screen = park_frames(snapshot)
+    st.subheader("Parks")
+    st.caption(
+        f"{basis_statement()} A factor shows its plate-appearance sample beside "
+        "it — the pinned export spans 13,560 to 31,517 PA, so two factors are "
+        "not equally well evidenced (D-014). Initial order is neutral — the "
+        "venue's own name — and every ordering is yours to apply in the headers."
+    )
+    st.caption(
+        "Roof state and forecast are **fixture-bound** in this ticket: the weather "
+        "seam is one adapter interface with a fixture behind it, and the live NWS "
+        "adapter arrives at §GMF-005. Their values are deliberately non-baseball "
+        "(OQ-4). Park factors above are the real pinned export; conditions here are not."
+    )
+    chosen = st.multiselect(
+        "Columns",
+        options=list(PARK_COLUMNS),
+        default=list(PARK_COLUMNS),
+        key="parks_columns",
+        help="The venue column always shows, so a selection stays readable.",
+    )
+    st.dataframe(
+        graded_styler(screen.data, screen.texts, screen.styles, PARK_FACTOR_COLUMNS),
+        column_order=visible_columns(tuple(chosen), VENUE_COLUMN, PARK_COLUMNS),
+        height=frame_height("Roomy", len(screen.data)),
+        hide_index=True,
+        key="parks",
+    )
+
+    for note in forecast_suppression_notes(snapshot):
+        st.markdown(f"- {note}")
+    unavailable = unavailable_forecast_notes(snapshot)
+    if unavailable:
+        st.markdown("**Forecast applies but the adapter had no value**")
+        for note in unavailable:
+            st.markdown(f"- {note}")
+        st.caption(
+            "The roof does not suppress these; the source did not supply them. "
+            "That is a fact about the adapter, not about the ballpark."
+        )
+
+    missing = factor_absence_notes(snapshot)
+    if missing:
+        st.markdown("**Absent park factors, in words**")
+        for note in missing:
+            st.markdown(f"- {note}")
+        st.caption(
+            "The component renders a null-data cell as its own `None` and drops "
+            "the display value carried for it, so an absent factor's reason is "
+            "stated here rather than left to a cell's background colour. The "
+            "export answered completely; these venues have no row in it yet, "
+            "and nothing is substituted for the gap."
+        )
+
+
 def main() -> None:
     st.set_page_config(page_title="GreenMachine", layout="wide")
     bridge_secrets_into_environment()
@@ -342,6 +435,8 @@ def main() -> None:
     render_grid()
     st.divider()
     render_metrics_screen(grid_demo_snapshot())
+    st.divider()
+    render_parks_screen()
 
 
 if __name__ == "__main__":
