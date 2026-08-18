@@ -426,9 +426,10 @@ def main() -> None:
     bridge_secrets_into_environment()
     st.title("GreenMachine")
     st.caption(
-        "Product surfaces per FEATURE_PHASE_PLAN §GMF-002 and §GMF-003 — "
-        "synthetic fixtures only; criteria tallies, never predictions "
-        "(D-015/D-017)."
+        "Product surfaces per FEATURE_PHASE_PLAN §GMF-002, §GMF-003 and §GMF-004 — "
+        "batter data is synthetic fixture (OQ-4), park factors are the pinned "
+        "Savant manual export, and conditions are fixture-bound until §GMF-005; "
+        "criteria tallies, never predictions (D-015/D-017)."
     )
     render_shell_fields()
     st.divider()
