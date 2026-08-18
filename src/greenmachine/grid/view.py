@@ -44,6 +44,7 @@ from greenmachine.inputs import (
     ExpectedWeightedOnBase,
     InputSnapshot,
     IsolatedPower,
+    ParkFactor,
     SnapshotField,
     SwingingStrikeRate,
     SwingShare,
@@ -158,6 +159,12 @@ def cell_text(field: MetricField) -> str:
         return f"{value.points} · AB {value.at_bats}"
     if isinstance(value, ExpectedWeightedOnBase):
         return f"{value.value} · PA {value.plate_appearances}"
+    if isinstance(value, ParkFactor):
+        # An index, not a rate: 100 is neutral and the number has no
+        # denominator of its own. ``PA`` here is the sample the factor was
+        # built over (D-014 beside the value), which varies from 13,560 to
+        # 31,517 across the pinned export — a spread a reader must see.
+        return f"{value.factor} · PA {value.plate_appearances}"
     if isinstance(value, WhiffRate):
         return f"{value.rate} · {value.swings} swings"
     if isinstance(value, SwingingStrikeRate):
@@ -188,6 +195,8 @@ def _numeric(field: MetricField) -> Decimal | None:
         return value.points
     if isinstance(value, ExpectedWeightedOnBase):
         return value.value
+    if isinstance(value, ParkFactor):
+        return value.factor
     if isinstance(value, WhiffRate | SwingingStrikeRate):
         return value.rate
     raise TypeError(f"no gradable magnitude for value type {type(value).__name__!r}")

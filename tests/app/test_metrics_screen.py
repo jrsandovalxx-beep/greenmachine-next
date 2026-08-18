@@ -35,9 +35,22 @@ def _run_app() -> AppTest:
     return at
 
 
+def _splits_elements(at: AppTest) -> list[Any]:
+    """Every pitch-type grid on the page, by this screen's own column signature.
+
+    Previously "the dataframe that is not the keyed batter grid", which was
+    exact while the page carried two tables and stopped being exact the moment
+    §GMF-004 added the parks table — a non-selectable dataframe carries no
+    proto id, so it matched the not-the-grid filter too. Identifying the
+    element by the column only this screen has keeps each assertion pointed at
+    the surface it was written for, however many tables the page grows.
+    """
+    return [element for element in at.dataframe if PITCH_TYPE_COLUMN in list(element.value.columns)]
+
+
 def _splits_element(at: AppTest) -> Any:
-    """The pitch-type grid: the dataframe that is not the keyed batter grid."""
-    others = [element for element in at.dataframe if not element.proto.id.endswith("-grid")]
+    """The pitch-type grid: exactly one when the screen is showing a batter."""
+    others = _splits_elements(at)
     assert len(others) == 1, f"expected one pitch-type grid, found {len(others)}"
     return others[0]
 
@@ -88,7 +101,7 @@ def test_the_initial_state_selects_nobody():  # D-015/D-017
     assert "Choose a batter to read their pitch-type splits." in captions
     assert "Nothing is selected for you." in captions
     # No split surface exists yet: no second dataframe, no window statement.
-    assert not [e for e in at.dataframe if not e.proto.id.endswith("-grid")]
+    assert not _splits_elements(at)
     body = " | ".join(m.value for m in at.markdown)
     assert "**Window:** SEASON_TO_DATE" not in body
 
@@ -202,7 +215,7 @@ def test_an_absent_split_set_reports_its_own_reason(batter: str, expected: str) 
     assert expected in info
     assert "No pitch-type splits to show" in info
     # No table at all, rather than an empty one that would read as "no types".
-    assert not [e for e in at.dataframe if not e.proto.id.endswith("-grid")]
+    assert not _splits_elements(at)
 
 
 def test_a_batter_who_faced_no_pitches_reads_as_an_observation() -> None:
@@ -219,7 +232,7 @@ def test_the_batter_control_changes_the_rendered_screen() -> None:
     at = _run_selected()
     before = list(_splits_element(at).value[PITCH_TYPE_COLUMN])
     at = _select_batter(at, "Batter Charlie")
-    remaining = [e for e in at.dataframe if not e.proto.id.endswith("-grid")]
+    remaining = _splits_elements(at)
     assert before == ["CH", "FF", "SL"]
     assert not remaining  # an absent set renders no table at all
 
