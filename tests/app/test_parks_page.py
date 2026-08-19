@@ -13,8 +13,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
 from streamlit.testing.v1 import AppTest
 
+from greenmachine.fixtures import FixtureWeatherAdapter
 from greenmachine.parks import (
     ALL_COLUMNS,
     FORECAST_COLUMN,
@@ -24,6 +26,7 @@ from greenmachine.parks import (
     VENUE_COLUMN,
     VENUE_TYPE_COLUMN,
 )
+from greenmachine.weather.nws import NwsWeatherAdapter
 
 _APP_PATH = Path(__file__).resolve().parents[2] / "streamlit_app.py"
 
@@ -135,3 +138,78 @@ def test_absent_factors_are_stated_in_words_somewhere_on_the_page() -> None:
     markdown = " ".join(element.value for element in at.markdown)
     assert "Sutter Health Park" in markdown
     assert "not yet observed" in markdown
+
+
+# --- §GMF-005: the binding, and the captions that must stay true ------------
+
+
+def test_a_local_render_binds_the_fixture_and_never_the_network() -> None:
+    """The ratified discriminator, asserted at the page.
+
+    Every test in this suite runs local, and GM-008 would fail any of them that
+    reached a socket — but a passing suite is not the claim. The claim is that
+    the page *chooses* the fixture locally, which is what keeps the local-render
+    evidence route alive for this ticket and the ones after it.
+    """
+    captions = " ".join(element.value for element in _run_app().caption)
+    assert "fixture-bound" in captions
+    assert "local" in captions
+    assert "api.weather.gov" not in captions
+
+
+def test_the_page_names_which_weather_binding_is_live_for_this_environment() -> None:
+    """Honesty in both directions: the local page says local, so a reader is
+    never left inferring which of the two states they are looking at."""
+    captions = " ".join(element.value for element in _run_app().caption)
+    assert "local environment" in captions
+
+
+def test_the_page_level_caption_names_every_section_it_renders() -> None:
+    """The GMF-004 V1 defect class, pre-empted: a global claim that outlives
+    the ticket it described is exactly what the render caught last time."""
+    captions = " ".join(element.value for element in _run_app().caption)
+    assert "§GMF-005" in captions
+    # The claim that went false when weather gained a source must be gone.
+    assert "conditions are fixture-bound until" not in captions
+
+
+def test_the_page_names_when_its_forecasts_were_retrieved() -> None:
+    """A freshness bound stated only in code says nothing to the reader; the
+    ruling asks for the retrieval time on the surface, and the fixture's
+    injected clock makes it a fixed, honest value rather than a live read."""
+    captions = " ".join(element.value for element in _run_app().caption)
+    assert "Forecasts retrieved" in captions
+    assert "2026-01-01T12:00:00+00:00" in captions
+
+
+def test_roof_is_still_described_as_fixture_bound() -> None:
+    """Weather gained a source in this ticket and roof did not. A reader who
+    saw one go live would otherwise assume the other did too."""
+    captions = " ".join(element.value for element in _run_app().caption)
+    assert "roof" in captions.lower()
+    assert "fixture" in captions.lower()
+
+
+def test_the_discriminator_chooses_the_live_adapter_only_off_local(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both directions of ruling B, proven on the function rather than the page.
+
+    Deliberately never calls ``forecast_for``: binding the live adapter is
+    correct, using it inside this suite is not. GM-008 raises a ``RuntimeError``
+    from the socket layer, which is not a ``TransportError`` and would not be
+    caught — the adapter's failure mapping covers a network that answers badly,
+    not a suite that has forbidden networking outright. So this asserts the
+    choice and stops there.
+    """
+    import streamlit_app
+
+    monkeypatch.setenv("GM_ENVIRONMENT", "staging")
+    adapter, live = streamlit_app.weather_binding()
+    assert live is True
+    assert isinstance(adapter, NwsWeatherAdapter)
+
+    monkeypatch.setenv("GM_ENVIRONMENT", "local")
+    adapter, live = streamlit_app.weather_binding()
+    assert live is False
+    assert isinstance(adapter, FixtureWeatherAdapter)

@@ -8,6 +8,7 @@ accident is the moment the interface appears.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from pathlib import Path
 
 from greenmachine.fixtures import CONDITIONS_SOURCE_ID, FixtureWeatherAdapter, parks_demo_snapshot
@@ -51,7 +52,15 @@ def test_the_fixture_cannot_silently_invent_coverage() -> None:
     this test's first version asserted a tautology and proved nothing.
     """
     adapter = FixtureWeatherAdapter()
-    unknown = ParkVenue("nowhere-park", "Nowhere Park", "Club Zulu", VenueType.OPEN_AIR, None)
+    unknown = ParkVenue(
+        "nowhere-park",
+        "Nowhere Park",
+        "Club Zulu",
+        VenueType.OPEN_AIR,
+        None,
+        latitude=Decimal("12.000"),
+        longitude=Decimal("-34.000"),
+    )
     field = adapter.forecast_for(unknown)
     assert field.value is None
     assert field.absence is AbsenceReason.NOT_YET_OBSERVED

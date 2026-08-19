@@ -811,6 +811,16 @@ class ParkVenue:
     the committed export (data/SAVANT_PARK_FACTORS_PROVENANCE.md), never
     from memory, and it is ``None`` exactly where the snapshot has no row
     for the club — a gap the product represents, never fills.
+
+    ``latitude``/``longitude`` are **required** (§GMF-005). The NWS API is
+    addressed only by coordinate — ``/points/{lat},{lon}`` — and publishes no
+    venue-name endpoint, so a venue without coordinates cannot be asked about
+    the weather at all. Making them required rather than optional means the
+    type system cannot express an unaddressable venue, which is the same
+    signature-enforcement §GMF-003 used for observed usage share. They are
+    geographic facts about a fixed place, not provider data: D-052 and D-057
+    do not reach them. Precision is stated where the values live
+    (``park_reference``), not here.
     """
 
     venue_id: str
@@ -818,10 +828,20 @@ class ParkVenue:
     team: str
     venue_type: VenueType
     savant_venue_id: int | None
+    latitude: Decimal
+    longitude: Decimal
 
     def __post_init__(self) -> None:
         if not self.venue_id or not self.name or not self.team:
             raise InputContractError("venue_id, name and team must be non-empty")
+        if not Decimal("-90") <= self.latitude <= Decimal("90"):
+            raise InputContractError(
+                f"venue {self.venue_id!r}: latitude {self.latitude} is outside [-90, 90]"
+            )
+        if not Decimal("-180") <= self.longitude <= Decimal("180"):
+            raise InputContractError(
+                f"venue {self.venue_id!r}: longitude {self.longitude} is outside [-180, 180]"
+            )
 
 
 @dataclass(frozen=True)
@@ -849,18 +869,45 @@ class ParkFactor:
 
 @dataclass(frozen=True)
 class WeatherForecast:
-    """The D-054 NWS forecast surface the GMF-004 seam binds. Units: °F, mph."""
+    """The D-054 NWS forecast surface the GMF-004 seam binds. Units: °F, mph.
+
+    ``obtained_at`` is **when this forecast was retrieved from its source** —
+    not when the snapshot was assembled (§GMF-005). The two diverge the moment
+    a cache exists: a cached forecast is older than the ``InputSnapshot`` that
+    renders it, and that gap is exactly what a stated freshness bound has to
+    make visible to a reader.
+
+    It lives on the value rather than on ``SourceRecord`` for that record's own
+    stated reason: retrieval time at the captured moment **is not one fact**. A
+    live adapter answers one venue from a fresh call and another from a cache
+    filled twenty minutes earlier, so a table-level acquisition time would be a
+    second representation of the values' own story — the defect class
+    ``SourceRecord`` exists to prevent. ``ManualExportProvenance`` carries a
+    single export date correctly because that export *is* one acquisition act
+    for all of its rows; a live adapter has one per venue. The value travels
+    through the cache, so its timestamp travels with it.
+    """
 
     temperature_f: Decimal
     wind_speed_mph: Decimal
     wind_direction: str
     short_forecast: str
+    obtained_at: datetime
 
     def __post_init__(self) -> None:
         if self.wind_speed_mph < 0:
             raise InputContractError("wind speed cannot be negative")
         if not self.wind_direction or not self.short_forecast:
             raise InputContractError("wind_direction and short_forecast must be non-empty")
+        if (
+            self.obtained_at.tzinfo is None
+            or self.obtained_at.utcoffset() is None
+            or self.obtained_at.utcoffset() != timedelta(0)
+        ):
+            raise InputContractError(
+                "obtained_at must be timezone-aware UTC (utcoffset zero), the same "
+                "single representation InputSnapshot.captured_at uses"
+            )
 
 
 @dataclass(frozen=True)

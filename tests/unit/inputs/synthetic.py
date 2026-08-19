@@ -342,7 +342,13 @@ def make_batter(
 
 
 OPEN_AIR_VENUE = ParkVenue(
-    "synthetic-open", "Synthetic Open Park", "Synthetic Club", VenueType.OPEN_AIR, None
+    "synthetic-open",
+    "Synthetic Open Park",
+    "Synthetic Club",
+    VenueType.OPEN_AIR,
+    None,
+    latitude=Decimal("1.000"),
+    longitude=Decimal("2.000"),
 )
 RETRACTABLE_VENUE = ParkVenue(
     "synthetic-retractable",
@@ -350,6 +356,8 @@ RETRACTABLE_VENUE = ParkVenue(
     "Synthetic Dome Club",
     VenueType.RETRACTABLE_ROOF,
     None,
+    latitude=Decimal("3.000"),
+    longitude=Decimal("4.000"),
 )
 FIXED_VENUE = ParkVenue(
     "synthetic-fixed",
@@ -357,6 +365,8 @@ FIXED_VENUE = ParkVenue(
     "Synthetic Fixed Club",
     VenueType.FIXED_ROOF,
     None,
+    latitude=Decimal("5.000"),
+    longitude=Decimal("6.000"),
 )
 
 
@@ -384,6 +394,7 @@ def make_park(
                 wind_speed_mph=Decimal("0"),
                 wind_direction="XX",
                 short_forecast="synthetic",
+                obtained_at=datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC),
             ),
             SOURCE_SYNTHETIC,
         )

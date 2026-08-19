@@ -11,11 +11,19 @@ rendering as its own. The page still renders the shell's deployment fields —
 environment, version, commit — because the staging deployment is verified end
 to end through them.
 
-**The parks screen carries two provenances and says so.** Its factor columns
-render the pinned Savant manual export with its export date; its roof and
-forecast columns are fixture-bound until §GMF-005 binds a live adapter behind
-the same seam. Real and fixture data share a table here, which is exactly why
-neither is left to be inferred.
+**The parks screen carries three provenances and says so.** Its factor columns
+render the pinned Savant manual export with its export date. Its forecast column
+is **live from api.weather.gov** in a deployed environment and fixture-bound
+locally — §GMF-005 bound the live adapter behind the §GMF-004 seam, and the
+discriminator is the environment, so a local render never becomes a network
+call. Its roof column stays **fixture-bound everywhere**: §GMF-005 gave weather
+a source and gave roof none, and a reader who saw weather go live would
+otherwise reasonably assume roof went with it. Real and fixture data share a
+table here, which is exactly why none of it is left to be inferred.
+
+**The live path exists in one place.** ``greenmachine.weather.transport`` is the
+only module in ``src`` that can open a connection, and it reaches exactly one
+host by module constant. Nothing else in this application fetches anything.
 
 Every widget lives here and only here: ``src/`` imports no streamlit
 (architecture-enforced), and both screens' logic — frames, grading, selection
@@ -40,7 +48,8 @@ from pathlib import Path
 
 import streamlit as st
 
-from greenmachine.fixtures import grid_demo_snapshot, parks_demo_snapshot
+from greenmachine.common.clock import SystemClock
+from greenmachine.fixtures import FixtureWeatherAdapter, grid_demo_snapshot, parks_demo_snapshot
 from greenmachine.grid import (
     DENSITY_ROWS,
     METRIC_COLUMNS,
@@ -82,6 +91,8 @@ from greenmachine.splits import (
     threshold_statement,
     window_label,
 )
+from greenmachine.weather.nws import CONTACT_ENV_VAR, DEFAULT_CONTACT, NwsWeatherAdapter
+from greenmachine.weather.transport import UrllibTransport, real_sleep
 
 REPO_ROOT = Path(__file__).resolve().parent
 
@@ -164,6 +175,53 @@ def resolve_commit() -> str:
     if env_value:
         return f"{env_value} (env)"
     return "unknown"
+
+
+def weather_binding() -> tuple[object, bool]:
+    """Which weather adapter this environment gets, and whether it is live.
+
+    **The discriminator is the environment, stated rather than implied.** A local
+    run binds the fixture: a local render must never become a network call, or
+    the local-render evidence route §GMF-003 and §GMF-004 both used quietly
+    dies — and every test in this suite runs local. Only a deployed environment
+    binds the live NWS adapter, which is what §GMF-005 submission 2 observes.
+
+    The contact string is configuration read here at the composition root and
+    injected, never reached for from inside the adapter: ``GM_NWS_CONTACT`` if
+    set, otherwise the committed repository URL. It is not a secret — it grants
+    no access and identifies rather than authenticates — so D-056's deferral of
+    ``st.secrets`` stands untouched.
+    """
+    if resolve_environment() == "local":
+        return FixtureWeatherAdapter(), False
+    contact = os.environ.get(CONTACT_ENV_VAR, "").strip() or DEFAULT_CONTACT
+    return (
+        NwsWeatherAdapter(
+            transport=UrllibTransport(),
+            clock=SystemClock(),
+            sleep=real_sleep,
+            contact=contact,
+        ),
+        True,
+    )
+
+
+def retrieval_statement(snapshot: InputSnapshot) -> str:
+    """When the forecasts on screen were obtained from their source.
+
+    A freshness bound stated only in code says nothing to the reader it exists
+    for. Because answers are cached, two rows can carry different ages, so the
+    span is reported rather than a single reassuring number.
+    """
+    obtained = sorted(
+        park.forecast.value.obtained_at for park in snapshot.parks if park.forecast.value
+    )
+    if not obtained:
+        return "No forecast on this page carries a retrieval time: none was obtained."
+    first, last = obtained[0], obtained[-1]
+    if first == last:
+        return f"Forecasts retrieved {first.isoformat()}."
+    return f"Forecasts retrieved between {first.isoformat()} and {last.isoformat()}."
 
 
 def render_shell_fields() -> None:
@@ -365,7 +423,8 @@ def render_parks_screen() -> None:
     (D-015/D-017). The ticket's name invites a target list; the product does
     not compose one.
     """
-    snapshot = parks_demo_snapshot()
+    adapter, live = weather_binding()
+    snapshot = parks_demo_snapshot(adapter)
     screen = park_frames(snapshot)
     st.subheader("Parks")
     st.caption(
@@ -374,12 +433,28 @@ def render_parks_screen() -> None:
         "not equally well evidenced (D-014). Initial order is neutral — the "
         "venue's own name — and every ordering is yours to apply in the headers."
     )
-    st.caption(
-        "Roof state and forecast are **fixture-bound** in this ticket: the weather "
-        "seam is one adapter interface with a fixture behind it, and the live NWS "
-        "adapter arrives at §GMF-005. Their values are deliberately non-baseball "
-        "(OQ-4). Park factors above are the real pinned export; conditions here are not."
-    )
+    environment = resolve_environment()
+    if live:
+        st.caption(
+            f"**Three provenances on this table, and they are not the same.** Park "
+            f"factors are the real pinned Savant export. Forecasts are **live from "
+            f"api.weather.gov** in this `{environment}` environment. Roof state is "
+            "still **fixture-bound** (OQ-4 values): §GMF-005 made weather live and "
+            "gave roof no source, so a roof reading here is a validation artifact "
+            "and not a measurement. "
+            f"{retrieval_statement(snapshot)} "
+            f"{getattr(adapter, 'freshness_statement', lambda: '')()}"
+        )
+    else:
+        st.caption(
+            f"**Roof state and forecast are both fixture-bound** in this "
+            f"`{environment}` environment: the weather seam is one adapter "
+            "interface, and the live NWS adapter binds only in a deployed "
+            "environment so that a local render never becomes a network call. "
+            "Their values are deliberately non-baseball (OQ-4). Park factors "
+            "above are the real pinned export; conditions here are not. "
+            f"{retrieval_statement(snapshot)}"
+        )
     chosen = st.multiselect(
         "Columns",
         options=list(PARK_COLUMNS),
@@ -407,6 +482,20 @@ def render_parks_screen() -> None:
             "That is a fact about the adapter, not about the ballpark."
         )
 
+    reasons = getattr(adapter, "diagnostics", dict)()
+    if reasons:
+        st.markdown("**Why a forecast could not be shown, per venue**")
+        by_name = {park.venue.venue_id: park.venue.name for park in snapshot.parks}
+        for venue_id, reason in sorted(reasons.items()):
+            st.markdown(f"- {by_name.get(venue_id, venue_id)} — {reason}")
+        st.caption(
+            "The contract records one reason — source unavailable — for a request "
+            "that timed out and for a venue the source does not cover. Those read "
+            "the same in the data and mean very different things to a person, so "
+            "the distinction is stated here rather than by adding a fourth absence "
+            "state to a contract that does not need one."
+        )
+
     missing = factor_absence_notes(snapshot)
     if missing:
         st.markdown("**Absent park factors, in words**")
@@ -425,10 +514,16 @@ def main() -> None:
     st.set_page_config(page_title="GreenMachine", layout="wide")
     bridge_secrets_into_environment()
     st.title("GreenMachine")
+    live_weather = resolve_environment() != "local"
+    weather_clause = (
+        "weather is live from api.weather.gov and roof state is still fixture-bound"
+        if live_weather
+        else "weather and roof state are both fixture-bound in this local environment"
+    )
     st.caption(
-        "Product surfaces per FEATURE_PHASE_PLAN §GMF-002, §GMF-003 and §GMF-004 — "
-        "batter data is synthetic fixture (OQ-4), park factors are the pinned "
-        "Savant manual export, and conditions are fixture-bound until §GMF-005; "
+        "Product surfaces per FEATURE_PHASE_PLAN §GMF-002, §GMF-003, §GMF-004 and "
+        f"§GMF-005 — batter data is synthetic fixture (OQ-4), park factors are the "
+        f"pinned Savant manual export, and {weather_clause}; "
         "criteria tallies, never predictions (D-015/D-017)."
     )
     render_shell_fields()
