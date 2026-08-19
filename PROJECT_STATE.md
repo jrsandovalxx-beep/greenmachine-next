@@ -113,6 +113,22 @@ Current state only. History and reasoning live in `DECISIONS.md`. Rewritten clea
   grid-cell representation is untouched in both directions. Record:
   `tickets/completed/GMF-003.md`. This closeout PR is the ticket's second review
   object and its verdict lives in the review thread, not in this file.
+- **GMF-004: implementation COMPLETE** — APPROVED WITH NOTES for SHA
+  `0e45d3ed29d829ba6dc35f6b802af45d975c1576` (2026-08-18), merged to `staging` as
+  `5594e0f118dfc77a6aada18ef487a1bc723bb000`. The parks screen: thirty venues in
+  neutral name order, the **pinned Savant home-run park factors per handedness**
+  beside venue type — the Product Owner's manual export, digest-verified before a
+  row is read, each factor carrying its plate-appearance sample (D-014) — with the
+  Athletics' gap represented as an absence and never filled. The **weather seam**
+  exists as one adapter interface returning an observed field, so *unavailable* is
+  an ordinary value; roof state and weather are fixture-bound until §GMF-005 binds
+  a live adapter behind the same interface. D-055's three roof states render
+  distinctly, a forecast is never printed for a closed roof, and — the ratified
+  extension — is withheld where the roof state was not obtained, since an
+  undetermined roof may be closed in fact. The page states its two provenances
+  apart: the pinned export with its date, the fixture binding with §GMF-005 named.
+  Record: `tickets/completed/GMF-004.md`. This closeout PR is the ticket's second
+  review object and its verdict lives in the review thread, not in this file.
 
 ## Specialist work
 - **GB-001/GB-002 (Grok): complete.** Twelve locked decisions (D-023), sample floors and rulings

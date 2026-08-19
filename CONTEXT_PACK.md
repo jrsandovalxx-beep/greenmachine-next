@@ -17,7 +17,7 @@ automated selection. Evidence confidence is displayed alongside, never fused int
 
 ## Current status
 
-- Active ticket: **GMF-004** (per `tickets/ACTIVE.md` → FEATURE_PHASE_PLAN §GMF-004).
+- Active ticket: **GMF-005** (per `tickets/ACTIVE.md` → FEATURE_PHASE_PLAN §GMF-005).
 - Decision count: **62** (D-001..D-062).
 - Plan (bootstrap, historical): REBUILD_PLAN v16, sha256 `c41b6abd5fbe64c0e9b468bea0c9a2ddb5f1b646780c017655f0295aa0b82ca2` — the pinned authority for
   GMN-000A … GMR-005; no longer the active ticket source.
@@ -64,6 +64,16 @@ automated selection. Evidence confidence is displayed alongside, never fused int
   words on its own surface and in the detail panel — while the component-level
   `None` rendering remains as recorded at GMF-002; the grid-cell representation
   is untouched in both directions. Record: `tickets/completed/GMF-003.md`.
+- GMF-004 complete: implementation APPROVED WITH NOTES for
+  `0e45d3ed29d829ba6dc35f6b802af45d975c1576`, merged to `staging`
+  (`5594e0f118dfc77a6aada18ef487a1bc723bb000`) — the parks screen: thirty venues
+  in neutral name order, pinned Savant park factors per handedness beside venue
+  type with each factor's plate-appearance sample, the Athletics' gap represented
+  never filled; one weather-seam adapter interface bound to a fixture until
+  §GMF-005, so *unavailable* is an ordinary value; D-055's three roof states
+  distinct, a forecast never printed for a closed roof and withheld where the roof
+  state was not obtained. The page states its two provenances apart.
+  Record: `tickets/completed/GMF-004.md`.
 
 ## Read first
 
