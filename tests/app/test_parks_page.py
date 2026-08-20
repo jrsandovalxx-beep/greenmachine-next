@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from greenmachine.fixtures import FixtureWeatherAdapter
@@ -216,27 +215,25 @@ def test_the_discriminator_chooses_the_live_adapter_only_off_local(
     assert isinstance(adapter, FixtureWeatherAdapter)
 
 
-def _bare_mode_caching_is_active() -> bool:
-    """Whether ``st.cache_resource`` dedupes without a ScriptRunContext here.
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])
 
-    It does at streamlit 1.60 and does **not** at the pinned 1.37 floor, where a
-    cached function outside a script run is a passthrough. That is a difference
-    in what a bare test can *observe*, not in what production does: a real run
-    always carries a context, so the cross-rerun lifetime holds at both versions.
-    Probed rather than version-sniffed, so the gate tracks the actual behaviour.
-    """
-
-    @st.cache_resource
-    def _probe(key: str) -> object:
-        return object()
-
-    return _probe("probe") is _probe("probe")
+# A script that binds the live adapter twice and reports whether it is the same
+# object. It never calls ``forecast_for``, so nothing fetches: binding the live
+# adapter is correct, and using it inside this suite is not.
+_RERUN_PROBE = f"""
+import sys
+sys.path.insert(0, {_REPO_ROOT!r})
+import streamlit as st
+import streamlit_app
+first = streamlit_app.live_weather_adapter("rerun-probe-contact")
+second = streamlit_app.live_weather_adapter("rerun-probe-contact")
+st.text("IDENTICAL" if first is second else "REBUILT")
+"""
 
 
 def test_the_binding_routes_through_a_cross_rerun_resource_cache() -> None:
     """The wiring that gives the adapter a life longer than one rerun.
 
-    Asserted structurally because it is provable at every supported version.
     Streamlit re-executes this script on every interaction, so an adapter built
     inside the render would begin each rerun with empty caches and re-fetch all
     thirty venues — the criterion's own bound defeated by the execution model
@@ -252,29 +249,25 @@ def test_the_binding_routes_through_a_cross_rerun_resource_cache() -> None:
     assert callable(streamlit_app.live_weather_adapter)
 
 
-def test_the_live_adapter_survives_the_rerun_boundary(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Two separate bindings hand back the *same* adapter, so its forecast and
-    gridpoint caches cross the rerun boundary.
+def test_the_live_adapter_survives_the_rerun_boundary() -> None:
+    """Two bindings inside a real script run hand back the *same* adapter, so
+    its forecast and gridpoint caches cross the rerun boundary.
 
-    Never calls ``forecast_for``: this asserts ownership and lifetime, and
-    binding the live adapter is correct while using it inside this suite is not.
+    Run through ``AppTest`` rather than called directly, because that is what
+    makes the assertion true at **every** supported version. ``st.cache_resource``
+    is a passthrough without a ``ScriptRunContext``: at the 1.37 floor a bare
+    call returns a fresh object every time, while 1.60 memoises anyway. AppTest
+    establishes the context, so the property is demonstrated at the floor and
+    above it instead of being skipped at the floor and asserted above — which is
+    what an earlier revision of this test did, and would have left blocker 2's
+    required property proven nowhere on the supported version.
     """
-    if not _bare_mode_caching_is_active():
-        pytest.skip(
-            "streamlit's resource cache is a passthrough without a ScriptRunContext at "
-            "the 1.37 floor, so the identity this asserts is unobservable in bare mode; "
-            "the wiring test above covers the property at every version, and production "
-            "always runs with a context"
-        )
-    import streamlit_app
-
-    monkeypatch.setenv("GM_ENVIRONMENT", "staging")
-    first, first_live = streamlit_app.weather_binding()
-    second, second_live = streamlit_app.weather_binding()
-    assert first_live is second_live is True
-    assert first is second, "each rerun rebuilt the adapter, so its caches never survive"
+    probe = AppTest.from_string(_RERUN_PROBE, default_timeout=_TIMEOUT)
+    probe.run()
+    assert not probe.exception, [str(e.value) for e in probe.exception]
+    assert [element.value for element in probe.text] == ["IDENTICAL"], (
+        "each rerun rebuilt the adapter, so its caches never survive"
+    )
 
 
 def test_the_stated_freshness_and_the_enforced_bound_are_one_value(
