@@ -1,4 +1,18 @@
-# FEATURE_PHASE_PLAN v12 — GMF-001 … GMF-009
+# FEATURE_PHASE_PLAN v13 — GMF-001 … GMF-009
+
+**v13 is revision r3 — it executes the Product Owner's 2026-08-20 autonomous-build directive.**
+The directive (a) grants the builder merge/push authority on this repository, with local
+verification — the 10-rule checker plus the full test suite on the exact merged tree — standing
+in for the pre-directive review-chat gate, and (b) requires the deployed dashboard to run on
+**real, current MLB data**, which a manual-export cycle cannot supply. r3 therefore lands
+**D-069..D-072** (§4b-r3): D-069 supersedes D-057's boundary 1 for the two named MLB hosts
+(`statsapi.mlb.com`, `baseballsavant.mlb.com`) under the GMF-005 weather-adapter discipline —
+host-pinned transport, composition-root only, no caller-supplied URLs, designed failure, no
+committed live payloads; D-057's override itself and the D-051 Ballpark Pal exclusion are
+unchanged. §GMF-006's criteria 2–3 are re-scoped from manual-export proof to host-pinned
+automated acquisition; §4c gains the r3 commit object (total 31). No other ticket criterion
+changes; no completed record is touched; the r1 and r2 decisions and tickets stand.
+
 
 **v12 is revision r2's third candidate — it answers the two findings of the v11 rejection
 (2026-08-20).** Finding 1 (GMF-007's seven form fields were never placed into the contract before
@@ -95,9 +109,15 @@ permitted.** This is a decision to proceed despite the terms.
 
 **The override is narrow. Two boundaries survive it:**
 
-- **Automated collection remains prohibited** — MLB terms clause (xi) is a *separate* term and is
-  not overridden. All MLB-derived data enters by **manual export performed by the Product Owner**.
-  §GMF-006 is re-scoped accordingly and must prove no code path fetches from an MLB host.
+- **Automated collection — superseded for the two named MLB hosts by D-069 (r3, 2026-08-20).**
+  The Product Owner's 2026-08-20 directive requires the deployed dashboard to run on real,
+  current MLB data and authorizes automated pulls from `statsapi.mlb.com` and
+  `baseballsavant.mlb.com` under the GMF-005 weather-adapter discipline: a host-pinned
+  transport at the composition root, no caller-supplied URLs, designed failure to named
+  absence states, no secret in code, no committed live payloads. **No claim is made that
+  clause (xi) permits this** — as with the override itself, this is a decision to proceed
+  despite the terms, now ratified by the Product Owner's directive. §GMF-006's criteria 2–3
+  are re-scoped accordingly.
 - **Ballpark Pal remains excluded** (D-051). Its terms are an affirmative click-through agreement,
   not a site notice, and the Product Owner does not rely on the provider.
 
@@ -265,6 +285,25 @@ pack count, shown together, plus the continuity check over D-001..D-068 (§6-r2 
 **Register statement:** after the r2 commit merges, the register reads **68 (D-001..D-068),
 continuous, no gap**. `staging` remains at 62 until it does.
 
+### 4b-r3. Register extension at revision r3 — D-069..D-072 (autonomous directive, live sources, grading v1, navigation)
+
+The Product Owner's 2026-08-20 autonomous-build directive governs the remainder of the feature
+phase. This revision lands four decisions.
+
+| ID | Decision |
+|---|---|
+| **D-069** | **Automated acquisition authorized for the two named MLB hosts; review gate suspended under the directive.** (a) The Product Owner's 2026-08-20 directive authorizes automated, unattended data pulls from `statsapi.mlb.com` and `baseballsavant.mlb.com`, superseding D-057 boundary 1 (manual export) for those hosts only. The GMF-005 weather-adapter discipline binds: a host-pinned transport module (allowlist constant, redirect re-validation, bounded timeout), network at the composition root only, no caller-supplied URLs, failures mapped to named absence states, no secret in code, no live payload committed as a fixture. (b) The directive grants the builder merge/push authority on this repository; local verification — the 10-rule checker plus the full test suite run on the exact merged tree — stands in for the pre-2026-08-20 review-chat gate for the directive's scope. The no-odds surface (D-015/D-017) and the Ballpark Pal exclusion (D-051) are unchanged. |
+| **D-070** | **Live sources of record.** Slate, probable pitchers, lineups and season hitting counts come from the MLB Stats API (`statsapi.mlb.com`); Statcast-derived metrics — season leaderboards, rolling L7/L14 windows, pitch-arsenal splits, per-event logs — come from Baseball Savant CSV endpoints (`baseballsavant.mlb.com`), the origin source per D-063; weather comes from `api.weather.gov` per GMF-005. Every fetch is cache-bound at the composition root with a stated freshness bound, so a reload is not a refetch. A failed or stale fetch degrades to the contract's named absence states; a stale value is never shown as current. |
+| **D-071** | **Grading v1 configuration.** The production grading configuration is 12 total points across five categories — power_profile 3, pitcher_matchup 3, form 2, pull_power 2, environment 2 — with grade cutoffs D [0,4), C [4,6), B [6,8), A [8,10), S [10,12], per the spec recorded in the synthetic engine config's header. Component bucket edges are provisional v1 values pending the Product Owner's threshold rulings; they are configuration, not code, so a later ruling changes the config file only. The v1 config lives at a new path (`config/production/gm_hr_v1.yaml`); the byte-pinned synthetic test config is never edited. |
+| **D-072** | **Navigation: four tabs.** The deployed app organises live surfaces as `st.tabs`: **Sluggers** (slate board — lineup batters with season and L7 metrics, park and weather tags, grade, threshold highlighting per the spec values, INSUFFICIENT badges), **Arms** (probable pitchers and their arsenals), **Matchups** (per-game venue, probable pitchers, and both lineups), **Conditions** (parks and live weather). A Record/betting-log surface is **not** authorized — it is ranking-adjacent under D-015/D-017 and awaits an explicit Product Owner posture ruling. |
+
+**Landing vehicle.** As at r2: the r3 decisions are directive ratifications independent of any one
+ticket, so the r3 commit object (§6-r3) lands D-069..D-072 in `DECISIONS.md` **verbatim from this
+table** and moves `CONTEXT_PACK.md`'s decision count **68 → 72** in the same commit.
+
+**Register statement:** after the r3 commit merges, the register reads **72 (D-001..D-072),
+continuous, no gap**. `staging` remains at 68 until it does.
+
 ### 4c. Review objects — finding 5 fix, determinate
 
 v1 stated fourteen while its own ticket text described more. Every ticket now has a **fixed** object
@@ -277,6 +316,7 @@ structure; none is builder-elective.
 | this plan, revision r1 — commit | 1 | plan-revision commit, GMF-000R shape — repairs §GMF-002's referent; delta fixed in §4b-r1 |
 | this plan, revision r2 — document review | 1 | candidate-bytes review of the revision text; mirrors the r1 rows |
 | this plan, revision r2 — commit | 1 | plan-revision commit, GMF-000R shape — lands D-063..D-068 and the post-freeze tickets; delta fixed in §6-r2 |
+| this plan, revision r3 — commit | 1 | plan-revision commit, GMF-000R shape — lands D-069..D-072 and the §GMF-006 re-scope; delta fixed in §6-r3; executed under the 2026-08-20 directive with local verification standing in for document review (D-069(b)) |
 | §GMF-000R | 1 | plan commit; no completed record |
 | §GMF-001 | 2 | impl + closeout; no deployed surface |
 | §GMF-002 | **3** | impl + **post-merge deployed verification** + closeout |
@@ -288,7 +328,7 @@ structure; none is builder-elective.
 | §GMF-008 | **3** | as above — a behaviour change on a live surface |
 | §GMF-009 | **3** | as above |
 
-**Exact total: 30 review objects** (19 at v9; +2 for r2, +9 for the three post-freeze tickets).
+**Exact total: 31 review objects** (19 at v9; +2 for r2, +9 for the three post-freeze tickets, +1 for r3 — the directive suspends the separate document-review object, D-069(b)).
 
 ### 4d. Deployed evidence — finding 6 fix, a route that exists
 
@@ -360,7 +400,7 @@ hardening or it is weaker than the rule it sits beside.
 ```
 - Plan (bootstrap, historical): REBUILD_PLAN v16, sha256 `<64 hex>` — the pinned authority for
   GMN-000A … GMR-005; no longer the active ticket source.
-- Plan (active, feature phase): FEATURE_PHASE_PLAN v12, sha256 `<64 hex>` — the pinned authority for
+- Plan (active, feature phase): FEATURE_PHASE_PLAN v13, sha256 `<64 hex>` — the pinned authority for
   GMF-001 … GMF-009.
 ```
 
@@ -382,7 +422,7 @@ version string in that plan's own title line**:
 | Pack record | Version label must equal the title version of |
 |---|---|
 | `- Plan (bootstrap, historical): REBUILD_PLAN v16 …` | `tickets/REBUILD_PLAN.md` |
-| `- Plan (active, feature phase): FEATURE_PHASE_PLAN v12 …` | `tickets/FEATURE_PHASE_PLAN.md` |
+| `- Plan (active, feature phase): FEATURE_PHASE_PLAN v13 …` | `tickets/FEATURE_PHASE_PLAN.md` |
 
 A revision that updates either plan's title without its record, or either record without its title,
 turns the checker red instead of shipping a record that misnames its own authority.
@@ -569,6 +609,37 @@ The split-usage denominator and the D-064 sample fields enter the tree at §GMF-
 
 ---
 
+## 6-r3. The r3 commit — plan revision, with an exact permitted delta
+
+**Regime:** B · **No completed record** (plan-revision object, the §GMF-000R / GMR-003R pattern) ·
+**Base:** `staging` at the head current at build time, pasted in the package.
+
+**The permitted delta is exactly these five paths, and all five change:**
+
+| Path | Change |
+|---|---|
+| `tickets/FEATURE_PHASE_PLAN.md` | the v13 bytes, sha256 pasted |
+| `DECISIONS.md` | D-069 … D-072 appended **verbatim** from §4b-r3's table |
+| `scripts/check_consistency.py` | `PINNED_FEATURE_PLAN_SHA256` → the v13 hash. **No rule added, removed, or reworded — the count stays at 10** (§5) |
+| `CONTEXT_PACK.md` | **two** enumerated changes: the active plan-record line per §5a (label `v13`, the v13 hash, range unchanged `GMF-001 … GMF-009`); the decision count **68 → 72** |
+| `docs/TEAM_ROLES.md` | **the object-structure mirror only**: the regime table gains the r3 row (§4c), and the total sentence moves **30 → 31** with its new breakdown — nothing else in that file changes |
+
+`tickets/ACTIVE.md` and `tickets/completed/` **do not change**: GMF-005's closeout is its own
+object and lands separately. `ORDER` does not change; the r2 tickets stand.
+
+**Criteria**
+
+1. Plan binding: the committed `FEATURE_PHASE_PLAN.md` bytes' sha256 pasted.
+2. **Atomicity.** Every change above lands in **one commit**. No committed state may carry a plan
+   whose hash disagrees with its pin.
+3. **The feature pin proven in both directions:** the pinned constant equals
+   sha256(`tickets/FEATURE_PHASE_PLAN.md`), and a one-byte edit to the file turns the checker red;
+   the negative case shown, restored, and the clean state shown. The bootstrap pin is re-pasted
+   unchanged as proof the historical plan was not touched.
+4. Checker clean at **10** rules; full suite green; D-015/D-017 clean.
+
+---
+
 ## 7. The `InputSnapshot` contract
 
 Authored by §GMF-001, consumed by everything after it.
@@ -681,30 +752,26 @@ forecast and the *unavailable* state, each captured with its timestamp.
 
 **Submission 1.**
 
-2. **OQ-3 decided here and argued from the contract as built**, not asserted: legacy ingestion
-   transplanted under GMR-003's byte-identity discipline, or rebuilt against `InputSnapshot`.
-   **Constrained by criterion 3(d):** the legacy ingestion is presumed to contain network paths, so
-   the transplant option is available only if control 3(a) finds none. If it finds one, the decision
-   is made for this ticket and the package says so.
-3. **Acquisition is manual export — D-057 boundary 1, and this is the ticket's hardest criterion.**
-   v2 offered a diff search plus a path-accepting test; the reviewer showed both are evadable — an
-   untouched or transplanted module outside the diff can hold a fetch path, a function can accept a
-   path and still open a socket, a URL can be assembled without a literal hostname, and a generic
-   client can fetch a caller-supplied endpoint. **Four controls replace them, and the third is the
-   one that actually binds:**
-   (a) a **whole-repository** tracked-code search at the reviewed head, not a diff search, with the
-   pattern list and covered file set pasted;
-   (b) the ingestion boundary **rejects URLs and URL-like schemes as inputs** — `http`, `https`,
-   `ftp`, `file`, protocol-relative and any string parsing as a URL — rather than merely accepting a
-   `Path`; each rejection exercised by a test;
-   (c) **ingestion executed under an outbound-network-deny harness**, proving the local-file path
-   completes with **no socket or HTTP attempt of any kind**. The repository already carries
-   `tests/unit/golden/test_network_blocking.py`; this criterion extends that existing machinery
-   rather than inventing a second mechanism, and the package states which it used;
-   (d) **a transplanted implementation containing any network path automatically fails OQ-3's
-   transplant option** — the transplant is then not available and the rebuild route is taken. This
-   is stated as a rule so criterion 2's decision cannot be argued around it.
-   An automated fetch here is a scope violation, not an optimisation.
+2. **OQ-3 decided here and argued from the contract as built**, not asserted: this repository
+   carries no legacy ingestion to transplant, so the GMR-003 byte-identity option is vacuous and
+   the rebuild route is taken against `InputSnapshot` — the package states this.
+3. **Acquisition is automated and host-pinned — D-069, and this is the ticket's hardest
+   criterion.** Four controls bind it, and the first is the one that actually binds:
+   (a) the **only** network path is a host-pinned transport module whose allowlist names exactly
+   `statsapi.mlb.com` and `baseballsavant.mlb.com` (the GMF-005 `api.weather.gov` transport is a
+   separate module with its own pin); redirect targets are re-validated against the allowlist;
+   timeouts are bounded; endpoints are module-level constants and **no function accepts a
+   caller-supplied URL or host** — each non-allowlisted rejection exercised by a test;
+   (b) **network lives at the composition root only** — `src/` ingestion code parses and maps
+   payloads from injected transport responses; `src/` tests run under the existing
+   network-blocking harness (`tests/unit/golden/test_network_blocking.py`) with fake transports,
+   and no live payload is committed as a fixture — synthetic payloads shaped like the APIs only;
+   (c) **failure is designed:** timeout, non-200, malformed payload and rate-limit responses each
+   map to the contract's named absence states and are each exercised by a test; the retry posture
+   is stated and bounded; caching carries a stated freshness bound, so a reload is not a refetch
+   (D-070);
+   (d) **no secret in code** (D-056 stands) and no surface fetches — screens render snapshots
+   (GMF-001's contract); fetching happens only in the app's composition root.
 4. Real data flows into `InputSnapshot`; the fixture bindings of GMF-002 … GMF-004 are replaced by
    live ones **with no change to the screens themselves**. A screen edited in this ticket is a
    contract failure and is reported as one rather than patched.
