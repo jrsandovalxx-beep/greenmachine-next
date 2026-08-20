@@ -3,7 +3,7 @@
 Hand-maintained orientation for builders. The authoritative state is `PROJECT_STATE.md`; the
 authoritative history is `DECISIONS.md`. **Ticket text has two pinned authorities:
 `tickets/REBUILD_PLAN.md` governs the completed bootstrap (GMN-000A … GMR-005) and
-`tickets/FEATURE_PHASE_PLAN.md` governs the feature phase (GMF-001 … GMF-006); `tickets/ACTIVE.md`
+`tickets/FEATURE_PHASE_PLAN.md` governs the feature phase (GMF-001 … GMF-009); `tickets/ACTIVE.md`
 selects which one governs the current object.** If this file disagrees with any of them, this file
 is wrong — the repository checker's freshness gate fails on a wrong active ticket or decision
 count here.
@@ -18,11 +18,11 @@ automated selection. Evidence confidence is displayed alongside, never fused int
 ## Current status
 
 - Active ticket: **GMF-005** (per `tickets/ACTIVE.md` → FEATURE_PHASE_PLAN §GMF-005).
-- Decision count: **62** (D-001..D-062).
+- Decision count: **68** (D-001..D-068).
 - Plan (bootstrap, historical): REBUILD_PLAN v16, sha256 `c41b6abd5fbe64c0e9b468bea0c9a2ddb5f1b646780c017655f0295aa0b82ca2` — the pinned authority for
   GMN-000A … GMR-005; no longer the active ticket source.
-- Plan (active, feature phase): FEATURE_PHASE_PLAN v9, sha256 `83780d850e60c28a6a74fc03951428622ba8b20c9d7612998d378cd21d9c96cd` — the pinned authority for
-  GMF-001 … GMF-006.
+- Plan (active, feature phase): FEATURE_PHASE_PLAN v12, sha256 `fd11ae2559f4be0ca3c77d17ba311bfeced3e0f6267de7a6b5953a380100343b` — the pinned authority for
+  GMF-001 … GMF-009.
 - GMN-000A complete: APPROVED WITH NOTES for `3d5e4fde3d6065fad1078749c85eb61b96fde9de`.
 - GMR-001 complete: implementation APPROVED for `3fc9f1e04d71cbd4ec464634d5598e16510a496d`,
   merged to `staging` (`a3eb0ea26db6f4a1ac94cc7d6f75fe1a3afc9774`); closeout approved

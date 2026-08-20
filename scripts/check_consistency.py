@@ -49,7 +49,7 @@ ROOT = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
 # criterion-4 correction); the bootstrap's completed records keep their v15 link-backs.
 PINNED_REBUILD_PLAN_SHA256 = "c41b6abd5fbe64c0e9b468bea0c9a2ddb5f1b646780c017655f0295aa0b82ca2"
 # FEATURE_PHASE_PLAN v6, APPROVED — the bytes committed unaltered by §GMF-000R.
-PINNED_FEATURE_PLAN_SHA256 = "83780d850e60c28a6a74fc03951428622ba8b20c9d7612998d378cd21d9c96cd"
+PINNED_FEATURE_PLAN_SHA256 = "fd11ae2559f4be0ca3c77d17ba311bfeced3e0f6267de7a6b5953a380100343b"
 
 # The completed-order table (FEATURE_PHASE_PLAN §4a — the complete combined sequence,
 # authoritative there). The set of files in tickets/completed/ must be exactly a prefix
@@ -67,6 +67,9 @@ ORDER = (
     "GMF-004",
     "GMF-005",
     "GMF-006",
+    "GMF-007",
+    "GMF-008",
+    "GMF-009",
 )
 SENTINEL = "NO ACTIVE TICKET — next phase pending planning"
 

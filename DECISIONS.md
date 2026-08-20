@@ -1597,3 +1597,53 @@ deployed page. No AppTest capability is claimed beyond the floor's.
 **Streamlit is version-bounded; upgrades land through `staging` first.** Floor **>= 1.37**
 (`on_select` arrived 1.35; `st.fragment` stable in 1.37), with a defended upper bound against
 third-party breakage.
+
+## D-063 - Origin-first provider precedence
+**Origin-first provider precedence.** (a) Baseball Savant is the origin source for Statcast-derived
+fields and takes precedence wherever it carries the field. (b) FanGraphs is admitted only for fields
+the project computes itself from its own inputs — never for re-display of FanGraphs-authored metrics
+(the §24 marks posture stands). (c) Origin-unavailable exception: where Savant does not carry a
+field at all, a secondary provider may supply it, and the exception is named in that field's
+provenance note.
+
+## D-064 - The sample contract
+**The sample contract.** AB, H and K are carried as raw counts, each with its unit and an
+observed/derived flag. `BIP_est = AB − K` is a derived estimate that understates balls in play by
+sacrifice flies and hits; the understatement is stated wherever the estimate appears, never hidden.
+K is carried as a count, never reconstructed as K% × AB. A derived field propagates the absence
+reason of every input it derives from, intact.
+
+## D-065 - Switch-hitter side handling (supersedes the switch-hitter resolution rule of D-025, confirmed in D-026)
+**Switch-hitter side handling (supersedes the switch-hitter resolution rule of D-025, confirmed in
+D-026).** A switch hitter's row carries **both** batting sides, each labelled by the opposing
+pitcher hand that produces it. The batting side used in any display is derived from the matchup and
+labelled as derived; it is never silently chosen. Probable-starter resolution is not a dependency of
+any surface; if it ever arrives it is an additive derived layer, never a contract input. D-025's
+never-average clause stands: both sides are never averaged into one number for a criterion.
+
+## D-066 - Pitch-usage scope toggle (PO-N1)
+**Pitch-usage scope toggle (PO-N1).** The batter metrics surface gains a user toggle between (a)
+usage measured against batters of the evaluated side and (b) all pitches the pitcher throws. The
+toggle requires the handedness-split usage denominator, which enters the contract at §7 and is
+ingested at §GMF-006, before the field set is fixed there. The three usage states (qualifies ·
+measured below threshold · absent/unevaluable) survive both toggle positions, and the prose names
+which scope produced each suppression. Scheduled as §GMF-008.
+
+## D-067 - Matchup window; score deferred (PO-N2)
+**Matchup window; score deferred (PO-N2).** The matchup section is computed over a **rolling 30
+days** ending at `as_of` — not a calendar month. **This ruling authorizes the window only. No score
+is authorized.** A windowed score is ranking-shaped under D-015/D-017 and requires its own explicit
+Product Owner posture ruling before any ticket text names it. Scheduled as §GMF-009.
+
+## D-068 - Form section (PO-N3)
+**Form section (PO-N3).** Seven metrics, no toggle: Barrel%, EV, AtkAng, IdealAtkAng%, Pull%, Hard%,
+xwOBA — where **Pull% is the D-023 Pull Air %**, labelled as such on the surface (Product Owner,
+2026-08-20). Window **L7 with an L14 fallback**, the fallback triggered by **each metric's own
+sample floor** — never by mere emptiness. Floors: Barrel% and EV **15 BBE** (D-023/D-026);
+IdealAtkAng% **25 tracked swings** (D-023); Pull Air % **15 air balls** (D-023); **AtkAng 25
+swings**, **Hard% 15 BBE**, **xwOBA 15 PA** (Product Owner, 2026-08-20 — each uncovered floor
+follows its shared denominator). A field whose L14 sample is below its floor is **present with its
+value, its exact sample, and an INSUFFICIENT marker** — the missing-versus-insufficient rule of
+D-023/D-025 is unchanged, and no new absence state is created. A field with no observations at all
+is absent with its reason under the ordinary absence semantics. The window actually used is named on
+the surface, per D-025's stated-window rule. Scheduled as §GMF-007.
