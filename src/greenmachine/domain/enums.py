@@ -172,9 +172,12 @@ class MissingReason(Enum):
 class ProviderId(Enum):
     """Stable data-provider identifier carried in core and stored records
     (``MODEL_SPEC.md`` §10). Only providers named in the approved documentation
-    are defined; more are added as they are approved."""
+    are defined; more are added as they are approved. ``MLB_STATS_API`` and
+    ``NWS`` were approved as live sources of record by D-070."""
 
     BASEBALL_SAVANT = "baseball_savant"
+    MLB_STATS_API = "mlb_stats_api"
+    NWS = "nws"
 
 
 class AcquisitionMethod(Enum):
