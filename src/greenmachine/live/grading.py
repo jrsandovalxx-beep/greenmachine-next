@@ -10,8 +10,10 @@ Provisional v1 derivations (D-073, all marked provisional pending the open
 product questions Q15/Q16):
 
 - pitch mix pressure: of the expected starter's qualifying pitch types, the
-  usage-weighted share where the batter's season wOBA against that pitch
-  meets or beats the league's PA-weighted wOBA against it.
+  usage-weighted share where the batter's season expected wOBA against that
+  pitch meets or beats the league's PA-weighted expected wOBA against that
+  same pitch (the baseline is per pitch type, so fastball-heavy pitchers are
+  not systematically easier to score against).
 - put-away pitch exploitation: on the starter's qualifying pitch type with
   the highest put-away rate, how far the batter's whiff share sits below the
   league's pitch-weighted whiff share, clamped at zero (a batter who whiffs
@@ -63,9 +65,15 @@ _UNKNOWN_STARTER_NAME = "Expected starter not announced"
 
 @dataclass(frozen=True)
 class LeaguePitchBaseline:
-    """League-wide per-pitch-type baselines for the matchup derivations."""
+    """League-wide per-pitch-type baselines for the matchup derivations.
 
-    woba: Decimal
+    ``expected_woba`` is PA-weighted across batters; ``whiff_share`` is
+    pitch-weighted across pitchers. Expected wOBA rather than raw wOBA: at
+    per-pitch-type sample sizes the raw figure is dominated by sequencing
+    and defense, which the estimator strips out (Q15 review, D-073).
+    """
+
+    expected_woba: Decimal
     whiff_share: Decimal
     plate_appearances: int
     pitches: int
@@ -128,7 +136,7 @@ def league_baselines(
     sums: dict[str, _BaselineSum] = {}
     for row in batter_rows:
         entry = sums.setdefault(row.pitch_type, _BaselineSum())
-        entry.woba_weighted += row.woba * Decimal(row.plate_appearances)
+        entry.woba_weighted += row.expected_woba * Decimal(row.plate_appearances)
         entry.plate_appearances += row.plate_appearances
     for row in pitcher_rows:
         entry = sums.setdefault(row.pitch_type, _BaselineSum())
@@ -143,7 +151,7 @@ def league_baselines(
         )
         whiff = entry.whiff_weighted / Decimal(entry.pitches) if entry.pitches > 0 else Decimal(0)
         baselines[pitch_type] = LeaguePitchBaseline(
-            woba=woba,
+            expected_woba=woba,
             whiff_share=whiff,
             plate_appearances=entry.plate_appearances,
             pitches=entry.pitches,
@@ -168,7 +176,7 @@ def derive_pitch_mix_pressure(matchup: MatchupInput) -> DerivedMatchup:
             continue  # a pitch type missing on either side leaves both sums
         weight_total += pitcher_row.usage_share
         sample += pitcher_row.pitches
-        if batter_row.woba >= league.woba:
+        if batter_row.expected_woba >= league.expected_woba:
             weight_beaten += pitcher_row.usage_share
     if weight_total <= 0:
         return DerivedMatchup(value=None, sample=0, reason=MissingReason.NO_EVENTS_IN_WINDOW)

@@ -100,20 +100,26 @@ class _ScriptedTransport:
 
 def test_a_transient_status_is_retried_exactly_once() -> None:
     transport = _ScriptedTransport([503, 200])
-    response = get_with_retry(transport, "https://statsapi.mlb.com/api/v1/schedule", {}, sleep=lambda _: None)
+    response = get_with_retry(
+        transport, "https://statsapi.mlb.com/api/v1/schedule", {}, sleep=lambda _: None
+    )
     assert response.status == 200
     assert transport.calls == 2
 
 
 def test_a_persistent_transient_status_is_not_retried_forever() -> None:
     transport = _ScriptedTransport([429])
-    response = get_with_retry(transport, "https://statsapi.mlb.com/api/v1/schedule", {}, sleep=lambda _: None)
+    response = get_with_retry(
+        transport, "https://statsapi.mlb.com/api/v1/schedule", {}, sleep=lambda _: None
+    )
     assert response.status == 429
     assert transport.calls == 2
 
 
 def test_a_non_retryable_status_answers_as_it_arrived() -> None:
     transport = _ScriptedTransport([404])
-    response = get_with_retry(transport, "https://statsapi.mlb.com/api/v1/schedule", {}, sleep=lambda _: None)
+    response = get_with_retry(
+        transport, "https://statsapi.mlb.com/api/v1/schedule", {}, sleep=lambda _: None
+    )
     assert response.status == 404
     assert transport.calls == 1

@@ -347,9 +347,7 @@ def test_model_configuration_yaml_lives_only_in_approved_locations() -> None:
     ]
 
     assert candidates, "expected the synthetic configurations to be found"
-    assert APPROVED_PRODUCTION_CONFIG.is_file(), (
-        "the approved production configuration is missing"
-    )
+    assert APPROVED_PRODUCTION_CONFIG.is_file(), "the approved production configuration is missing"
     assert not outside, f"model configuration YAML in an unapproved location: {outside}"
 
 

@@ -47,7 +47,9 @@ def _event(
     )
 
 
-def _tracking(player_id: int, side: str, bat_speed: str, attack: str, ideal: str, swings: int) -> BatTrackingRow:
+def _tracking(
+    player_id: int, side: str, bat_speed: str, attack: str, ideal: str, swings: int
+) -> BatTrackingRow:
     return BatTrackingRow(
         player_id=player_id,
         side=side,
