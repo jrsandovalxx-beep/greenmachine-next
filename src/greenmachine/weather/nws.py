@@ -10,8 +10,9 @@ reach exactly one host.
 unpublished rate limits, and over-limit requests retryable within a few seconds.
 Against that, each named failure maps to an absence the screens already render:
 
-- timeout, connection failure, non-200 (404 included), malformed payload, and a
-  rate limit that survives the one permitted retry: ``SOURCE_UNAVAILABLE``;
+- timeout, connection failure, non-200 (404 included), malformed payload, a
+  rate limit that survives the one permitted retry, and a redirect the host pin
+  refuses: ``SOURCE_UNAVAILABLE``;
 - answered, with no period for this venue yet: ``NOT_YET_OBSERVED``.
 
 That last row is not a failure at all, and it is why the vocabulary needs no new
@@ -57,6 +58,7 @@ from greenmachine.inputs.contract import (
 from greenmachine.weather.transport import (
     NWS_HOST,
     NWS_SCHEME,
+    HostNotPermittedError,
     HttpResponse,
     Transport,
     TransportError,
@@ -272,6 +274,17 @@ class NwsWeatherAdapter:
             )
         except StatusFailureError as failure:
             self._reasons[venue.venue_id] = failure.reason()
+            return SnapshotField[WeatherForecast].absent(
+                AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_ID
+            )
+        except HostNotPermittedError:
+            # A hop tried to leave the pinned host. Reported as unavailable like
+            # any other non-answer, but named precisely: this is the boundary
+            # holding, not the source failing.
+            self._reasons[venue.venue_id] = (
+                "the source tried to redirect this request off api.weather.gov, and the "
+                "host pin refused the hop - no forecast rather than a fetch from elsewhere"
+            )
             return SnapshotField[WeatherForecast].absent(
                 AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_ID
             )

@@ -276,8 +276,16 @@ def test_an_empty_period_list_is_not_yet_observed_rather_than_a_failure() -> Non
 # --- caching, with its bound ------------------------------------------------
 
 
-def test_a_second_read_inside_the_bound_does_not_refetch() -> None:
-    """ "A reload is not a fetch": a Streamlit rerun must not re-hit the source."""
+def test_a_second_read_on_one_adapter_inside_the_bound_does_not_refetch() -> None:
+    """The cache works *within* one adapter's lifetime — and that is all this proves.
+
+    Its previous name claimed a Streamlit rerun did not re-hit the source, which
+    this test never crossed: two calls on one instance are same-instance reuse.
+    The rerun boundary is a property of who owns the adapter rather than of the
+    adapter itself, so it is proven where it lives — at the composition root, in
+    ``tests/app/test_parks_page.py``. Test names are claims and get audited like
+    any other claim.
+    """
     clock = StepClock()
     adapter, transport, _ = build([ok(points_body()), ok(forecast_body())], clock=clock)
     first = adapter.forecast_for(VENUE)

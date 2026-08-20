@@ -1,10 +1,26 @@
 """The one network-capable implementation in this repository (§GMF-005).
 
 Every byte this project fetches passes through :class:`UrllibTransport`, and
-that class can reach exactly one host. The pin is a module constant and the
-refusal is exercised by test, so "no MLB host is reachable by any code path"
-is proven by construction rather than asserted from absence — which is what
-D-057 boundary 1 needs once a live path exists at all.
+**every hop it makes** is constrained to one host. The pin is a module constant
+and the refusals are exercised by test, so "no MLB host is reachable by any code
+path" is proven by construction rather than asserted from absence — which is
+what D-057 boundary 1 needs once a live path exists at all.
+
+**Hops, not just the first request.** An earlier revision validated the URL it
+was handed and then passed the request to the default opener, whose
+``HTTPRedirectHandler`` answers a 3xx by building a request for the ``Location``
+target and opening it — without returning through the check. The pin was
+therefore on the one hop that could not go anywhere unexpected, and absent from
+the one that could; worse, the redirect handler copies the original headers onto
+the new request, so the identifying ``User-Agent`` would have travelled to
+whatever host the redirect named. :class:`PinnedRedirectHandler` closes that by
+re-validating every redirect target against the same rule.
+
+Re-validation rather than blanket refusal is deliberate. Refusing all redirects
+would also be safe, but if NWS legitimately redirects any path in use, every
+forecast becomes *source unavailable* — and that would surface on a live
+deployment at submission 2, the most expensive place to learn it. Re-validating
+keeps the boundary exactly as tight while surviving a legitimate redirect.
 
 The transport deliberately knows nothing about weather: it performs one bounded
 GET and reports what happened. Interpretation — which failures mean *source
@@ -52,9 +68,10 @@ class TransportUnreachableError(TransportError):
 class HostNotPermittedError(TransportError):
     """A URL was refused because it does not name the pinned host.
 
-    Raised before any network operation. This is the mechanism behind the
-    package's central claim: the transport cannot be pointed somewhere else,
-    so no MLB host — or any other — is reachable through it.
+    Raised before the hop it refuses is opened — on the caller's URL, and again
+    on any redirect target. Together those two checkpoints are the mechanism
+    behind the package's claim: no hop this transport makes can name a host
+    other than the pinned one, so no MLB host is reachable through it.
     """
 
 
@@ -90,19 +107,55 @@ def require_pinned_host(url: str) -> None:
         )
 
 
+class PinnedRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Applies the host pin to every redirect target, before it is followed.
+
+    ``redirect_request`` is where the stdlib decides whether and how to follow a
+    3xx. Checking here rather than after the fact means the refused hop is never
+    opened, and it keeps one rule in one function: the same
+    :func:`require_pinned_host` the caller's URL passes through.
+
+    It is an ordinary object with an ordinary method, which is why the guarantee
+    is testable without a socket — a test calls this method directly with a
+    synthetic ``Location`` and asserts the refusal.
+    """
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: object,
+        code: int,
+        msg: str,
+        headers: object,
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        require_pinned_host(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)  # type: ignore[arg-type]
+
+
+def pinned_opener() -> urllib.request.OpenerDirector:
+    """An opener whose redirect handling is the pinned one.
+
+    Built explicitly rather than relying on the module-level default opener,
+    because that default is global mutable state any import could have changed.
+    """
+    return urllib.request.build_opener(PinnedRedirectHandler)
+
+
 class UrllibTransport:
     """The stdlib transport. No third-party HTTP client enters this project."""
 
-    __slots__ = ("_timeout",)
+    __slots__ = ("_opener", "_timeout")
 
     def __init__(self, timeout_seconds: float = REQUEST_TIMEOUT_SECONDS) -> None:
         self._timeout = timeout_seconds
+        self._opener = pinned_opener()
 
     def get(self, url: str, headers: dict[str, str]) -> HttpResponse:
         require_pinned_host(url)
         request = urllib.request.Request(url, headers=headers, method="GET")
         try:
-            with urllib.request.urlopen(request, timeout=self._timeout) as response:
+            with self._opener.open(request, timeout=self._timeout) as response:
                 return HttpResponse(status=int(response.status), body=response.read())
         except urllib.error.HTTPError as exc:
             # A status the server actually sent: 404, 429 and 5xx arrive here and
@@ -118,7 +171,7 @@ class UrllibTransport:
             raise TransportUnreachableError(f"request to {url!r} failed: {exc}") from exc
 
     def __repr__(self) -> str:
-        return f"UrllibTransport(timeout_seconds={self._timeout})"
+        return f"UrllibTransport(host={NWS_HOST!r}, timeout_seconds={self._timeout})"
 
 
 def real_sleep(seconds: float) -> None:

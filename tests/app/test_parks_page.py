@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from greenmachine.fixtures import FixtureWeatherAdapter
@@ -26,7 +27,7 @@ from greenmachine.parks import (
     VENUE_COLUMN,
     VENUE_TYPE_COLUMN,
 )
-from greenmachine.weather.nws import NwsWeatherAdapter
+from greenmachine.weather.nws import FORECAST_FRESHNESS, NwsWeatherAdapter
 
 _APP_PATH = Path(__file__).resolve().parents[2] / "streamlit_app.py"
 
@@ -213,3 +214,78 @@ def test_the_discriminator_chooses_the_live_adapter_only_off_local(
     adapter, live = streamlit_app.weather_binding()
     assert live is False
     assert isinstance(adapter, FixtureWeatherAdapter)
+
+
+def _bare_mode_caching_is_active() -> bool:
+    """Whether ``st.cache_resource`` dedupes without a ScriptRunContext here.
+
+    It does at streamlit 1.60 and does **not** at the pinned 1.37 floor, where a
+    cached function outside a script run is a passthrough. That is a difference
+    in what a bare test can *observe*, not in what production does: a real run
+    always carries a context, so the cross-rerun lifetime holds at both versions.
+    Probed rather than version-sniffed, so the gate tracks the actual behaviour.
+    """
+
+    @st.cache_resource
+    def _probe(key: str) -> object:
+        return object()
+
+    return _probe("probe") is _probe("probe")
+
+
+def test_the_binding_routes_through_a_cross_rerun_resource_cache() -> None:
+    """The wiring that gives the adapter a life longer than one rerun.
+
+    Asserted structurally because it is provable at every supported version.
+    Streamlit re-executes this script on every interaction, so an adapter built
+    inside the render would begin each rerun with empty caches and re-fetch all
+    thirty venues — the criterion's own bound defeated by the execution model
+    rather than by the adapter's logic. ``st.cache_resource`` is what prevents
+    that, and it must actually be on the function the binding calls.
+    """
+    import streamlit_app
+
+    # The streamlit cache wrapper, not a bare function: `.clear` exists only on
+    # a cached one. An `or True` clause here would be the vacuous-assertion
+    # defect this ticket is already correcting elsewhere.
+    assert hasattr(streamlit_app.live_weather_adapter, "clear")
+    assert callable(streamlit_app.live_weather_adapter)
+
+
+def test_the_live_adapter_survives_the_rerun_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two separate bindings hand back the *same* adapter, so its forecast and
+    gridpoint caches cross the rerun boundary.
+
+    Never calls ``forecast_for``: this asserts ownership and lifetime, and
+    binding the live adapter is correct while using it inside this suite is not.
+    """
+    if not _bare_mode_caching_is_active():
+        pytest.skip(
+            "streamlit's resource cache is a passthrough without a ScriptRunContext at "
+            "the 1.37 floor, so the identity this asserts is unobservable in bare mode; "
+            "the wiring test above covers the property at every version, and production "
+            "always runs with a context"
+        )
+    import streamlit_app
+
+    monkeypatch.setenv("GM_ENVIRONMENT", "staging")
+    first, first_live = streamlit_app.weather_binding()
+    second, second_live = streamlit_app.weather_binding()
+    assert first_live is second_live is True
+    assert first is second, "each rerun rebuilt the adapter, so its caches never survive"
+
+
+def test_the_stated_freshness_and_the_enforced_bound_are_one_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caption promising thirty minutes over a cache expiring on some other
+    schedule would be a new claims-versus-behaviour defect replacing the old
+    one. Both read the same constant."""
+    import streamlit_app
+
+    monkeypatch.setenv("GM_ENVIRONMENT", "staging")
+    adapter, _ = streamlit_app.weather_binding()
+    minutes = int(FORECAST_FRESHNESS.total_seconds() // 60)
+    assert f"{minutes} minutes" in adapter.freshness_statement()

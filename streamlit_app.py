@@ -22,8 +22,11 @@ otherwise reasonably assume roof went with it. Real and fixture data share a
 table here, which is exactly why none of it is left to be inferred.
 
 **The live path exists in one place.** ``greenmachine.weather.transport`` is the
-only module in ``src`` that can open a connection, and it reaches exactly one
-host by module constant. Nothing else in this application fetches anything.
+only module in ``src`` that can open a connection, and every hop it makes — the
+request it is handed and any redirect target — is checked against one pinned
+host. Nothing else in this application fetches anything. The adapter that uses
+it is held across reruns by ``live_weather_adapter`` below, because a cache
+rebuilt on every rerun is not a cache.
 
 Every widget lives here and only here: ``src/`` imports no streamlit
 (architecture-enforced), and both screens' logic — frames, grading, selection
@@ -177,6 +180,38 @@ def resolve_commit() -> str:
     return "unknown"
 
 
+@st.cache_resource(show_spinner=False)
+def live_weather_adapter(contact: str) -> NwsWeatherAdapter:
+    """The live adapter, held across reruns rather than rebuilt on each one.
+
+    **This is what makes "a reload is not a fetch" true.** Streamlit re-executes
+    this whole script on every widget interaction, so an adapter constructed
+    inside the render would start each rerun with empty caches and re-fetch all
+    thirty venues — the criterion's own bound, defeated by the page's execution
+    model rather than by the adapter's logic. ``st.cache_resource`` gives the
+    object a lifetime longer than one run, which is the only place that lifetime
+    can live: ``src/`` cannot import streamlit (architecture-enforced), so the
+    adapter stays a plain object with injected collaborators and the composition
+    root owns its persistence.
+
+    **The cache is shared across sessions, and that is chosen, not incidental.**
+    A resource cache is process-wide, so two viewers share one adapter. The data
+    it holds is keyed by venue and by nothing else — no viewer's identity, query
+    or selection reaches it — so sharing leaks nothing between them and spares
+    the source duplicate work. D-051's sole-user posture is untouched: this
+    changes who repeats a request, not who may see the page.
+
+    Keyed on ``contact`` so a configuration change yields a new adapter rather
+    than silently reusing one built with the previous identity.
+    """
+    return NwsWeatherAdapter(
+        transport=UrllibTransport(),
+        clock=SystemClock(),
+        sleep=real_sleep,
+        contact=contact,
+    )
+
+
 def weather_binding() -> tuple[object, bool]:
     """Which weather adapter this environment gets, and whether it is live.
 
@@ -195,15 +230,7 @@ def weather_binding() -> tuple[object, bool]:
     if resolve_environment() == "local":
         return FixtureWeatherAdapter(), False
     contact = os.environ.get(CONTACT_ENV_VAR, "").strip() or DEFAULT_CONTACT
-    return (
-        NwsWeatherAdapter(
-            transport=UrllibTransport(),
-            clock=SystemClock(),
-            sleep=real_sleep,
-            contact=contact,
-        ),
-        True,
-    )
+    return live_weather_adapter(contact), True
 
 
 def retrieval_statement(snapshot: InputSnapshot) -> str:

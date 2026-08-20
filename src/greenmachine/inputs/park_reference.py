@@ -20,17 +20,21 @@ Volatile rows, recorded so drift is a data update rather than a surprise:
 and ``longitude`` are required because the NWS API is addressed only by
 coordinate. Two things about them a reader is entitled to know:
 
-- **Source.** They were recorded by the builder from general knowledge of
-  where these ballparks are, not retrieved from any dataset: nothing fetched
-  them, and no file was copied. Geographic coordinates of a fixed place are
-  facts, so no database licence attaches and none is claimed — an attribution
-  naming a source these values were not copied from would be a provenance
-  claim this project has no business making. This is **weaker provenance than
-  the pinned Savant snapshot beside them**, and weaker than the ``savant_venue_id``
-  discipline in this same file, which deliberately binds against committed data
-  rather than recall. It is disclosed rather than dressed up, and the value set
-  can be replaced by a provenance-pinned export at any time without touching
-  the contract.
+- **Source.** They were recorded by the builder from general knowledge of where
+  these ballparks are, not retrieved from any dataset: nothing fetched them, and
+  no file was copied. Because **these particular values were not copied from any
+  compilation**, no attribution is owed to a source they did not come from, and
+  the origin is disclosed here instead. That is the narrow, load-bearing claim;
+  this file makes no general assertion about how geographic data is licensed,
+  which is not a question it is competent to settle.
+
+  This is **weaker provenance than the pinned Savant snapshot beside them**,
+  weaker than the ``savant_venue_id`` discipline in this same file — which
+  deliberately binds against committed data rather than recall — and weaker than
+  the standard this very docstring sets a few lines above, where the venue types
+  name their source. It is disclosed rather than dressed up, and the value set
+  can be replaced by a provenance-pinned export at any time without touching the
+  contract.
 - **Precision: three decimal places (~110 m), deliberately.** The requirement is
   landing in the right NWS gridpoint, and that grid is coarse — about 2.5 km — so
   110 m resolves it roughly twenty times over. A stadium footprint spans a
