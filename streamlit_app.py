@@ -488,7 +488,17 @@ def _temperature_lookup() -> object:
     def read(venue: ParkVenue) -> Decimal | None:
         if not live:
             return None
-        field = adapter.forecast_for(venue)
+        try:
+            field = adapter.forecast_for(venue)
+        except AttributeError:
+            st.warning(
+                "WEATHER DIAG: "
+                f"type={type(venue).__module__}.{type(venue).__name__} "
+                f"has_venue_id={hasattr(venue, 'venue_id')} "
+                f"has_latitude={hasattr(venue, 'latitude')} "
+                f"value={str(venue)[:140]!r}"
+            )
+            return None
         if field.value is None:
             return None
         return field.value.temperature_f
