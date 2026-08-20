@@ -278,26 +278,31 @@ def test_no_component_threshold_table_lives_in_source() -> None:
 # GM-041.5 relocated the disclaimed synthetic configuration out of tests/ so the
 # deployed app never reads an executable configuration from the test tree. It
 # lives in exactly one place, and that place announces non-production in its
-# name. Everything ELSE under config/ would be a production configuration, which
-# still cannot exist while Q11-Q16 are open.
+# name. D-071 (2026-08-20 directive) then approved exactly one production
+# configuration for the live dashboard: config/production/gm_hr_v1.yaml.
 NONPRODUCTION_CONFIG_DIR = REPO_ROOT / "config" / "nonproduction"
+APPROVED_PRODUCTION_CONFIG = REPO_ROOT / "config" / "production" / "gm_hr_v1.yaml"
 
 
-def test_no_production_yaml_configuration_is_committed() -> None:
-    """No approved production model configuration exists (Q11-Q16 open).
+def test_only_the_approved_production_yaml_configuration_is_committed() -> None:
+    """D-071 approved exactly one production model configuration.
 
-    ``config/nonproduction/`` is the one permitted home for a disclaimed,
-    non-production configuration. A YAML anywhere else under ``config/`` would
-    be a production model configuration, which no ticket has approved.
+    ``config/nonproduction/`` holds the disclaimed synthetic configuration;
+    ``config/production/gm_hr_v1.yaml`` is the single approved production one.
+    Any other YAML outside the non-production directory is an unapproved
+    production model configuration.
     """
     config_dir = REPO_ROOT / "config"
+    committed = []
     if config_dir.exists():
         committed = [
             path
             for path in [*config_dir.rglob("*.yaml"), *config_dir.rglob("*.yml")]
             if NONPRODUCTION_CONFIG_DIR not in path.parents
         ]
-        assert not committed, f"production configuration committed: {committed}"
+    assert committed == [APPROVED_PRODUCTION_CONFIG], (
+        f"production configurations committed beyond the approved one: {committed}"
+    )
 
     assert not list(SRC_ROOT.rglob("*.yaml"))
     assert not list(SRC_ROOT.rglob("*.yml"))
@@ -319,11 +324,12 @@ TOOLING_YAML = frozenset({".pre-commit-config.yaml"})
 
 
 def test_model_configuration_yaml_lives_only_in_approved_locations() -> None:
-    """Two permitted homes, both non-production, and nowhere else.
+    """Three permitted homes and nowhere else.
 
     ``tests/fixtures/`` holds fixtures the suite builds on; ``config/nonproduction/``
-    holds the one disclaimed configuration the deployed app may execute. A model
-    configuration anywhere else would be an unapproved production configuration.
+    holds the one disclaimed configuration the deployed app may execute; and
+    ``config/production/gm_hr_v1.yaml`` is the single D-071-approved production
+    configuration. A model configuration anywhere else is unapproved.
     """
     candidates = [
         path
@@ -335,10 +341,13 @@ def test_model_configuration_yaml_lives_only_in_approved_locations() -> None:
     outside = [
         path
         for path in candidates
-        if "fixtures" not in path.parts and NONPRODUCTION_CONFIG_DIR not in path.parents
+        if "fixtures" not in path.parts
+        and NONPRODUCTION_CONFIG_DIR not in path.parents
+        and path != APPROVED_PRODUCTION_CONFIG
     ]
 
     assert candidates, "expected the synthetic configurations to be found"
+    assert APPROVED_PRODUCTION_CONFIG.is_file(), "the approved production configuration is missing"
     assert not outside, f"model configuration YAML in an unapproved location: {outside}"
 
 

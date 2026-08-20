@@ -46,12 +46,19 @@ from __future__ import annotations
 
 import os
 import subprocess
+from datetime import UTC, date, datetime
+from decimal import Decimal, InvalidOperation
 from importlib import metadata
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 from greenmachine.common.clock import SystemClock
+from greenmachine.config.loader import load_config
+from greenmachine.config.schema import GreenMachineConfig
+from greenmachine.domain.enums import ComponentId, SampleStatus, WindowProfile
+from greenmachine.domain.grade_result import EvaluatedGradeResult
 from greenmachine.fixtures import FixtureWeatherAdapter, grid_demo_snapshot, parks_demo_snapshot
 from greenmachine.grid import (
     DENSITY_ROWS,
@@ -68,7 +75,12 @@ from greenmachine.grid import (
     visible_columns,
 )
 from greenmachine.inputs import InputSnapshot, Window
-from greenmachine.inputs.savant_park_factors import basis_statement
+from greenmachine.inputs.contract import Handedness, ParkFactor, ParkVenue
+from greenmachine.inputs.savant_park_factors import basis_statement, read_factors
+from greenmachine.live.mlb_api import FetchFailure, MlbStatsApi
+from greenmachine.live.pipeline import BatterCard, GameCard, SlateBoard, build_board
+from greenmachine.live.savant import BaseballSavant
+from greenmachine.live.transport import UrllibTransport as MlbTransport
 from greenmachine.parks import ALL_COLUMNS as PARK_COLUMNS
 from greenmachine.parks import FACTOR_COLUMNS as PARK_FACTOR_COLUMNS
 from greenmachine.parks import (
@@ -434,6 +446,366 @@ def render_metrics_screen(snapshot: InputSnapshot) -> None:
         )
 
 
+# --------------------------------------------------------------------------
+# GMF-006: the live slate board (D-069/D-070/D-071/D-072)
+# --------------------------------------------------------------------------
+
+# The board rebuilds at most this often; per-day event files refresh hourly.
+BOARD_TTL_SECONDS = 900
+DAY_EVENTS_TTL_SECONDS = 3600
+
+
+@st.cache_resource
+def live_mlb_adapters() -> tuple[MlbStatsApi, BaseballSavant]:
+    """The two live adapters, held across reruns (a reload is not a refetch)."""
+    transport = MlbTransport()
+    return MlbStatsApi(transport), BaseballSavant(transport)
+
+
+@st.cache_resource
+def production_config() -> GreenMachineConfig:
+    """The one approved production grading configuration (D-071)."""
+    return load_config(REPO_ROOT / "config" / "production" / "gm_hr_v1.yaml")
+
+
+@st.cache_resource
+def park_factor_table() -> dict[int, dict[Handedness, ParkFactor]]:
+    """The pinned Savant park-factor snapshot (digest-verified on read)."""
+    return read_factors()
+
+
+@st.cache_data(ttl=DAY_EVENTS_TTL_SECONDS, show_spinner=False)
+def _day_events(day_iso: str, year: int) -> object:
+    """One day's pitches, cached: a past day never changes."""
+    _, savant = live_mlb_adapters()
+    return savant.fetch_pitch_events(year=year, day=day_iso)
+
+
+def _temperature_lookup() -> object:
+    """A venue -> °F reader over the weather seam; None locally or on absence."""
+    adapter, live = weather_binding()
+
+    def read(venue: ParkVenue) -> Decimal | None:
+        if not live:
+            return None
+        field = adapter.forecast_for(venue)
+        if field.value is None:
+            return None
+        return field.value.temperature_f
+
+    return read
+
+
+@st.cache_data(ttl=BOARD_TTL_SECONDS, show_spinner="Building today's slate board...")
+def live_board(slate_iso: str) -> SlateBoard | FetchFailure:
+    """Assemble and grade the slate; cached so a rerun is not a refetch."""
+    api, savant = live_mlb_adapters()
+    slate_date = date.fromisoformat(slate_iso)
+    year = slate_date.year
+
+    def fetch_day(day: date) -> object:
+        return _day_events(day.isoformat(), year)
+
+    return build_board(
+        api=api,
+        savant=savant,
+        slate_date=slate_date,
+        as_of=datetime.now(UTC),
+        config=production_config(),
+        fetch_day_events=fetch_day,  # type: ignore[arg-type]
+        temperature_for=_temperature_lookup(),  # type: ignore[arg-type]
+        park_factors=park_factor_table(),
+    )
+
+
+def _top_bucket_lower(config: GreenMachineConfig, component_id: ComponentId) -> Decimal | None:
+    """The lower edge of a component's top bucket — the highlight threshold.
+
+    Read from the loaded configuration, never restated here: the config file
+    is the single place thresholds live.
+    """
+    for component in config.components:
+        if component.component_id is component_id:
+            for profile in component.profiles:
+                if profile.window_profile is WindowProfile.RECENT_7D:
+                    block = profile.scoring[0]
+                    buckets = getattr(block, "buckets", None)
+                    if buckets:
+                        return Decimal(str(buckets[-1].lower))
+    return None
+
+
+_HIGHLIGHT = "background-color: #d4edda"
+
+
+def _highlight_columns(
+    frame: pd.DataFrame, edges: dict[str, Decimal | None]
+) -> pd.io.formats.style.Styler:
+    """Green-mark cells at or above their component's top bucket edge."""
+    styler = frame.style
+    for column, edge in edges.items():
+        if edge is None or column not in frame.columns:
+            continue
+
+        def mark(value: object, *, _edge: Decimal = edge) -> str:
+            if value is None:
+                return ""
+            try:
+                numeric = Decimal(str(value))
+            except InvalidOperation:  # non-numeric cell content is never highlighted
+                return ""
+            return _HIGHLIGHT if numeric >= _edge else ""
+
+        styler = styler.map(mark, subset=[column])
+    return styler
+
+
+def _component_flags(card: BatterCard) -> tuple[str, str]:
+    """(insufficient-sample tags, missing-with-reason tags) for one card."""
+    insufficient = [
+        obs.component_id.value
+        for obs in card.result.present_observations
+        if obs.sample_status is SampleStatus.INSUFFICIENT
+    ]
+    missing = [
+        f"{obs.component_id.value} ({obs.missing_reason.value})"
+        for obs in card.result.missing_observations
+    ]
+    return ", ".join(insufficient), ", ".join(missing)
+
+
+def _side_factor(game: GameCard, side: str | None) -> ParkFactor | None:
+    if side == "L":
+        return game.home_run_factor_left
+    if side == "R":
+        return game.home_run_factor_right
+    return None
+
+
+def _slugger_rows(board: SlateBoard) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for game in board.games:
+        for batters, opposing in (
+            (game.away_batters, game.home_pitcher),
+            (game.home_batters, game.away_pitcher),
+        ):
+            for card in batters:
+                factor = _side_factor(game, card.batting_side)
+                insufficient, missing = _component_flags(card)
+                rows.append(
+                    {
+                        "Batter": card.full_name,
+                        "Team": card.team,
+                        "Vs": opposing.full_name if opposing else "TBD",
+                        "Grade": (
+                            card.result.grade.value
+                            if isinstance(card.result, EvaluatedGradeResult)
+                            else "N/E"
+                        ),
+                        "Total": (
+                            float(card.result.total_score)
+                            if isinstance(card.result, EvaluatedGradeResult)
+                            else None
+                        ),
+                        "EV": (float(card.statcast.exit_velocity_avg) if card.statcast else None),
+                        "Barrel%": (
+                            float(card.statcast.barrel_share * 100) if card.statcast else None
+                        ),
+                        "Hard-Hit%": (
+                            float(card.statcast.hard_hit_share * 100) if card.statcast else None
+                        ),
+                        "Sweet%": (
+                            float(card.form.sweet_spot_pct.value)
+                            if card.form and card.form.sweet_spot_pct.value is not None
+                            else None
+                        ),
+                        "Bat Speed": (
+                            float(card.form.bat_speed_mph.value)
+                            if card.form and card.form.bat_speed_mph.value is not None
+                            else None
+                        ),
+                        "Ideal AA%": (
+                            float(card.form.ideal_attack_angle_pct.value)
+                            if card.form and card.form.ideal_attack_angle_pct.value is not None
+                            else None
+                        ),
+                        "Pull-Air%": (
+                            float(card.form.pull_air_pct.value)
+                            if card.form and card.form.pull_air_pct.value is not None
+                            else None
+                        ),
+                        "Park": float(factor.factor) if factor is not None else None,
+                        "Low sample": insufficient,
+                        "Missing": missing,
+                        "Lineup": "est." if card.lineup_is_estimate else "",
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> None:
+    st.caption(
+        "Every lineup batter on the slate, graded under the provisional v1 model "
+        "(D-071). Green cells are at or above the component's top bucket edge, "
+        "read live from the config. 'Low sample' lists components below their "
+        "floor — still scored, carrying the advisory. 'Missing' names absences "
+        "with their reasons. Estimated lineups are marked 'est.' until orders post."
+    )
+    frame = _slugger_rows(board)
+    edges = {
+        "EV": _top_bucket_lower(config, ComponentId.EXIT_VELOCITY),
+        "Barrel%": _top_bucket_lower(config, ComponentId.BARREL_PCT),
+        "Hard-Hit%": _top_bucket_lower(config, ComponentId.HARD_HIT_PCT),
+        "Sweet%": _top_bucket_lower(config, ComponentId.SWEET_SPOT_PCT),
+        "Bat Speed": _top_bucket_lower(config, ComponentId.BAT_SPEED),
+        "Ideal AA%": _top_bucket_lower(config, ComponentId.ATTACK_ANGLE_QUALITY),
+        "Pull-Air%": _top_bucket_lower(config, ComponentId.PULL_PCT_AIR_BALLS),
+        "Park": _top_bucket_lower(config, ComponentId.PARK),
+    }
+    st.dataframe(
+        _highlight_columns(frame, edges),
+        hide_index=True,
+        height=frame_height("Roomy", len(frame)),
+        key="live_sluggers",
+    )
+
+
+def _render_arms(board: SlateBoard) -> None:
+    st.caption(
+        "Expected starters with their season line and the arsenal they actually "
+        "throw (pitch types at or above the qualifying usage share)."
+    )
+    rows: list[dict[str, object]] = []
+    for game in board.games:
+        for card, team in (
+            (game.home_pitcher, game.home_team),
+            (game.away_pitcher, game.away_team),
+        ):
+            if card is None:
+                rows.append({"Game": f"{game.away_team} at {game.home_team}", "Pitcher": "TBD"})
+                continue
+            arsenal = " · ".join(
+                f"{row.pitch_type} {float(row.usage_share * 100):.0f}%"
+                f" (whiff {float(row.whiff_share * 100):.0f}%)"
+                for row in card.arsenal
+            )
+            rows.append(
+                {
+                    "Game": f"{game.away_team} at {game.home_team}",
+                    "Pitcher": card.full_name,
+                    "Team": team,
+                    "Throws": card.throws,
+                    "ERA": card.season.era if card.season else "",
+                    "WHIP": card.season.whip if card.season else "",
+                    "GS": card.season.games_started if card.season else None,
+                    "K": card.season.strikeouts if card.season else None,
+                    "Arsenal": arsenal,
+                }
+            )
+    st.dataframe(pd.DataFrame(rows), hide_index=True, key="live_arms")
+
+
+def _render_matchups(board: SlateBoard) -> None:
+    st.caption(
+        "Per game: the venue, the expected starters, and both lineups with "
+        "grades. Lineups marked estimated are the club's highest-usage bats "
+        "until the posted order arrives."
+    )
+    for game in board.games:
+        pitchers = " vs ".join(
+            card.full_name if card else "TBD" for card in (game.away_pitcher, game.home_pitcher)
+        )
+        with st.expander(f"{game.away_team} at {game.home_team} — {game.venue_name} · {pitchers}"):
+            for label, batters in (("Away", game.away_batters), ("Home", game.home_batters)):
+                st.markdown(f"**{label} lineup**")
+                rows = [
+                    {
+                        "#": card.order_position,
+                        "Batter": card.full_name,
+                        "Bats": card.bats,
+                        "Grade": (
+                            card.result.grade.value
+                            if isinstance(card.result, EvaluatedGradeResult)
+                            else "N/E"
+                        ),
+                        "Total": (
+                            float(card.result.total_score)
+                            if isinstance(card.result, EvaluatedGradeResult)
+                            else None
+                        ),
+                        "Lineup": "est." if card.lineup_is_estimate else "",
+                    }
+                    for card in batters
+                ]
+                st.dataframe(pd.DataFrame(rows), hide_index=True)
+
+
+def _render_conditions(board: SlateBoard) -> None:
+    st.caption(
+        "Parks and conditions. A roofed venue grades at the assumed neutral "
+        "indoor value — an assumption, labelled, not a measurement. A park "
+        "factor carries its plate-appearance sample beside it (D-014)."
+    )
+    rows: list[dict[str, object]] = []
+    for game in board.games:
+        left = game.home_run_factor_left
+        right = game.home_run_factor_right
+        rows.append(
+            {
+                "Game": f"{game.away_team} at {game.home_team}",
+                "Venue": game.venue_name,
+                "Type": game.venue_type.value,
+                "HR factor (LHB)": float(left.factor) if left else None,
+                "n": left.plate_appearances if left else None,
+                "HR factor (RHB)": float(right.factor) if right else None,
+                "n ": right.plate_appearances if right else None,
+                "Temp °F": (
+                    float(game.temperature_fahrenheit)
+                    if game.temperature_fahrenheit is not None
+                    else None
+                ),
+            }
+        )
+    st.dataframe(pd.DataFrame(rows), hide_index=True, key="live_conditions")
+    if board.diagnostics:
+        st.markdown("**Fetch diagnostics — what degraded, and why**")
+        for line in board.diagnostics:
+            st.markdown(f"- {line}")
+
+
+def render_live_board() -> None:
+    """The four live tabs (D-072). Live only in a deployed environment: a local
+    render never becomes a network call, mirroring the weather seam."""
+    st.subheader("Today's slate")
+    if resolve_environment() == "local":
+        st.caption(
+            "The live board binds only in a deployed environment: locally it "
+            "would be a network call, so it stays unbuilt here. Deployed, this "
+            "surface pulls the day's slate, lineups, season boards, form events, "
+            "park factors and forecasts from the two approved MLB hosts and the "
+            "NWS adapter, then grades every batter under the v1 config (D-071)."
+        )
+        return
+    board = live_board(date.today().isoformat())
+    if isinstance(board, FetchFailure):
+        st.warning(f"Today's schedule could not be fetched: {board.reason}")
+        return
+    st.caption(
+        f"Slate of {board.official_date}, assembled {board.as_of:%H:%M UTC}. "
+        f"{len(board.games)} game(s). Board refreshes every "
+        f"{BOARD_TTL_SECONDS // 60} minutes; form windows hourly."
+    )
+    sluggers, arms, matchups, conditions = st.tabs(["Sluggers", "Arms", "Matchups", "Conditions"])
+    with sluggers:
+        _render_sluggers(board, production_config())
+    with arms:
+        _render_arms(board)
+    with matchups:
+        _render_matchups(board)
+    with conditions:
+        _render_conditions(board)
+
+
 def render_parks_screen() -> None:
     """The §GMF-004 parks screen: thirty venues, factors per handedness.
 
@@ -554,6 +926,8 @@ def main() -> None:
         "criteria tallies, never predictions (D-015/D-017)."
     )
     render_shell_fields()
+    st.divider()
+    render_live_board()
     st.divider()
     render_grid()
     st.divider()

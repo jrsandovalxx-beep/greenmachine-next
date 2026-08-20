@@ -424,7 +424,7 @@ be added, renamed, reordered, or removed on one side only. Definitions of what e
 | `SampleType` | `batted_ball_events`, `swings`, `air_balls`, `plate_appearances`, `pitches`, `games` |
 | `SampleStatus` | `SUFFICIENT`, `INSUFFICIENT` |
 | `MissingReason` | `NO_EVENTS_IN_WINDOW`, `SOURCE_UNAVAILABLE`, `TRACKING_UNAVAILABLE`, `PLAYER_NOT_COVERED`, `INVALID_SOURCE_VALUE`, `EXPECTED_PITCHER_UNKNOWN`, `WEATHER_UNAVAILABLE`, `UNSUPPORTED_HISTORICAL_PERIOD` |
-| `ProviderId` | `baseball_savant` |
+| `ProviderId` | `baseball_savant`, `mlb_stats_api`, `nws` |
 | `AcquisitionMethod` | `direct_aggregate`, `structured_extract`, `rendered_scrape`, `event_derived`, `configured_proxy` |
 | `PitcherRole` | `opener`, `expected_starter`, `uncertain` |
 | `EvaluationStatus` | `EVALUATED`, `NOT_EVALUABLE` |

@@ -49,7 +49,7 @@ ROOT = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
 # criterion-4 correction); the bootstrap's completed records keep their v15 link-backs.
 PINNED_REBUILD_PLAN_SHA256 = "c41b6abd5fbe64c0e9b468bea0c9a2ddb5f1b646780c017655f0295aa0b82ca2"
 # FEATURE_PHASE_PLAN v6, APPROVED — the bytes committed unaltered by §GMF-000R.
-PINNED_FEATURE_PLAN_SHA256 = "fd11ae2559f4be0ca3c77d17ba311bfeced3e0f6267de7a6b5953a380100343b"
+PINNED_FEATURE_PLAN_SHA256 = "87f76fade5fc33faa3c29d6d65dc57eece2150ce1c5857a1cc1b707e5802d2e5"
 
 # The completed-order table (FEATURE_PHASE_PLAN §4a — the complete combined sequence,
 # authoritative there). The set of files in tickets/completed/ must be exactly a prefix

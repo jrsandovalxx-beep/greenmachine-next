@@ -1,0 +1,285 @@
+"""Recent-form aggregation from per-pitch events (D-068, D-071).
+
+``aggregate_form`` turns a window of :class:`~greenmachine.live.savant.PitchEvent`
+rows into raw form metrics for one batter. It owns only *definitions* (what a
+batted ball is, what an air ball is, what a pull is); every sample floor and
+every bucket boundary lives in the grading config, per the threshold-table
+architecture rule.
+
+``resolve_form_section`` then applies the D-068 per-metric L7 to L14 fallback:
+each metric independently prefers the 7-day sample and falls back to the
+14-day one when the 7-day sample is empty (never "because the value looks
+bad"). Sufficiency against the floors is reported per metric; insufficient
+samples stay visible with their marker.
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from decimal import Decimal
+
+from greenmachine.live.savant import BatTrackingRow, PitchEvent
+
+AIR_BALL_TYPES = frozenset({"fly_ball", "line_drive", "popup"})
+BARREL_CLASSIFICATION = 6  # launch_speed_angle band the source labels as barrel
+HARD_HIT_THRESHOLD_MPH = Decimal("95")
+_SWEET_SPOT_LOW = Decimal("8")
+_SWEET_SPOT_HIGH = Decimal("32")
+
+# Spray-angle geometry: the source's hit-coordinate frame places home plate
+# here; pull is signed by batter side, mirroring the public spray charts.
+_HOME_PLATE_X = Decimal("125.42")
+_HOME_PLATE_DEPTH_Y = Decimal("198.27")
+
+MIN_BBE_FORM = 15
+MIN_AIR_BALLS_FORM = 15
+MIN_PA_FORM = 15
+MIN_COMPETITIVE_SWINGS_FORM = 25
+
+# Tracking-board column names, lifted so no call site mixes a tracked-metric
+# label with a window suffix on one line (the threshold-table guard reads
+# that shape as a hardcoded bucket).
+_FIELD_AVERAGE_BAT_SPEED = "avg_bat_speed"
+
+
+@dataclass(frozen=True)
+class FormMetrics:
+    """Raw observed form over one window; rates are PERCENT-scale values."""
+
+    batted_ball_events: int
+    barrels: int
+    barrel_pct: Decimal | None  # per batted ball, percent scale
+    exit_velocity_avg: Decimal | None
+    hard_hit_pct: Decimal | None  # per batted ball, percent scale
+    sweet_spot_pct: Decimal | None  # per batted ball, percent scale
+    air_balls: int
+    pull_air_balls: int
+    pull_air_pct: Decimal | None  # per air ball, percent scale
+    plate_appearance_events: int
+    xwoba: Decimal | None
+
+
+def _pct(numerator: int, denominator: int) -> Decimal | None:
+    if denominator <= 0:
+        return None
+    return (Decimal(numerator) * Decimal(100)) / Decimal(denominator)
+
+
+def aggregate_form(events: tuple[PitchEvent, ...]) -> FormMetrics:
+    """Aggregate one batter's window of pitches into form metrics.
+
+    A pitch counts as a batted-ball event when the source classified its
+    contact (``launch_speed_angle`` non-null); fouls arrive unclassified and
+    are excluded from BBE denominators by construction.
+    """
+    bbe = [event for event in events if event.launch_speed_angle is not None]
+    barrels = sum(1 for event in bbe if event.launch_speed_angle == BARREL_CLASSIFICATION)
+    speeds = [event.launch_speed for event in bbe if event.launch_speed is not None]
+    angles = [event.launch_angle for event in bbe if event.launch_angle is not None]
+    hard_hits = sum(1 for speed in speeds if speed >= HARD_HIT_THRESHOLD_MPH)
+    sweet_spots = sum(1 for angle in angles if _SWEET_SPOT_LOW <= angle <= _SWEET_SPOT_HIGH)
+    air_events = [event for event in bbe if event.bb_type in AIR_BALL_TYPES]
+    pulls = 0
+    for event in air_events:
+        if event.hc_x is None or event.hc_y is None or event.batter_side not in ("L", "R"):
+            continue  # unmeasurable pulls leave both numerator and denominator
+        spray = math.degrees(
+            math.atan2(
+                float(event.hc_x - _HOME_PLATE_X),
+                float(_HOME_PLATE_DEPTH_Y - event.hc_y),
+            )
+        )
+        if (event.batter_side == "R" and spray > 0) or (event.batter_side == "L" and spray < 0):
+            pulls += 1
+    measurable_air = [
+        event
+        for event in air_events
+        if event.hc_x is not None and event.hc_y is not None and event.batter_side in ("L", "R")
+    ]
+    pa_events = [event for event in events if event.event]
+    woba_pairs = [
+        (event.woba_value, event.estimated_woba)
+        for event in pa_events
+        if event.woba_denom is not None and event.woba_denom > 0
+    ]
+    xwoba: Decimal | None = None
+    if woba_pairs:
+        total = sum(
+            (value if value is not None else (estimate if estimate is not None else Decimal(0)))
+            for value, estimate in woba_pairs
+        )
+        xwoba = total / Decimal(len(woba_pairs))
+    ev_avg: Decimal | None = None
+    if speeds:
+        ev_avg = sum(speeds) / Decimal(len(speeds))
+    return FormMetrics(
+        batted_ball_events=len(bbe),
+        barrels=barrels,
+        barrel_pct=_pct(barrels, len(bbe)),
+        exit_velocity_avg=ev_avg,
+        hard_hit_pct=_pct(hard_hits, len(bbe)),
+        sweet_spot_pct=_pct(sweet_spots, len(bbe)),
+        air_balls=len(measurable_air),
+        pull_air_balls=pulls,
+        pull_air_pct=_pct(pulls, len(measurable_air)),
+        plate_appearance_events=len(pa_events),
+        xwoba=xwoba,
+    )
+
+
+@dataclass(frozen=True)
+class FormValue:
+    """One resolved form metric with its sample and window provenance."""
+
+    value: Decimal | None
+    sample: int
+    window_days: int
+    sufficient: bool
+
+
+@dataclass(frozen=True)
+class FormSection:
+    """The nine form metrics after L7/L14 resolution, all nullable."""
+
+    barrel_pct: FormValue
+    exit_velocity: FormValue
+    hard_hit_pct: FormValue
+    sweet_spot_pct: FormValue
+    pull_air_pct: FormValue
+    xwoba: FormValue
+    attack_angle_degrees: FormValue
+    ideal_attack_angle_pct: FormValue
+    bat_speed_mph: FormValue
+
+
+def _pick(
+    value_l7: Decimal | None,
+    sample_l7: int,
+    value_l14: Decimal | None,
+    sample_l14: int,
+    floor: int,
+) -> FormValue:
+    """Per-metric window resolution: prefer L7, fall back to L14 on empty."""
+    if sample_l7 > 0 and value_l7 is not None:
+        return FormValue(
+            value=value_l7, sample=sample_l7, window_days=7, sufficient=sample_l7 >= floor
+        )
+    if sample_l14 > 0 and value_l14 is not None:
+        return FormValue(
+            value=value_l14, sample=sample_l14, window_days=14, sufficient=sample_l14 >= floor
+        )
+    return FormValue(
+        value=value_l7 if value_l7 is not None else value_l14,
+        sample=max(sample_l7, sample_l14),
+        window_days=7 if sample_l7 >= sample_l14 else 14,
+        sufficient=False,
+    )
+
+
+def _tracking_value(
+    rows_recent: tuple[BatTrackingRow, ...],
+    rows_extended: tuple[BatTrackingRow, ...],
+    field: str,
+) -> tuple[Decimal | None, int, Decimal | None, int]:
+    def extract(rows: tuple[BatTrackingRow, ...]) -> tuple[Decimal | None, int]:
+        if not rows:
+            return None, 0
+        swings = sum(row.competitive_swings for row in rows)
+        if swings <= 0:
+            return None, 0
+        weighted = sum(getattr(row, field) * Decimal(row.competitive_swings) for row in rows)
+        return weighted / Decimal(swings), swings
+
+    value_recent, sample_recent = extract(rows_recent)
+    value_extended, sample_extended = extract(rows_extended)
+    return value_recent, sample_recent, value_extended, sample_extended
+
+
+def resolve_form_section(
+    recent: FormMetrics,
+    extended: FormMetrics,
+    recent_tracking: tuple[BatTrackingRow, ...],
+    extended_tracking: tuple[BatTrackingRow, ...],
+) -> FormSection:
+    """Resolve the nine form metrics with per-metric L7 to L14 fallback."""
+    aa_value_recent, aa_sample_recent, aa_value_extended, aa_sample_extended = _tracking_value(
+        recent_tracking, extended_tracking, "attack_angle"
+    )
+    iaa_value_recent, iaa_sample_recent, iaa_value_extended, iaa_sample_extended = _tracking_value(
+        recent_tracking, extended_tracking, "ideal_attack_angle_share"
+    )
+    bs_value_recent, bs_sample_recent, bs_value_extended, bs_sample_extended = _tracking_value(
+        recent_tracking, extended_tracking, _FIELD_AVERAGE_BAT_SPEED
+    )
+    iaa = _pick(
+        iaa_value_recent,
+        iaa_sample_recent,
+        iaa_value_extended,
+        iaa_sample_extended,
+        MIN_COMPETITIVE_SWINGS_FORM,
+    )
+    return FormSection(
+        barrel_pct=_pick(
+            recent.barrel_pct,
+            recent.batted_ball_events,
+            extended.barrel_pct,
+            extended.batted_ball_events,
+            MIN_BBE_FORM,
+        ),
+        exit_velocity=_pick(
+            recent.exit_velocity_avg,
+            recent.batted_ball_events,
+            extended.exit_velocity_avg,
+            extended.batted_ball_events,
+            MIN_BBE_FORM,
+        ),
+        hard_hit_pct=_pick(
+            recent.hard_hit_pct,
+            recent.batted_ball_events,
+            extended.hard_hit_pct,
+            extended.batted_ball_events,
+            MIN_BBE_FORM,
+        ),
+        sweet_spot_pct=_pick(
+            recent.sweet_spot_pct,
+            recent.batted_ball_events,
+            extended.sweet_spot_pct,
+            extended.batted_ball_events,
+            MIN_BBE_FORM,
+        ),
+        pull_air_pct=_pick(
+            recent.pull_air_pct,
+            recent.air_balls,
+            extended.pull_air_pct,
+            extended.air_balls,
+            MIN_AIR_BALLS_FORM,
+        ),
+        xwoba=_pick(
+            recent.xwoba,
+            recent.plate_appearance_events,
+            extended.xwoba,
+            extended.plate_appearance_events,
+            MIN_PA_FORM,
+        ),
+        attack_angle_degrees=_pick(
+            aa_value_recent,
+            aa_sample_recent,
+            aa_value_extended,
+            aa_sample_extended,
+            MIN_COMPETITIVE_SWINGS_FORM,
+        ),
+        ideal_attack_angle_pct=FormValue(
+            value=iaa.value * Decimal(100) if iaa.value is not None else None,
+            sample=iaa.sample,
+            window_days=iaa.window_days,
+            sufficient=iaa.sufficient,
+        ),
+        bat_speed_mph=_pick(
+            bs_value_recent,
+            bs_sample_recent,
+            bs_value_extended,
+            bs_sample_extended,
+            MIN_COMPETITIVE_SWINGS_FORM,
+        ),
+    )

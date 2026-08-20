@@ -1647,3 +1647,42 @@ value, its exact sample, and an INSUFFICIENT marker** — the missing-versus-ins
 D-023/D-025 is unchanged, and no new absence state is created. A field with no observations at all
 is absent with its reason under the ordinary absence semantics. The window actually used is named on
 the surface, per D-025's stated-window rule. Scheduled as §GMF-007.
+
+## D-069 - Automated acquisition authorized for the two named MLB hosts; review gate suspended under the directive
+**Automated acquisition authorized for the two named MLB hosts; review gate suspended under the
+directive.** (a) The Product Owner's 2026-08-20 directive authorizes automated, unattended data
+pulls from `statsapi.mlb.com` and `baseballsavant.mlb.com`, superseding D-057 boundary 1 (manual
+export) for those hosts only. The GMF-005 weather-adapter discipline binds: a host-pinned
+transport module (allowlist constant, redirect re-validation, bounded timeout), network at the
+composition root only, no caller-supplied URLs, failures mapped to named absence states, no
+secret in code, no live payload committed as a fixture. (b) The directive grants the builder
+merge/push authority on this repository; local verification — the 10-rule checker plus the full
+test suite run on the exact merged tree — stands in for the pre-2026-08-20 review-chat gate for
+the directive's scope. The no-odds surface (D-015/D-017) and the Ballpark Pal exclusion (D-051)
+are unchanged.
+
+## D-070 - Live sources of record
+**Live sources of record.** Slate, probable pitchers, lineups and season hitting counts come
+from the MLB Stats API (`statsapi.mlb.com`); Statcast-derived metrics — season leaderboards,
+rolling L7/L14 windows, pitch-arsenal splits, per-event logs — come from Baseball Savant CSV
+endpoints (`baseballsavant.mlb.com`), the origin source per D-063; weather comes from
+`api.weather.gov` per GMF-005. Every fetch is cache-bound at the composition root with a stated
+freshness bound, so a reload is not a refetch. A failed or stale fetch degrades to the contract's
+named absence states; a stale value is never shown as current.
+
+## D-071 - Grading v1 configuration
+**Grading v1 configuration.** The production grading configuration is 12 total points across five
+categories — power_profile 3, pitcher_matchup 3, form 2, pull_power 2, environment 2 — with grade
+cutoffs D [0,4), C [4,6), B [6,8), A [8,10), S [10,12], per the spec recorded in the synthetic
+engine config's header. Component bucket edges are provisional v1 values pending the Product
+Owner's threshold rulings; they are configuration, not code, so a later ruling changes the config
+file only. The v1 config lives at a new path (`config/production/gm_hr_v1.yaml`); the byte-pinned
+synthetic test config is never edited.
+
+## D-072 - Navigation: four tabs
+**Navigation: four tabs.** The deployed app organises live surfaces as `st.tabs`: **Sluggers**
+(slate board — lineup batters with season and L7 metrics, park and weather tags, grade, threshold
+highlighting per the spec values, INSUFFICIENT badges), **Arms** (probable pitchers and their
+arsenals), **Matchups** (per-game venue, probable pitchers, and both lineups), **Conditions**
+(parks and live weather). A Record/betting-log surface is **not** authorized — it is
+ranking-adjacent under D-015/D-017 and awaits an explicit Product Owner posture ruling.

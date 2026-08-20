@@ -149,7 +149,7 @@ def test_acquisition_methods_match_the_priority_list() -> None:
 
 def test_provider_id_only_contains_approved_providers() -> None:
     """Only providers named in the approved documentation exist (Q23 still open)."""
-    assert values(ProviderId) == {"baseball_savant"}
+    assert values(ProviderId) == {"baseball_savant", "mlb_stats_api", "nws"}
 
 
 def test_pitcher_roles_match_the_spec() -> None:

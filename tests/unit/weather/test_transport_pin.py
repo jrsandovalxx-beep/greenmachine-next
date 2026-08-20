@@ -69,14 +69,17 @@ def test_no_mlb_host_can_be_reached_through_the_transport() -> None:
             transport.get(url, {"User-Agent": "test"})
 
 
-def test_exactly_one_module_in_src_can_open_a_connection() -> None:
+def test_only_the_enumerated_modules_in_src_can_open_a_connection() -> None:
     """The enumerated-presence claim, asserted over the whole source tree.
 
-    One network-capable implementation, at a named path. If a second appears,
-    this fails and the package's central claim has to be rewritten rather than
-    quietly outgrown.
+    D-069 authorized automated pulls from the two named MLB hosts, so the
+    enumeration is now two modules: the weather transport (api.weather.gov)
+    and the MLB transport (statsapi.mlb.com, baseballsavant.mlb.com). If a
+    third appears, this fails and the package's central claim has to be
+    rewritten rather than quietly outgrown.
     """
     network_modules = {"urllib", "http", "socket", "ssl", "ftplib", "requests", "httpx", "aiohttp"}
+    approved = ("weather/transport.py:", "live/transport.py:")
     offenders: list[str] = []
     for path in sorted(SRC.rglob("*.py")):
         text = path.read_text(encoding="utf-8")
@@ -87,7 +90,7 @@ def test_exactly_one_module_in_src_can_open_a_connection() -> None:
             for module in network_modules:
                 if stripped.startswith(f"import {module}") or stripped.startswith(f"from {module}"):
                     offenders.append(f"{path.relative_to(SRC).as_posix()}: {stripped}")
-    assert all(entry.startswith("weather/transport.py:") for entry in offenders), offenders
+    assert all(entry.startswith(approved) for entry in offenders), offenders
     assert offenders, "the sweep found no network import at all - the walk is broken"
 
 
