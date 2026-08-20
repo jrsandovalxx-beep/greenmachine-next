@@ -351,6 +351,8 @@ def build_board(
         batter_arsenal = ()
     else:
         batter_arsenal = batter_arsenal_result
+        if not batter_arsenal:
+            diagnostics.append("batter arsenal board: returned zero rows")
     pitcher_arsenal_result = savant.fetch_pitch_arsenal(kind="pitcher", year=year)
     pitcher_arsenal_rows: tuple[PitchArsenalRow, ...]
     pitcher_arsenal_available = not isinstance(pitcher_arsenal_result, FetchFailure)
@@ -359,6 +361,8 @@ def build_board(
         pitcher_arsenal_rows = ()
     else:
         pitcher_arsenal_rows = pitcher_arsenal_result
+        if not pitcher_arsenal_rows:
+            diagnostics.append("pitcher arsenal board: returned zero rows")
     league = league_baselines(batter_rows=batter_arsenal, pitcher_rows=pitcher_arsenal_rows)
     arsenal_lists_by_pitcher: dict[int, list[PitchArsenalRow]] = {}
     for row in pitcher_arsenal_rows:
@@ -426,6 +430,8 @@ def build_board(
         statcast = {}
     else:
         statcast = statcast_result
+        if not statcast:
+            diagnostics.append("statcast board: returned zero rows")
 
     short_start = (as_of - timedelta(days=FORM_SHORT_DAYS)).date()
     reach_start = (as_of - timedelta(days=FORM_REACH_DAYS)).date()

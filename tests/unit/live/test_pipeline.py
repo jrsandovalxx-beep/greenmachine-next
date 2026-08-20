@@ -11,8 +11,6 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 
-import pytest
-
 from greenmachine.config.loader import load_config
 from greenmachine.domain.enums import ComponentId, MissingReason, SampleStatus
 from greenmachine.domain.grade_result import EvaluatedGradeResult

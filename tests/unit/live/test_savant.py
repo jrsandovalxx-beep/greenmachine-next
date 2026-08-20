@@ -137,3 +137,11 @@ def test_every_board_request_stays_on_the_savant_host() -> None:
     assert all(
         url.startswith("https://baseballsavant.mlb.com/") for url in transport.requested_urls
     )
+
+
+def test_a_byte_order_mark_does_not_shift_the_columns() -> None:
+    """Regression: Savant prepends a BOM; unhandled, it shifts every column."""
+    bom_csv = "\ufeff" + _STATCAST_CSV
+    rows = BaseballSavant(_FakeTransport(bom_csv)).fetch_statcast_batters(year=2026)
+    assert not isinstance(rows, FetchFailure)
+    assert rows[101].batted_ball_events == 300
