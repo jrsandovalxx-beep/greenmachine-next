@@ -481,22 +481,32 @@ def _day_events(day_iso: str, year: int) -> object:
     return savant.fetch_pitch_events(year=year, day=day_iso)
 
 
+# Bound on live-weather failures per board build. A black-holed venue costs one
+# transport timeout (~10s); without a cap, a network path that drops every NWS
+# packet would multiply that by every open-air venue on the slate. After this
+# many failures the reader stops asking and the remaining venues take the
+# ordinary weather-unavailable absence instead (D-054: absence is a value).
+WEATHER_FAILURE_CIRCUIT_BREAKER = 3
+
+# Diagnostics from the last board build's weather reads, rendered after the
+# board. Module-level because the reader closure runs inside the cached build;
+# the list is cleared at the start of each build, so it always names the
+# current board's weather story and nothing older.
+LIVE_WEATHER_DIAGNOSTICS: list[str] = []
+
+
 def _temperature_lookup() -> object:
     """A venue -> °F reader over the weather seam; None locally or on absence."""
     adapter, live = weather_binding()
 
     def read(venue: ParkVenue) -> Decimal | None:
-        if not live:
+        if not live or len(LIVE_WEATHER_DIAGNOSTICS) >= WEATHER_FAILURE_CIRCUIT_BREAKER:
             return None
         try:
             field = adapter.forecast_for(venue)
-        except AttributeError:
-            st.warning(
-                "WEATHER DIAG: "
-                f"type={type(venue).__module__}.{type(venue).__name__} "
-                f"has_venue_id={hasattr(venue, 'venue_id')} "
-                f"has_latitude={hasattr(venue, 'latitude')} "
-                f"value={str(venue)[:140]!r}"
+        except Exception as exc:  # composition-root last resort: weather downgrades to absence
+            LIVE_WEATHER_DIAGNOSTICS.append(
+                f"{venue.venue_id}: {type(exc).__name__} on {type(venue).__name__}"
             )
             return None
         if field.value is None:
@@ -516,6 +526,7 @@ def live_board(slate_iso: str) -> SlateBoard | FetchFailure:
     def fetch_day(day: date) -> object:
         return _day_events(day.isoformat(), year)
 
+    LIVE_WEATHER_DIAGNOSTICS.clear()
     return build_board(
         api=api,
         savant=savant,
@@ -814,6 +825,12 @@ def render_live_board() -> None:
         _render_matchups(board)
     with conditions:
         _render_conditions(board)
+    if LIVE_WEATHER_DIAGNOSTICS:
+        joined = "; ".join(LIVE_WEATHER_DIAGNOSTICS)
+        st.caption(
+            "Weather reads that failed during this build (absent on the board): "
+            f"{joined}. Further venues were not asked."
+        )
 
 
 def render_parks_screen() -> None:
