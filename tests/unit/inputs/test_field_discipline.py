@@ -97,6 +97,11 @@ ALLOWED_NON_SNAPSHOT_FIELDS: dict[tuple[str, str], str] = {
     ("ParkVenue", "team"): "identity",
     ("ParkVenue", "venue_type"): "identity",
     ("ParkVenue", "savant_venue_id"): "identity",
+    # Where a fixed place is. Identity in the same sense venue_type is: a
+    # property of the ballpark itself, not an observation about it, so there is
+    # nothing for an absence reason to say (GMF-005).
+    ("ParkVenue", "latitude"): "identity",
+    ("ParkVenue", "longitude"): "identity",
     ("ParkFactor", "factor"): "value-component",
     ("ParkFactor", "handedness"): "value-component",
     ("ParkFactor", "plate_appearances"): "value-component",
@@ -104,6 +109,11 @@ ALLOWED_NON_SNAPSHOT_FIELDS: dict[tuple[str, str], str] = {
     ("WeatherForecast", "wind_speed_mph"): "value-component",
     ("WeatherForecast", "wind_direction"): "value-component",
     ("WeatherForecast", "short_forecast"): "value-component",
+    # When this value was obtained from its source - the same category as
+    # InputSnapshot.captured_at, and deliberately on the value rather than the
+    # source table, because a cached forecast is older than the snapshot that
+    # renders it (GMF-005).
+    ("WeatherForecast", "obtained_at"): "timestamp",
     ("InputSnapshot", "captured_at"): "timestamp",
 }
 

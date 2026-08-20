@@ -8,6 +8,7 @@ snapshot — never copied into a fixture.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -60,16 +61,27 @@ _SOURCES = (
     ),
 )
 
+_OBTAINED_AT = datetime(2026, 1, 1, 11, 30, 0, tzinfo=UTC)
+
 _FORECAST = WeatherForecast(
     temperature_f=Decimal("222.2"),
     wind_speed_mph=Decimal("77.7"),
     wind_direction="SSW",
     short_forecast="Synthetic",
+    obtained_at=_OBTAINED_AT,
 )
 
 
 def _venue(slug: str, name: str, venue_type: VenueType, team: str = "Club Alpha") -> ParkVenue:
-    return ParkVenue(slug, name, team, venue_type, savant_venue_id=None)
+    return ParkVenue(
+        slug,
+        name,
+        team,
+        venue_type,
+        savant_venue_id=None,
+        latitude=Decimal("10.000"),
+        longitude=Decimal("-20.000"),
+    )
 
 
 def _factor(value: str, side: Handedness, sample: int = 5000) -> SnapshotField[ParkFactor]:
@@ -106,8 +118,6 @@ def _park(
 
 
 def _snapshot(*parks: ParkInputs) -> InputSnapshot:
-    from datetime import UTC, datetime
-
     return InputSnapshot(
         captured_at=datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC),
         sources=_SOURCES,

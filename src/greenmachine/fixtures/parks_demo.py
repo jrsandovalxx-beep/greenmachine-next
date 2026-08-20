@@ -28,10 +28,11 @@ only exercises the happy path proves the happy path:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from greenmachine.common.clock import Clock, FixedClock
 from greenmachine.inputs import (
     PARK_VENUES,
     AbsenceReason,
@@ -48,6 +49,7 @@ from greenmachine.inputs import (
 )
 from greenmachine.inputs.savant_park_factors import SOURCE as SAVANT_SOURCE
 from greenmachine.inputs.savant_park_factors import factor_fields, read_factors
+from greenmachine.weather import WeatherAdapter
 
 CAPTURED_AT = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 
@@ -81,12 +83,24 @@ _ROOF_ABSENT: dict[str, AbsenceReason] = {
     "globe-life-field": AbsenceReason.SOURCE_UNAVAILABLE,
 }
 
-_SYNTHETIC_FORECAST = WeatherForecast(
-    temperature_f=Decimal("111.1"),
-    wind_speed_mph=Decimal("88.8"),
-    wind_direction="NNE",
-    short_forecast="Synthetic fixture conditions (OQ-4)",
-)
+
+def _synthetic_forecast(obtained_at: datetime) -> WeatherForecast:
+    """The fixture's one forecast value, stamped with when it was "obtained".
+
+    ``obtained_at`` comes from the adapter's injected clock and never from a
+    system read: the determinism suite permits exactly one real-time read in
+    all of ``src`` (``SystemClock.now``), and a fixture that reached for the
+    wall clock would make a timestamp non-deterministic inside a tree whose
+    whole test posture depends on it not being.
+    """
+    return WeatherForecast(
+        temperature_f=Decimal("111.1"),
+        wind_speed_mph=Decimal("88.8"),
+        wind_direction="NNE",
+        short_forecast="Synthetic fixture conditions (OQ-4)",
+        obtained_at=obtained_at,
+    )
+
 
 # Venues whose forecast is deliberately absent, with the reason each names.
 # Rogers Centre is the honest case D-055 itself calls out: NWS covers the US
@@ -152,14 +166,22 @@ class FixtureWeatherAdapter:
     coverage is a visible state. Every answer this adapter gives — present or
     absent — is a row in a table above, so its coverage is auditable by
     reading, and its default is an absence.
+
+    The clock is injected and defaults to the fixture's own captured moment, so
+    every fixture forecast carries an honest, fixed ``obtained_at`` (§GMF-005)
+    and nothing here reads wall-clock time.
     """
+
+    clock: Clock = field(default_factory=lambda: FixedClock(CAPTURED_AT))
 
     def forecast_for(self, venue: ParkVenue) -> SnapshotField[WeatherForecast]:
         reason = _FORECAST_ABSENT.get(venue.venue_id)
         if reason is not None:
             return SnapshotField[WeatherForecast].absent(reason, CONDITIONS_SOURCE_ID)
         if venue.venue_id in _FORECAST_PRESENT:
-            return SnapshotField.present(_SYNTHETIC_FORECAST, CONDITIONS_SOURCE_ID)
+            return SnapshotField.present(
+                _synthetic_forecast(self.clock.now()), CONDITIONS_SOURCE_ID
+            )
         return SnapshotField[WeatherForecast].absent(
             AbsenceReason.NOT_YET_OBSERVED, CONDITIONS_SOURCE_ID
         )
@@ -181,12 +203,14 @@ def _roof_field(venue: ParkVenue) -> SnapshotField[RoofStatus]:
     return SnapshotField[RoofStatus].absent(reason, CONDITIONS_SOURCE_ID)
 
 
-def parks_demo_snapshot(adapter: FixtureWeatherAdapter | None = None) -> InputSnapshot:
+def parks_demo_snapshot(adapter: WeatherAdapter | None = None) -> InputSnapshot:
     """All thirty venues: pinned factors, fixture roof and weather.
 
-    The adapter is a parameter so a test can bind a different one without
-    touching the screen — which is the seam doing its job at the only scale
-    this ticket has.
+    The adapter is a parameter typed as the **seam**, not as the fixture, so
+    §GMF-005's live NWS adapter binds here without a line of the screen
+    changing — which is the whole point of having built the seam first. A
+    default of ``None`` keeps every local caller, and every test, on the
+    fixture.
     """
     weather = adapter if adapter is not None else FixtureWeatherAdapter()
     factors = read_factors()
