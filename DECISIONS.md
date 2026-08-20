@@ -1686,3 +1686,35 @@ highlighting per the spec values, INSUFFICIENT badges), **Arms** (probable pitch
 arsenals), **Matchups** (per-game venue, probable pitchers, and both lineups), **Conditions**
 (parks and live weather). A Record/betting-log surface is **not** authorized — it is
 ranking-adjacent under D-015/D-017 and awaits an explicit Product Owner posture ruling.
+
+## D-073 - GMF-006 implementation judgment calls
+**GMF-006 implementation judgment calls.** Logged per the 2026-08-20 directive's judgment-call
+rule; each was made to keep the build moving and each is reversible.
+(a) *Provisional matchup derivations (Q15/Q16 stay open).* pitch_mix_pressure is the
+usage-weighted share of the expected starter's >=15%-usage pitch types where the batter's season
+expected wOBA meets or beats the league's PA-weighted expected wOBA **against that same pitch
+type** (a per-pitch-type baseline, so fastball-heavy pitchers are not systematically easier).
+put_away_pitch_exploitation is the batter's whiff suppression versus the league's pitch-weighted
+whiff share on the starter's qualifying pitch with the highest put-away rate, clamped to
+[0, 1] — a batter who whiffs *more* than league scores zero, never negative. The parallel QA
+review recommended replacing both with continuous expected-wOBA margins; that replacement needs
+PO-ratified boundaries (Q12/Q13) and lands as a config-plus-derivation change, not a rebuild.
+(b) *Expected wOBA, not raw wOBA* (adopted from QA review): at per-pitch-type sample sizes the
+raw figure is dominated by sequencing and defense.
+(c) *Any roof means neutral conditions.* Fixed-roof **and** retractable-roof venues grade the
+weather component at an assumed neutral indoor value (72 °F), labelled as an assumption, because
+v1 has no roof-state source and an unobtained roof may be closed; only open-air venues use the
+live NWS forecast. This follows the ratified withholding rule rather than the open-air default.
+(d) *Unposted lineups are estimated, labelled.* The club's nine highest-usage bats on the batter
+arsenal board stand in, marked `est.` wherever they render.
+(e) *Observations carry the snapshot's 7-day window*; the D-068 14-day fallback reach is recorded
+in each form observation's DataCoverage requested span, because the domain requires every
+observation to share the snapshot's exact window.
+(f) *Missing scheduled start* resolves to midday UTC for the game identity only; *an unannounced
+starter* is represented by an explicit `UNCERTAIN` placeholder pitcher, never by guessing.
+(g) *Savant CSV realities:* the export's BOM is stripped before parsing (it mis-splits the first
+quoted header otherwise); a 200 with an empty body reads as no-data, not an error; rows with
+empty required cells (tiny samples) drop row-wise while a fully unparseable board still fails;
+`hard_hit_percent` ships empty this season and is read optionally.
+(h) *Caching:* the composition root caches the assembled board 15 minutes and each day's pitch
+file one hour; a reload is not a refetch (D-070).
