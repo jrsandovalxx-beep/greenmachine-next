@@ -1,6 +1,43 @@
-# FEATURE_PHASE_PLAN v9 — GMF-001 … GMF-006
+# FEATURE_PHASE_PLAN v12 — GMF-001 … GMF-009
 
-**v9 is revision r1's third candidate — it answers the one finding of the v8 rejection**: r1 is
+**v12 is revision r2's third candidate — it answers the two findings of the v11 rejection
+(2026-08-20).** Finding 1 (GMF-007's seven form fields were never placed into the contract before
+the field set is fixed at §GMF-006): §7 gains the three missing general-window fields — attack-angle
+mean over swings, hard-hit share over batted-ball events, xwOBA per plate appearance — and
+§GMF-006 criterion 6 ingests them alongside the other r2 fields; PO-N3's "Pull%" is ruled by the
+Product Owner (2026-08-20) to **be** the existing D-023 Pull Air %, labelled as such on the surface,
+so no new pull field exists. Finding 2 (the "locked floors" covered only four of the seven metrics):
+the Product Owner ruled 2026-08-20 that each uncovered floor follows its shared denominator —
+**AtkAng 25 swings** (as Ideal Attack Angle %), **Hard% 15 BBE** (as Barrel%/EV), **xwOBA 15 PA**
+(its per-PA denominator, the same count) — and D-068 now carries the per-metric floor table, so no
+builder infers a threshold anywhere.
+
+**v11 is revision r2's second candidate — it answers the three findings of the v10 rejection
+(2026-08-20).** Finding 1 (the candidate bytes were missing from the review submission): the review
+package now carries the complete candidate bytes inline as the review object — the package is
+self-contained per D-047, and the stated hash is computed over exactly those bytes. Finding 2
+(D-065 collided with the switch-hitter rule of D-025, confirmed in D-026, without declaring
+supersession): D-065 now declares the supersession explicitly and preserves D-025's never-average
+clause — the append-only register gains a superseding entry, and history is not rewritten. Finding 3
+(D-068's "absent with its reason" contradicted the missing-versus-insufficient rule of D-023/D-025
+and had no absence state to mean it): D-068 now follows the standing rule — below floor is
+**present with its value, its exact sample, and an INSUFFICIENT marker**; only a field with no
+observations at all is absent, under the ordinary absence semantics. No new absence state is
+invented and the contract's vocabulary is untouched.
+
+**v10 is revision r2's candidate — it lands what the 2026-08-20 handoff recorded as banked, and
+nothing else.** Two ratified-but-unlanded decisions (origin-first provider precedence; the sample
+contract), one banked ruling without a number (switch-hitter side handling), and the three Product
+Owner feature notations recorded 2026-08-18. The register extension is **D-063..D-068** (§4b-r2),
+the order table gains **GMF-007, GMF-008, GMF-009** (§4a), the object total moves **19 → 30**
+(§4c), the §7 contract gains the fields the notations need **before** §GMF-006 fixes the field
+set, and §GMF-006's criteria extend accordingly. The Product Owner ruled the notations' postures
+on 2026-08-20: the form section and the usage-scope toggle are authorized as tickets; the matchup
+notation is authorized as a **window only — no score** (D-067). No criterion of
+GMF-001..GMF-005 changes; no completed record is touched; completed link-backs keep their
+historical hashes per the v15 → v16 precedent (§3a) and the r1 precedent (§4b-r1).
+
+**v9 was revision r1's third candidate — it answers the one finding of the v8 rejection**: r1 is
 **two** review objects, not one — the candidate-bytes document review and the later revision-bound
 commit review are distinct objects, exactly as the original lifecycle counted "this plan" and
 §GMF-000R separately. §4c now carries both r1 rows, the exact total is **19**, the `TEAM_ROLES.md`
@@ -133,7 +170,8 @@ state-file update"; §GMF-000R is that object.
 
 ```
 GMN-000A → GMR-001 → GMR-002 → GMR-003 → GMR-004 → GMR-005
-        → GMF-001 → GMF-002 → GMF-003 → GMF-004 → GMF-005 → GMF-006 → sentinel
+        → GMF-001 → GMF-002 → GMF-003 → GMF-004 → GMF-005 → GMF-006
+        → GMF-007 → GMF-008 → GMF-009 → sentinel
 ```
 
 Sentinel unchanged: `NO ACTIVE TICKET — next phase pending planning` (em dash, U+2014).
@@ -197,6 +235,36 @@ mirror, if one exists, is reported as a finding — the delta does not authorize
 link-backs untouched**, per the v15 → v16 precedent (§3a): a forward version bump, never
 retroactive.
 
+### 4b-r2. Register extension at revision r2 — D-063..D-068 (providers, samples, switch-hitters, and the three notations)
+
+The 2026-08-20 handoff recorded two decisions **ratified by the Product Owner and banked for this
+revision** (origin-first provider precedence; the sample contract), one banked ruling carried
+without a number (switch-hitter side handling), and **three Product Owner feature notations
+recorded 2026-08-18**. This revision lands all six. **The Product Owner ruled the notations'
+postures on 2026-08-20**: the form section and the usage-scope toggle are authorized as tickets
+(§GMF-007, §GMF-008); the matchup notation is authorized as a **window only — no score** (D-067,
+§GMF-009).
+
+| ID | Decision |
+|---|---|
+| **D-063** | **Origin-first provider precedence.** (a) Baseball Savant is the origin source for Statcast-derived fields and takes precedence wherever it carries the field. (b) FanGraphs is admitted only for fields the project computes itself from its own inputs — never for re-display of FanGraphs-authored metrics (the §24 marks posture stands). (c) Origin-unavailable exception: where Savant does not carry a field at all, a secondary provider may supply it, and the exception is named in that field's provenance note. |
+| **D-064** | **The sample contract.** AB, H and K are carried as raw counts, each with its unit and an observed/derived flag. `BIP_est = AB − K` is a derived estimate that understates balls in play by sacrifice flies and hits; the understatement is stated wherever the estimate appears, never hidden. K is carried as a count, never reconstructed as K% × AB. A derived field propagates the absence reason of every input it derives from, intact. |
+| **D-065** | **Switch-hitter side handling (supersedes the switch-hitter resolution rule of D-025, confirmed in D-026).** A switch hitter's row carries **both** batting sides, each labelled by the opposing pitcher hand that produces it. The batting side used in any display is derived from the matchup and labelled as derived; it is never silently chosen. Probable-starter resolution is not a dependency of any surface; if it ever arrives it is an additive derived layer, never a contract input. D-025's never-average clause stands: both sides are never averaged into one number for a criterion. |
+| **D-066** | **Pitch-usage scope toggle (PO-N1).** The batter metrics surface gains a user toggle between (a) usage measured against batters of the evaluated side and (b) all pitches the pitcher throws. The toggle requires the handedness-split usage denominator, which enters the contract at §7 and is ingested at §GMF-006, before the field set is fixed there. The three usage states (qualifies · measured below threshold · absent/unevaluable) survive both toggle positions, and the prose names which scope produced each suppression. Scheduled as §GMF-008. |
+| **D-067** | **Matchup window; score deferred (PO-N2).** The matchup section is computed over a **rolling 30 days** ending at `as_of` — not a calendar month. **This ruling authorizes the window only. No score is authorized.** A windowed score is ranking-shaped under D-015/D-017 and requires its own explicit Product Owner posture ruling before any ticket text names it. Scheduled as §GMF-009. |
+| **D-068** | **Form section (PO-N3).** Seven metrics, no toggle: Barrel%, EV, AtkAng, IdealAtkAng%, Pull%, Hard%, xwOBA — where **Pull% is the D-023 Pull Air %**, labelled as such on the surface (Product Owner, 2026-08-20). Window **L7 with an L14 fallback**, the fallback triggered by **each metric's own sample floor** — never by mere emptiness. Floors: Barrel% and EV **15 BBE** (D-023/D-026); IdealAtkAng% **25 tracked swings** (D-023); Pull Air % **15 air balls** (D-023); **AtkAng 25 swings**, **Hard% 15 BBE**, **xwOBA 15 PA** (Product Owner, 2026-08-20 — each uncovered floor follows its shared denominator). A field whose L14 sample is below its floor is **present with its value, its exact sample, and an INSUFFICIENT marker** — the missing-versus-insufficient rule of D-023/D-025 is unchanged, and no new absence state is created. A field with no observations at all is absent with its reason under the ordinary absence semantics. The window actually used is named on the surface, per D-025's stated-window rule. Scheduled as §GMF-007. |
+
+**Landing vehicle.** Unlike r1 — which authorized the landing inside a later submission because
+its decisions belonged to that submission's implementation — the r2 decisions are ratifications
+that exist independent of any one ticket, so the r2 commit object (§6-r2) lands D-063..D-068 in
+`DECISIONS.md` **verbatim from this table** and moves `CONTEXT_PACK.md`'s decision count **62 → 68**
+in the same commit. This is the §GMF-000R precedent: the plan-commit object itself appended
+D-047..D-057. The r2 package proves the landing mechanically — the `DECISIONS.md` tail and the
+pack count, shown together, plus the continuity check over D-001..D-068 (§6-r2 criterion 4).
+
+**Register statement:** after the r2 commit merges, the register reads **68 (D-001..D-068),
+continuous, no gap**. `staging` remains at 62 until it does.
+
 ### 4c. Review objects — finding 5 fix, determinate
 
 v1 stated fourteen while its own ticket text described more. Every ticket now has a **fixed** object
@@ -207,6 +275,8 @@ structure; none is builder-elective.
 | this plan | 1 | document review |
 | this plan, revision r1 — document review | 1 | candidate-bytes review of the revision text; mirrors the "this plan" row |
 | this plan, revision r1 — commit | 1 | plan-revision commit, GMF-000R shape — repairs §GMF-002's referent; delta fixed in §4b-r1 |
+| this plan, revision r2 — document review | 1 | candidate-bytes review of the revision text; mirrors the r1 rows |
+| this plan, revision r2 — commit | 1 | plan-revision commit, GMF-000R shape — lands D-063..D-068 and the post-freeze tickets; delta fixed in §6-r2 |
 | §GMF-000R | 1 | plan commit; no completed record |
 | §GMF-001 | 2 | impl + closeout; no deployed surface |
 | §GMF-002 | **3** | impl + **post-merge deployed verification** + closeout |
@@ -214,8 +284,11 @@ structure; none is builder-elective.
 | §GMF-004 | 2 | fixtures; verified by test and local render |
 | §GMF-005 | **3** | impl + **post-merge deployed verification** + closeout |
 | §GMF-006 | **3** | impl + **post-merge deployed verification** + closeout |
+| §GMF-007 | **3** | a new surface rendering real provider data on the public app gets the §GMF-002 pattern: impl + deployed verification + closeout |
+| §GMF-008 | **3** | as above — a behaviour change on a live surface |
+| §GMF-009 | **3** | as above |
 
-**Exact total: 19 review objects** (17 at v6; +2: the r1 document review and the r1 commit).
+**Exact total: 30 review objects** (19 at v9; +2 for r2, +9 for the three post-freeze tickets).
 
 ### 4d. Deployed evidence — finding 6 fix, a route that exists
 
@@ -269,6 +342,12 @@ bytes, but the phrase rule exists precisely to survive tomorrow's authorized re-
 therefore **extends rule 5 to scan both plans outside fenced blocks**. This is an expansion of an
 existing rule, not an eleventh rule; the count stays at **10**.
 
+**What r2 changes in the checker, and what it does not.** The r2 commit (§6-r2) updates
+`PINNED_FEATURE_PLAN_SHA256` to the v12 hash and extends `ORDER` with GMF-007, GMF-008, GMF-009 per
+§4a. **No rule is added, removed, or reworded; the count stays at 10.** The two record-anchored
+pack rules and the version-label coupling are untouched — they bind to the records and titles,
+not to any version literal, which is exactly why a revision can re-pin without weakening them.
+
 ### 5a. The two pack records — fixed forms, and why the form matters (v2 finding 3 fix)
 
 Existing rule 7 does not search `CONTEXT_PACK.md` for a hash-shaped string. It anchors to the Plan
@@ -281,8 +360,8 @@ hardening or it is weaker than the rule it sits beside.
 ```
 - Plan (bootstrap, historical): REBUILD_PLAN v16, sha256 `<64 hex>` — the pinned authority for
   GMN-000A … GMR-005; no longer the active ticket source.
-- Plan (active, feature phase): FEATURE_PHASE_PLAN v9, sha256 `<64 hex>` — the pinned authority for
-  GMF-001 … GMF-006.
+- Plan (active, feature phase): FEATURE_PHASE_PLAN v12, sha256 `<64 hex>` — the pinned authority for
+  GMF-001 … GMF-009.
 ```
 
 **The self-reference trap, and why it is closed mechanically rather than by care.** This plan fixes
@@ -303,7 +382,7 @@ version string in that plan's own title line**:
 | Pack record | Version label must equal the title version of |
 |---|---|
 | `- Plan (bootstrap, historical): REBUILD_PLAN v16 …` | `tickets/REBUILD_PLAN.md` |
-| `- Plan (active, feature phase): FEATURE_PHASE_PLAN v9 …` | `tickets/FEATURE_PHASE_PLAN.md` |
+| `- Plan (active, feature phase): FEATURE_PHASE_PLAN v12 …` | `tickets/FEATURE_PHASE_PLAN.md` |
 
 A revision that updates either plan's title without its record, or either record without its title,
 turns the checker red instead of shipping a record that misnames its own authority.
@@ -352,6 +431,11 @@ fixed here:
 > selects which one governs the current object.** If this file disagrees with any of them, this file
 > is wrong — the repository checker's freshness gate fails on a wrong active ticket or decision
 > count here.
+
+*(r2 note: §6-r2's delta authorizes the one further change to this statement — the feature-phase
+range becomes `(GMF-001 … GMF-009)`. The quote above stays as committed: it is the historical
+record of the text §GMF-000R authorized, and editing it here would falsify that record to fix a
+label.)*
 
 **The base-state inventory — corrected, and the correction matters more than the number.** v3
 asserted three `REBUILD_PLAN` references in the pack, counting an active-ticket line that reads
@@ -422,6 +506,69 @@ at its own head. It is never taken from a working copy in the Lead workspace.
 
 ---
 
+## 6-r2. The r2 commit — plan revision, with an exact permitted delta
+
+**Regime:** B · **No completed record** (plan-revision object, the §GMF-000R / GMR-003R pattern) ·
+**Base:** `staging` at the head current at build time, pasted in the package.
+
+**The permitted delta is exactly these five paths, and all five change:**
+
+| Path | Change |
+|---|---|
+| `tickets/FEATURE_PHASE_PLAN.md` | these approved v12 bytes, unaltered, sha256 pasted |
+| `DECISIONS.md` | D-063 … D-068 appended **verbatim** from §4b-r2's table |
+| `scripts/check_consistency.py` | `PINNED_FEATURE_PLAN_SHA256` → the v12 hash; `ORDER` gains `GMF-007`, `GMF-008`, `GMF-009` per §4a. **No rule added, removed, or reworded — the count stays at 10** (§5) |
+| `CONTEXT_PACK.md` | **three** enumerated changes: the active plan-record line per §5a (label `v12`, the v12 hash, range `GMF-001 … GMF-009`); the decision count **62 → 68**; the authority statement's feature-phase range `(GMF-001 … GMF-006)` → `(GMF-001 … GMF-009)` |
+| `docs/TEAM_ROLES.md` | **the object-structure mirror only**: the regime table gains the five r2-and-later rows (§4c), and the total sentence moves **19 → 30** with its new breakdown — nothing else in that file changes |
+
+`tickets/ACTIVE.md` **does not change**: GMF-005 remains the active ticket under the revised plan,
+and the r2 commit must not move the pointer. `PROJECT_STATE.md` **does not change**; the revision is
+recorded here and in the pack, and GMF-005's own closeout remains the next scope-authorized
+state-file update. The §6 quote of the pack's authority statement **stays as committed** — it is the
+historical record of the text §GMF-000R authorized; r2's own change to that statement lives in the
+delta above, and conflating the two would falsify the history to fix a label.
+
+**The mirror sweep.** The r2 package must sweep the tree for any other committed statement of
+(a) the object total, (b) the decision count, (c) the feature-phase ticket range `GMF-001 … GMF-006`,
+and (d) the plan version label — and demonstrate `TEAM_ROLES.md` and `CONTEXT_PACK.md` are the only
+mirrors. A further mirror, if one exists, is **reported as a finding, not absorbed** (D-049).
+
+**Criteria**
+
+1. Plan binding: the committed `FEATURE_PHASE_PLAN.md` bytes equal the approved v12 candidate bytes;
+   sha256 pasted and equal to the reviewed value.
+2. **Atomicity.** Every change above lands in **one commit**. No committed state may carry a plan
+   whose hash disagrees with its pin.
+3. **The feature pin proven in both directions:** the pinned constant equals
+   sha256(`tickets/FEATURE_PHASE_PLAN.md`), and a one-byte edit to the file turns the checker red.
+   **Show the negative case**, restore, show clean. The bootstrap pin is re-pasted unchanged as proof
+   the historical plan was not touched (§2's binding rule).
+4. **Decision register continuity proven mechanically:** every ID D-001..D-068 present exactly once,
+   no gap, no duplicate, no dangling citation to a nonexistent decision. Paste the check, not a claim.
+5. **Decision-count coupling:** the pack states **68** and the register holds 68 decision headers —
+   checker rule 2's own output pasted, both sides shown.
+6. **The feature pack record proven positively and negatively.** The record takes the §5a form with
+   the `v12` label and the new hash. Beyond the positive pass, **three red outcomes are demonstrated
+   and pasted**, then the pack is restored and the ten-rule checker shown clean: (i) wrong hash in
+   the feature record; (ii) the feature record missing entirely; (iii) **the decoy** — an unrelated
+   pack entry carrying the correct hash while the authoritative record carries a wrong one, which
+   must still fail.
+7. **Version-label coupling re-proven for the feature record:** the record's `v12` label equals the
+   plan title's version; alter one side, show the named failure, restore, show clean.
+8. **Banned-phrase rule proven against the v12 bytes**: insert one fixed retired-lifecycle phrase
+   outside a fence in `tickets/FEATURE_PHASE_PLAN.md`, show the named banned-phrase failure, restore
+   the file, show clean. A re-pinned plan the phrase rule has never failed on is untested (§6
+   criterion 9's reasoning, carried forward).
+9. **The mirror sweep pasted in full** — every matching line, not a count (§2's whole-inventory
+   rule).
+10. Checker clean at **10** rules; full suite green; D-015/D-017 clean; Regime B; revision binding
+    with full diff inlined.
+
+**No feature code.** A single non-plan, non-checker, non-governance source change fails this object.
+The split-usage denominator and the D-064 sample fields enter the tree at §GMF-006, not here.
+
+---
+
 ## 7. The `InputSnapshot` contract
 
 Authored by §GMF-001, consumed by everything after it.
@@ -437,8 +584,26 @@ Authored by §GMF-001, consumed by everything after it.
   silently remove the outcome this product exists to study. An ambiguous denominator fails review.
 - **Pitch-type splits carry their usage share**, so the 15% threshold is applied by the screen from
   data in the snapshot rather than assumed upstream.
+- **Usage share is carried against two scopes** (r2, D-066) — for each pitch type, usage is measured
+  against batters of the evaluated side **and** against all batters faced, each scope labelled. A
+  screen applies its threshold to the scope the user selected and never re-derives a denominator.
+- **Sample fields are raw counts with provenance flags** (r2, D-064) — AB, H and K travel as counts,
+  each with its unit and an observed/derived flag; a derived field propagates the absence reasons of
+  its inputs, intact. `BIP_est = AB − K` understates balls in play by sacrifice flies and hits, and
+  the estimate says so wherever it appears.
+- **The general window carries the seven form fields** (r2, D-068) — beside the existing four
+  (barrel rate, exit velocity, ideal-attack-angle share, pull-air share): **attack-angle mean over
+  swings**, **hard-hit share over batted-ball events**, and **xwOBA per plate appearance**, each
+  with its denominator named and its observed/derived flag per D-064.
+- **Batting side is derived, never assumed** (r2, D-065) — a switch hitter carries both sides, each
+  labelled by the opposing pitcher hand that produced it. Probable-starter resolution is not a
+  contract input; if it ever arrives it is an additive derived layer.
 - **Provenance travels with the data** — every MLB-derived field records the export it came from, so
   D-057's manual-export chain is auditable from the snapshot alone.
+
+**The field set is fixed at §GMF-006.** The four r2 bullets above enter the contract **before**
+§GMF-006 executes, precisely so that fixing does not strand the authorized §GMF-008 toggle. A field
+needed later and absent from §GMF-006's ingestion is a contract reopen, with its own revision.
 
 ---
 
@@ -512,7 +677,7 @@ forecast and the *unavailable* state, each captured with its timestamp.
 
 **Closeout** quotes both verdicts.
 
-### §GMF-006 — Statcast ingestion and wire-through · 3 objects · closeout pointer SENTINEL
+### §GMF-006 — Statcast ingestion and wire-through · 3 objects · closeout pointer GMF-007
 
 **Submission 1.**
 
@@ -545,17 +710,71 @@ forecast and the *unavailable* state, each captured with its timestamp.
    contract failure and is reported as one rather than patched.
 5. Ingestion failure degrades to the same absence states the screens already render. A stale value
    is never shown as current.
+6. **The §7 r2 fields are ingested** (r2): both usage scopes per pitch type, each labelled (D-066);
+   the D-064 sample counts — AB, H, K — each with its unit and its observed/derived flag; and the
+   three general-window form fields — attack-angle mean, hard-hit share, xwOBA per plate
+   appearance — each with its denominator named (D-068). Every
+   one is shown **populated or absent-with-reason** against the real export; no field silently
+   defaults, and a derived field carries its inputs' absence reasons intact.
+7. **A switch hitter's row carries both sides** (r2, D-065), each labelled by the opposing pitcher
+   hand that produced it — proven against at least one real switch hitter in the export, named in
+   the package.
 
 **Submission 2 — deployed verification.** The public app observed rendering real data, leakage check
 re-run against real content.
+
+**Closeout** quotes both verdicts, pointer to **GMF-007**.
+
+### §GMF-007 — Form section (PO-N3, D-068) · 3 objects · closeout pointer GMF-008
+
+**Submission 1.** The seven-metric form section: Barrel%, EV, AtkAng, IdealAtkAng%, Pull%, Hard%,
+xwOBA — **no toggle**; **Pull% is the D-023 Pull Air %, labelled as such on the surface**.
+Window **L7 with an L14 fallback**, the fallback triggered by **each metric's own floor per
+D-068's table**, never by mere emptiness; a field whose L14 sample is below floor is **present
+with its value, its exact sample, and an INSUFFICIENT marker** (D-023/D-025: insufficient is present,
+never absent); a field with no observations at all is absent with its reason. The window actually
+used is **named on the surface** (D-025's stated-window rule). All seven fields come from the
+snapshot per §7 — none is derived in the view. Built on the §GMF-002 grid — a third copy of grid logic fails this ticket. No automated ranking or selection
+(D-015/D-017); colour communicates data state only, per the standing convention.
+
+**Submission 2 — deployed verification.** The section observed on the deployed app rendering real
+data — including at least one field below floor at L14 carrying its value with an INSUFFICIENT marker, and the window-used label.
+
+**Closeout** quotes both verdicts.
+
+### §GMF-008 — Pitch-usage scope toggle (PO-N1, D-066) · 3 objects · closeout pointer GMF-009
+
+**Submission 1.** A user toggle on the batter metrics surface between (a) usage measured against
+batters of the evaluated side and (b) all pitches the pitcher throws, **both denominators supplied
+by the snapshot per §7 — never derived in the view**. The three usage states (qualifies · measured
+below threshold · absent/unevaluable) survive both positions, and the prose names which scope
+produced each suppression. The default position is a Product Owner choice, stated in the package;
+nothing is pre-selected beyond it.
+
+**Submission 2 — deployed verification.** Both toggle positions observed on the deployed app, with
+the scope-named suppression prose under each.
+
+**Closeout** quotes both verdicts.
+
+### §GMF-009 — Matchup window (PO-N2, D-067) · 3 objects · closeout pointer SENTINEL
+
+**Submission 1.** The matchup section computed over a **rolling 30 days** ending at `as_of`, the
+window named on the surface in words. **No score is authorized.** D-067 rules the window in and the
+score out: a windowed score is ranking-shaped under D-015/D-017 and requires its own explicit
+Product Owner posture ruling before any ticket text names it. **A package presenting a score, a
+ranked order, or a default sort by any metric fails this ticket.**
+
+**Submission 2 — deployed verification.** The section observed on the deployed app with its named
+window.
 
 **Closeout** quotes both verdicts, pointer to **SENTINEL**.
 
 ---
 
-## 9. After GMF-006
+## 9. After the feature sequence
 
-The dashboard renders real data and UI/UX refinement begins. Deferred by name: the confidence
-surface and legibility guards from D-030's register; any retrospective surface, which has no source
-and needs its own; and D-051's Ballpark Pal gate, which stays closed while anyone but the Product
-Owner can reach the app.
+The dashboard renders real data across every surface, and UI/UX refinement begins. Deferred by name:
+the confidence surface and legibility guards from D-030's register; any retrospective surface, which
+has no source and needs its own; **a windowed matchup score, which D-067 leaves unauthorized pending
+its own posture ruling**; and D-051's Ballpark Pal gate, which stays closed while anyone but the
+Product Owner can reach the app.
