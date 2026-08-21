@@ -1718,3 +1718,25 @@ empty required cells (tiny samples) drop row-wise while a fully unparseable boar
 `hard_hit_percent` ships empty this season and is read optionally.
 (h) *Caching:* the composition root caches the assembled board 15 minutes and each day's pitch
 file one hour; a reload is not a refetch (D-070).
+
+## D-074 - The weather seam names its source at the interface
+**Weather adapters expose their `SourceRecord` as `source`, not only inside each field.**
+The input contract rejects a snapshot whose fields name an undeclared source, and a live
+adapter's fields name the *adapter's* source — so the record has to be reachable from the
+seam, or every snapshot builder would have to import each live adapter module to declare it.
+`WeatherAdapter` gains a `source: SourceRecord` attribute; the NWS adapter answers its
+module-level `SOURCE`, the fixture answers `CONDITIONS_SOURCE`. `parks_demo_snapshot`
+declares whatever the bound adapter names alongside its own fixture sources, which is what
+lets the §GMF-004 screen keep rendering when §GMF-005's live adapter binds (the deployed
+`InputContractError` of 2026-08-20).
+
+## D-075 - One tab's failure never blanks the page
+**Each live-board tab renders inside its own isolation boundary.** An exception escaping a
+tab renderer ends the whole Streamlit script run, taking the other three tabs and every
+section below the board with it — the failure shape observed on the deployed app when a NaN
+cell reached the highlight mapper (pandas stores a missing numeric as NaN, and
+`Decimal('NaN') >= edge` raises `decimal.InvalidOperation`). Each tab now renders through a
+helper that converts a failure into a named in-tab warning; the highlight mapper treats
+non-numeric cells (None, NaN, text) as never-highlighted. Regression coverage drives the
+full page through AppTest against a real `build_board` product mixing covered and uncovered
+batters — the mixed float64/NaN columns that triggered the crash.

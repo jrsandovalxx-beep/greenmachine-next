@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from importlib import metadata
@@ -575,6 +576,11 @@ def _highlight_columns(
                 numeric = Decimal(str(value))
             except InvalidOperation:  # non-numeric cell content is never highlighted
                 return ""
+            if numeric.is_nan():
+                # pandas stores a missing numeric as NaN; a NaN comparison would
+                # raise InvalidOperation rather than answer, and a cell with no
+                # value is never highlighted.
+                return ""
             return _HIGHLIGHT if numeric >= _edge else ""
 
         styler = styler.map(mark, subset=[column])
@@ -794,6 +800,23 @@ def _render_conditions(board: SlateBoard) -> None:
             st.markdown(f"- {line}")
 
 
+def _render_tab(label: str, render: Callable[[], None]) -> None:
+    """One tab's failure degrades to a named warning, never a blanked page.
+
+    An exception escaping a tab renderer ends the whole script run: the other
+    tabs, the grid, the metrics and the parks screens all vanish with it —
+    the failure mode behind the 2026-08-20 hotfix. Each view now stands or
+    falls on its own (D-075).
+    """
+    try:
+        render()
+    except Exception as exc:
+        st.warning(
+            f"The {label} view could not be rendered "
+            f"({type(exc).__name__}). The remaining views are unaffected."
+        )
+
+
 def render_live_board() -> None:
     """The four live tabs (D-072). Live only in a deployed environment: a local
     render never becomes a network call, mirroring the weather seam."""
@@ -817,14 +840,14 @@ def render_live_board() -> None:
         f"{BOARD_TTL_SECONDS // 60} minutes; form windows hourly."
     )
     sluggers, arms, matchups, conditions = st.tabs(["Sluggers", "Arms", "Matchups", "Conditions"])
-    with sluggers:
-        _render_sluggers(board, production_config())
-    with arms:
-        _render_arms(board)
-    with matchups:
-        _render_matchups(board)
-    with conditions:
-        _render_conditions(board)
+    for label, container, render in (
+        ("Sluggers", sluggers, lambda: _render_sluggers(board, production_config())),
+        ("Arms", arms, lambda: _render_arms(board)),
+        ("Matchups", matchups, lambda: _render_matchups(board)),
+        ("Conditions", conditions, lambda: _render_conditions(board)),
+    ):
+        with container:
+            _render_tab(label, render)
     if LIVE_WEATHER_DIAGNOSTICS:
         joined = "; ".join(LIVE_WEATHER_DIAGNOSTICS)
         st.caption(

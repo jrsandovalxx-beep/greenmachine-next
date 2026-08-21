@@ -174,6 +174,10 @@ class FixtureWeatherAdapter:
 
     clock: Clock = field(default_factory=lambda: FixedClock(CAPTURED_AT))
 
+    # The seam's hoisted naming (D-074): every field this fixture answers
+    # carries CONDITIONS_SOURCE_ID, so the fixture's record is that source.
+    source: SourceRecord = CONDITIONS_SOURCE
+
     def forecast_for(self, venue: ParkVenue) -> SnapshotField[WeatherForecast]:
         reason = _FORECAST_ABSENT.get(venue.venue_id)
         if reason is not None:
@@ -224,9 +228,15 @@ def parks_demo_snapshot(adapter: WeatherAdapter | None = None) -> InputSnapshot:
         )
         for venue in PARK_VENUES
     )
+    # The contract rejects a field that names an undeclared source, and the
+    # adapter's fields name the *adapter's* source — so the snapshot declares
+    # whatever the bound adapter names, not only the fixture's own sources.
+    sources: tuple[SourceRecord, ...] = (SAVANT_SOURCE, CONDITIONS_SOURCE)
+    if all(weather.source.source_id != known.source_id for known in sources):
+        sources = (*sources, weather.source)
     return InputSnapshot(
         captured_at=CAPTURED_AT,
-        sources=(SAVANT_SOURCE, CONDITIONS_SOURCE),
+        sources=sources,
         batters=(),
         parks=parks,
     )
