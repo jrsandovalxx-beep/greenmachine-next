@@ -1762,3 +1762,65 @@ comparisons, so no NaN ever reaches a comparison (the first deployed crash class
 (c) *The shell is original artwork and makes no remote request.* No console maker's
 marks, no CDN font, image, stylesheet, or script — the theme is CSS plus an inline SVG
 background, enforced by test.
+
+## D-077 - The Sluggers board is a shortlist, not a spreadsheet
+**The Sluggers tab shows only batters at or above a minimum grade, and only these
+columns: Batter, Team, Versus (the opposing starter), Grade, Park factor, Weather
+details, and a Tags box reserved for future markers (Product Owner, 2026-08-21).**
+Season/L7 metric columns leave the main table; a per-row expand control opens the
+batter metrics view (D-078). The minimum grade is configuration, not code — the
+provisional floor is A and S pending the Product Owner's threshold ruling, which
+they have reserved ("we will tweak grading and thresholds when ready"). This
+sharpens D-072's sketch of the tab, not its intent.
+
+## D-078 - The expanded batter view is the home of the form section
+**One batter-metrics view, reachable from a batter's row in both Sluggers and
+Matchups, carries: the matchup block (L30 pitch-mix data), the D-068 form section
+(the seven metrics, L7 with the per-metric L14 fallback, each bracket-labelled
+"L7" on the surface), Oppo Air Pull %, park factor, and weather (Product Owner,
+2026-08-21).** Pull Air % and Oppo Air Pull % carry a user toggle between L7 and
+season windows. A metric with no observations at either reach says "not enough
+data available" in words — D-068's present-with-INSUFFICIENT rule stands for
+below-floor samples. This placement is §GMF-007's surface.
+
+## D-079 - The Matchups tab grades on L30 pitch mix
+**Each matchup row is computed over the rolling 30 days versus the opposing
+starter's pitch mix (pitches at or above a 14% usage share), with a user toggle
+to the season view — but the matchup grade is always the L30 computation
+(Product Owner, 2026-08-21).** Columns: ABs/H (or BIP), Barrels, HRs, Exit
+Velocity, Barrel/PA %, Hard-Hit %, AVG, SLG, ISO, +350 ft Pull Air %, xwOBA,
+Swing-Str %, recent form, grade. **This ruling is D-067's awaited posture
+ruling: the Product Owner has explicitly authorized the matchup grade on the
+named window; the no-score freeze is lifted for this surface only.**
+
+## D-080 - The per-pitch expanded view mirrors batter against pitcher
+**Inside a matchup's expanded view: the batter's per-pitch table (usage %, AVG,
+SLG, ISO, HR, Barrel %, Hard-Hit %, plus xwOBA and Swing-Str %), a recent
+exit-velocity game-by-game sheet, and a threshold on/off toggle that applies to
+the whole expanded view only; scrolling further reveals the mirror table — the
+pitcher's own per-pitch metrics against the batter's side, with xwOBA and Whiff %
+added (Product Owner, 2026-08-21, reference images 6–8 of 2026-08-21).**
+
+## D-081 - Pitcher and pitch-usage windows fall back L30 to L45 to last season
+**Where a pitcher's pitch-mix or per-pitch sample is too small at L30, the reach
+extends to L45, then to last season; a field empty at every reach states "no
+data available" (Product Owner, 2026-08-21).** The window actually used is named
+on the surface, per D-025's stated-window rule — the same discipline as D-068's
+L7/L14 form windows, applied to the pitcher side.
+
+## D-082 - The matchup card reads top-down: park, pitchers, teams
+**Each matchup game card opens with a 2D field-view stadium panel — park factor
+plus live conditions with a wind animation in the spirit of the PO's weather-man
+reference (image 3 of 2026-08-21) — then a brief per-pitcher metrics strip
+(reference image 8) behind an LHH/RHH toggle, then the two lineups behind a
+team toggle rather than one long scroll (Product Owner, 2026-08-21).** The wind
+animation consumes the park-orientation table and the Ballpark Pal receptiveness
+capture (docs/reference/ballpark-pal-park-factors.md); both enter as data with
+their provenance named, per the source discipline.
+
+## D-083 - Tab navigation imitates the original-Xbox rotary dial
+**Switching the four main tabs carries a dial motion — the selector ring rotates
+the chosen tab into place, in the spirit of the PO's reference video
+(20–22 s mark) — implemented as original CSS artwork only (Product Owner,
+2026-08-21).** D-003's constraints stand: no console maker's marks, no remote
+asset of any kind.
