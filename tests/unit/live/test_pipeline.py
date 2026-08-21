@@ -609,3 +609,204 @@ def test_batter_matchup_lines_are_side_scoped_over_the_window() -> None:
     assert away.pitch_lines[0].usage_share == Decimal(1)
     # The home lineup has no named opposing starter: no scope, no lines.
     assert game.home_batters[0].pitch_lines == ()
+
+
+def test_mix_line_counts_only_the_qualifying_mix_pitches() -> None:
+    """D-079: the grid line reads the batter's L30 events against the
+    starter's qualifying (>=14% usage) mix pitches — a fringe pitch the
+    starter barely throws never enters a denominator. With no probable
+    named there is no scope and no line (D-081)."""
+    pitcher_events = tuple(
+        _window_event(batter_id=555, pitcher_id=PITCHER_ID, pitch_type="FF") for _ in range(20)
+    ) + tuple(
+        _window_event(batter_id=555, pitcher_id=PITCHER_ID, pitch_type="SL") for _ in range(2)
+    )
+    batter_events = tuple(
+        _window_event(pitch_type="FF", event="single", pitcher_id=999) for _ in range(4)
+    ) + tuple(_window_event(pitch_type="SL", event="double", pitcher_id=999) for _ in range(4))
+    board = _build(_FakeApi(), _FakeSavant(), events=pitcher_events + batter_events)
+    assert not isinstance(board, FetchFailure)
+    away = board.games[0].away_batters[0]
+    assert away.mix_label == "last 30 days"
+    line = away.mix_line
+    assert line is not None
+    assert line.pitches == 4
+    assert line.at_bats == 4
+    assert line.hits == 4  # the four SL events are outside the qualifying mix
+    assert board.games[0].home_batters[0].mix_line is None
+
+
+def test_mix_reaches_back_to_l45_only_when_the_window_is_empty() -> None:
+    """D-081: a starter with no pitches in the matchup window extends the
+    read to L45, named on the surface; the extra days are fetched only when
+    some probable needs them."""
+    old_starter_events = (
+        _window_event(
+            batter_id=555, pitcher_id=PITCHER_ID, pitch_type="FF", game_date="2026-07-20"
+        ),
+    )
+    batter_events = (_window_event(pitch_type="FF", event="single", pitcher_id=999),)
+    all_events = old_starter_events + batter_events
+    fetched: list[date] = []
+
+    def fetch_day(day: date) -> tuple[PitchEvent, ...]:
+        fetched.append(day)
+        return tuple(e for e in all_events if e.game_date == day.isoformat())
+
+    board = build_board(
+        api=_FakeApi(),  # type: ignore[arg-type]
+        savant=_FakeSavant(),  # type: ignore[arg-type]
+        slate_date=SLATE_DATE,
+        as_of=AS_OF,
+        config=CONFIG,
+        fetch_day_events=fetch_day,
+        temperature_for=lambda venue: Decimal("78"),
+        park_factors=_park_factors(),
+    )
+    assert not isinstance(board, FetchFailure)
+    away = board.games[0].away_batters[0]
+    assert away.mix_label == "last 45 days"
+    assert min(fetched) == date(2026, 7, 6)  # the reach fetched days 31-45 back
+    line = away.mix_line
+    assert line is not None
+    assert line.at_bats == 1
+
+    # No empty-window starter: the reach never fires.
+    fetched.clear()
+    recent_starter = (_window_event(batter_id=555, pitcher_id=PITCHER_ID, pitch_type="FF"),)
+    current_events = recent_starter + batter_events
+
+    def fetch_current_day(day: date) -> tuple[PitchEvent, ...]:
+        fetched.append(day)
+        return tuple(e for e in current_events if e.game_date == day.isoformat())
+
+    board = build_board(
+        api=_FakeApi(),  # type: ignore[arg-type]
+        savant=_FakeSavant(),  # type: ignore[arg-type]
+        slate_date=SLATE_DATE,
+        as_of=AS_OF,
+        config=CONFIG,
+        fetch_day_events=fetch_current_day,
+        temperature_for=lambda venue: Decimal("78"),
+        park_factors=_park_factors(),
+    )
+    assert not isinstance(board, FetchFailure)
+    assert min(fetched) == date(2026, 7, 21)  # the plain 31-day window only
+
+
+def test_mix_falls_back_to_the_season_board_when_no_window_pitches() -> None:
+    """D-081: with no window pitches at either reach, the mix is the season
+    board, named 'season'."""
+    batter_events = (_window_event(pitch_type="FF", event="single", pitcher_id=999),)
+    savant = _FakeSavant(
+        pitcher_arsenal=(_arsenal_row(PITCHER_ID, "FF", "0.55", "0.300", "0.25", "0.20"),),
+    )
+    board = _build(_FakeApi(), savant, events=batter_events)
+    assert not isinstance(board, FetchFailure)
+    away = board.games[0].away_batters[0]
+    assert away.mix_label == "season"
+    line = away.mix_line
+    assert line is not None
+    assert line.at_bats == 1
+
+
+def test_mix_falls_back_to_last_season_when_no_current_record() -> None:
+    """D-081: the chain ends at last season's board when the pitcher has no
+    current-season record either, named 'last season'."""
+
+    class _FallbackSavant(_FakeSavant):
+        def fetch_pitch_arsenal(
+            self, *, kind: str, year: int
+        ) -> tuple[PitchArsenalRow, ...] | FetchFailure:
+            if kind == "pitcher" and year == SLATE_DATE.year:
+                return ()
+            if kind == "pitcher":
+                return (_arsenal_row(PITCHER_ID, "FF", "0.55", "0.300", "0.25", "0.20"),)
+            return ()
+
+    batter_events = (_window_event(pitch_type="FF", event="single", pitcher_id=999),)
+    board = _build(_FakeApi(), _FallbackSavant(), events=batter_events)
+    assert not isinstance(board, FetchFailure)
+    away = board.games[0].away_batters[0]
+    assert away.mix_label == "last season"
+    line = away.mix_line
+    assert line is not None
+    assert line.at_bats == 1
+
+
+def test_pull_air_350_counts_only_long_pulled_air_balls() -> None:
+    """D-079: the +350 ft pull-air share counts pulled air balls at or past
+    the distance floor over all batted balls — short pulls, opposite-field
+    air balls, and non-air contact never enter the numerator."""
+    pull_x, oppo_x = Decimal("100"), Decimal("150")  # L batter: spray < 0 pulls
+    base = {
+        "pitch_type": "FF",
+        "launch_speed": Decimal("100"),
+        "hc_y": Decimal("150"),
+        "event": "fly_out",
+    }
+    events = (
+        _window_event(bb_type="fly_ball", hc_x=pull_x, hit_distance=Decimal("380"), **base),
+        _window_event(bb_type="fly_ball", hc_x=pull_x, hit_distance=Decimal("320"), **base),
+        _window_event(bb_type="fly_ball", hc_x=oppo_x, hit_distance=Decimal("390"), **base),
+        _window_event(bb_type="ground_ball", hc_x=pull_x, hit_distance=Decimal("400"), **base),
+        _window_event(
+            event="",
+            launch_speed=None,
+            launch_angle=None,
+            launch_speed_angle=None,
+            description="ball",
+        ),
+    )
+    board = _build(_FakeApi(), _FakeSavant(), events=events)
+    assert not isinstance(board, FetchFailure)
+    line = board.games[0].away_batters[0].mix_line
+    assert line is not None
+    assert line.batted_balls == 4
+    assert line.pull_air_350_share == Decimal("0.25")
+
+
+def test_season_grid_line_composes_the_season_sources() -> None:
+    """D-079's toggle target: the season line reads the hitting line
+    (AVG/SLG/ISO from total bases), the statcast board (EV, barrels,
+    hard-hit), and the arsenal board (PA-weighted xwOBA, pitch-weighted
+    Swing-Str). No season source publishes a 350-foot pull-air read."""
+    hitting = {
+        BATTER_ID: SeasonHittingLine(
+            player_id=BATTER_ID,
+            full_name="Covered Batter",
+            bats="L",
+            games=120,
+            plate_appearances=500,
+            at_bats=440,
+            hits=121,
+            home_runs=33,
+            strikeouts=130,
+            total_bases=204,
+        )
+    }
+    savant = _FakeSavant(
+        batter_arsenal=(
+            _arsenal_row(BATTER_ID, "FF", "0.5", "0.400", "0.15", "0.15"),
+            _arsenal_row(BATTER_ID, "SL", "0.5", "0.300", "0.25", "0.15"),
+        ),
+    )
+    board = _build(_FakeApi(hitting=hitting), savant)
+    assert not isinstance(board, FetchFailure)
+    line = board.games[0].away_batters[0].season_line
+    assert line is not None
+    assert line.at_bats == 440
+    assert line.hits == 121
+    assert line.home_runs == 33
+    assert line.slugging is not None and line.slugging.quantize(Decimal("0.001")) == Decimal(
+        "0.464"
+    )
+    assert line.iso is not None and line.iso.quantize(Decimal("0.001")) == Decimal("0.189")
+    assert line.exit_velocity == Decimal("91.5")
+    assert line.batted_balls == 300
+    assert line.barrels == 30
+    assert line.barrel_per_pa == Decimal("0.06")
+    assert line.hard_hit_share == Decimal("0.5")
+    assert line.expected_woba == Decimal("0.35")
+    assert line.whiff_share == Decimal("0.20")
+    assert line.pull_air_350_share is None

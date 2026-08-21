@@ -142,6 +142,7 @@ class PitchEvent:
     estimated_woba: Decimal | None
     woba_value: Decimal | None
     woba_denom: Decimal | None
+    hit_distance: Decimal | None = None
 
 
 def _decimal(raw: Any, context: str) -> Decimal:
@@ -422,6 +423,7 @@ class BaseballSavant:
                 estimated_woba=_decimal_or_none(row.get("estimated_woba_using_speedangle")),
                 woba_value=_decimal_or_none(row.get("woba_value")),
                 woba_denom=_decimal_or_none(row.get("woba_denom")),
+                hit_distance=_decimal_or_none(row.get("hit_distance_sc")),
             )
 
         try:

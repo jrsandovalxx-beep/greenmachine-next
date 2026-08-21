@@ -613,3 +613,167 @@ def test_a_dialog_failure_cannot_blank_the_board(tmp_path: Path) -> None:
     assert not at.exception, [str(e.value) for e in at.exception]
     assert any("batter detail" in str(w.value) for w in at.warning)
     assert len(at.dataframe) == 1
+
+
+def _grid_line(**overrides: object) -> object:
+    from greenmachine.live.pipeline import BatterGridLine
+
+    base = {
+        "pitches": 22,
+        "plate_appearances": 6,
+        "at_bats": 5,
+        "hits": 2,
+        "batted_balls": 4,
+        "barrels": 1,
+        "home_runs": 1,
+        "exit_velocity": Decimal("95.5"),
+        "barrel_per_pa": Decimal("0.1667"),
+        "hard_hit_share": Decimal("0.5"),
+        "batting_average": Decimal("0.4"),
+        "slugging": Decimal("1.0"),
+        "iso": Decimal("0.6"),
+        "pull_air_350_share": Decimal("0.25"),
+        "expected_woba": Decimal("0.45"),
+        "whiff_share": Decimal("0.12"),
+    }
+    base.update(overrides)
+    return BatterGridLine(**base)  # type: ignore[arg-type]
+
+
+def test_grid_line_cells_render_rates_and_named_absences() -> None:
+    """D-079/D-081: a present line renders every column in its display
+    shape; a scope missing at every reach states 'no data available', and a
+    rate with no denominator is a styled dash — never an invented zero."""
+    import streamlit_app
+
+    texts, styles = streamlit_app._grid_line_cells(None)
+    assert texts["AB"] == "no data available"
+    assert set(texts) == {
+        "AB",
+        "H",
+        "BIP",
+        "Barrels",
+        "HR",
+        "EV",
+        "Barrel/PA %",
+        "Hard-Hit %",
+        "AVG",
+        "SLG",
+        "ISO",
+        "+350 Pull Air %",
+        "xwOBA",
+        "Swing-Str %",
+    }
+    assert set(styles) == set(texts)
+
+    texts, styles = streamlit_app._grid_line_cells(_grid_line())
+    assert texts["AB"] == "5"
+    assert texts["EV"] == "95.5"
+    assert texts["AVG"] == ".400"
+    assert texts["+350 Pull Air %"] == "25.0%"
+    assert texts["xwOBA"] == ".450"
+    assert styles == {}
+
+    texts, styles = streamlit_app._grid_line_cells(
+        _grid_line(pull_air_350_share=None, batted_balls=None)
+    )
+    assert texts["+350 Pull Air %"] == "—"
+    assert texts["BIP"] == "—"
+    assert styles["+350 Pull Air %"] == streamlit_app._REASON_CSS
+
+
+def _board_with_grid_lines() -> SlateBoard:
+    """The graded outage board with populated L30 and season grid lines, so
+    the matchups grid and its season toggle have real figures to show."""
+    import dataclasses as _dc
+
+    from greenmachine.live.pipeline import BatterCard as _BatterCard
+
+    board = _graded_board()
+    l30 = _grid_line()
+    season = _grid_line(
+        pitches=900,
+        plate_appearances=500,
+        at_bats=440,
+        hits=121,
+        home_runs=33,
+        exit_velocity=Decimal("91.5"),
+        pull_air_350_share=None,
+    )
+
+    def attach(cards: tuple[_BatterCard, ...]) -> tuple[_BatterCard, ...]:
+        return tuple(
+            _dc.replace(card, mix_line=l30, season_line=season, mix_label="last 30 days")
+            for card in cards
+        )
+
+    game = board.games[0]
+    regraded = _dc.replace(
+        game,
+        home_batters=attach(game.home_batters),
+        away_batters=attach(game.away_batters),
+    )
+    return _dc.replace(board, games=(regraded, *board.games[1:]))
+
+
+def test_matchups_grid_has_the_d079_columns_and_a_named_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-079: the grid is one row per batter with the ratified columns; the
+    caption names the mix window actually used (D-025/D-081); the season
+    toggle swaps the metric scope while the grade stays the L30 one."""
+    import streamlit as st
+
+    import greenmachine.live.pipeline as pipeline
+
+    monkeypatch.setattr(pipeline, "build_board", lambda **kwargs: _board_with_grid_lines())
+    monkeypatch.setenv("GM_ENVIRONMENT", "staging")
+    st.cache_data.clear()
+    at = AppTest.from_file(str(_APP_PATH), default_timeout=_TIMEOUT)
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+
+    def grid_frames() -> list[pd.DataFrame]:
+        frames = []
+        for element in at.dataframe:
+            frame = _display_values(element).astype(str)
+            if "+350 Pull Air %" in frame.columns:
+                frames.append(frame)
+        return frames
+
+    grids = grid_frames()
+    assert grids, "the matchups grids rendered"
+    expected = {
+        "AB",
+        "H",
+        "BIP",
+        "Barrels",
+        "HR",
+        "EV",
+        "Barrel/PA %",
+        "Hard-Hit %",
+        "AVG",
+        "SLG",
+        "ISO",
+        "+350 Pull Air %",
+        "xwOBA",
+        "Swing-Str %",
+        "Form (EV)",
+        "Grade",
+    }
+    assert expected <= set(grids[0].columns)
+    assert set(grids[0]["AB"]) == {"5"}  # the L30 scope
+    away_grades = grids[0]["Grade"].tolist()
+    captions = " ".join(element.value for element in at.caption)
+    assert "last 30 days" in captions
+    assert "14%" in captions
+
+    toggles = [toggle for toggle in at.toggle if toggle.key == "matchups_season_view"]
+    assert toggles, "the season-view toggle rendered"
+    toggles[0].set_value(True)
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    grids = grid_frames()
+    assert set(grids[0]["AB"]) == {"440"}  # the season scope
+    assert set(grids[0]["+350 Pull Air %"]) == {"—"}  # no season source (D-081)
+    assert grids[0]["Grade"].tolist() == away_grades  # the grade stays L30

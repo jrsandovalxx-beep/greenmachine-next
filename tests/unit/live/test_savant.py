@@ -32,9 +32,9 @@ _ARSENAL_CSV = (
 _EVENTS_CSV = (
     "game_pk,game_date,batter,pitcher,stand,p_throws,pitch_type,events,description,bb_type,"
     "launch_speed,launch_angle,launch_speed_angle,hc_x,hc_y,estimated_woba_using_speedangle,"
-    "woba_value,woba_denom\n"
-    "777001,2026-08-20,101,201,L,R,FF,home_run,batted,fly_ball,108.2,28,6,140.5,150.2,1.65,2.0,1\n"
-    "777001,2026-08-20,101,201,L,R,FF,,foul,,,,,,,,,\n"
+    "woba_value,woba_denom,hit_distance_sc\n"
+    "777001,2026-08-20,101,201,L,R,FF,home_run,batted,fly_ball,108.2,28,6,140.5,150.2,1.65,2.0,1,418\n"
+    "777001,2026-08-20,101,201,L,R,FF,,foul,,,,,,,,,,\n"
 )
 
 
@@ -104,6 +104,8 @@ def test_pitch_events_classify_contact_and_leave_fouls_unclassified() -> None:
     homer, foul = events
     assert homer.launch_speed_angle == 6
     assert homer.launch_speed == Decimal("108.2")
+    assert homer.hit_distance == Decimal("418")
+    assert foul.hit_distance is None
     assert homer.batter_side == "L"
     assert foul.launch_speed_angle is None
     assert foul.launch_speed is None

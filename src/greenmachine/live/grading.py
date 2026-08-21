@@ -9,11 +9,12 @@ roofed venue's neutral conditions are), each logged as a decision record.
 Provisional v1 derivations (D-073, all marked provisional pending the open
 product questions Q15/Q16):
 
-- pitch mix pressure: of the expected starter's qualifying pitch types, the
-  usage-weighted share where the batter's season expected wOBA against that
-  pitch meets or beats the league's PA-weighted expected wOBA against that
-  same pitch (the baseline is per pitch type, so fastball-heavy pitchers are
-  not systematically easier to score against).
+- pitch mix pressure: of the expected starter's qualifying pitch types
+  (14% mix share over the named matchup window, D-079), the usage-weighted
+  share where the batter's windowed expected wOBA against that pitch meets
+  or beats the league's PA-weighted season expected wOBA against that same
+  pitch (the baseline is per pitch type, so fastball-heavy pitchers are not
+  systematically easier to score against).
 - put-away pitch exploitation: on the starter's qualifying pitch type with
   the highest put-away rate, how far the batter's whiff share sits below the
   league's pitch-weighted whiff share, clamped at zero (a batter who whiffs
@@ -56,6 +57,9 @@ from greenmachine.live.savant import PitchArsenalRow, StatcastBatterRow
 from greenmachine.scoring.engine import score_snapshot
 
 QUALIFYING_USAGE_SHARE = Decimal("0.15")
+# The matchup mix's qualifying bar (D-079) — distinct from the arsenal
+# board's 15% qualifying share, which D-070 ratified for the season surface.
+MIX_USAGE_SHARE = Decimal("0.14")
 ROOFED_VENUE_NEUTRAL_FAHRENHEIT = Decimal("72")
 FORM_FALLBACK_REACH_DAYS = 14
 PERCENT = Decimal(100)
@@ -90,11 +94,47 @@ class _BaselineSum:
 
 
 @dataclass(frozen=True)
-class MatchupInput:
-    """Everything the matchup derivations read: both sides plus baselines."""
+class PitchMixRow:
+    """The opposing starter's mix membership for the matchup grade (D-079).
 
-    pitcher_rows: tuple[PitchArsenalRow, ...]
-    batter_rows: tuple[PitchArsenalRow, ...]
+    ``pitches`` and ``usage_share`` come from the window actually used — the
+    rolling 30 days, the D-081 L45 reach, or the season board; the surface
+    names which. ``put_away_share`` is always the season board's: pitch
+    events carry no put-away counts. A None put-away means the season board
+    has no row for the pitch type, and the derivation skips the pitch rather
+    than inventing a zero.
+    """
+
+    pitch_type: str
+    pitch_name: str
+    pitches: int
+    usage_share: Decimal
+    put_away_share: Decimal | None
+
+
+@dataclass(frozen=True)
+class BatterPitchLine:
+    """The batter's per-pitch line against the starter's side over the
+    matchup window (D-079/D-088) — the batter half of the matchup grade.
+    Rates are None where their denominator is empty; the derivations skip a
+    pitch they cannot read rather than inventing a zero."""
+
+    pitch_type: str
+    pitches: int
+    expected_woba: Decimal | None
+    whiff_share: Decimal | None
+
+
+@dataclass(frozen=True)
+class MatchupInput:
+    """Everything the matchup derivations read: both sides plus baselines.
+
+    The pitcher side is the starter's mix over the named window (D-079); the
+    batter side is his windowed per-pitch lines against the starter's side.
+    The league baselines stay season-long."""
+
+    pitcher_rows: tuple[PitchMixRow, ...]
+    batter_rows: tuple[BatterPitchLine, ...]
     league: dict[str, LeaguePitchBaseline]
 
 
@@ -159,8 +199,8 @@ def league_baselines(
     return baselines
 
 
-def _qualifying_pitcher_rows(matchup: MatchupInput) -> list[PitchArsenalRow]:
-    return [row for row in matchup.pitcher_rows if row.usage_share >= QUALIFYING_USAGE_SHARE]
+def _qualifying_pitcher_rows(matchup: MatchupInput) -> list[PitchMixRow]:
+    return [row for row in matchup.pitcher_rows if row.usage_share >= MIX_USAGE_SHARE]
 
 
 def derive_pitch_mix_pressure(matchup: MatchupInput) -> DerivedMatchup:
@@ -172,8 +212,13 @@ def derive_pitch_mix_pressure(matchup: MatchupInput) -> DerivedMatchup:
     for pitcher_row in _qualifying_pitcher_rows(matchup):
         batter_row = batter_by_pitch.get(pitcher_row.pitch_type)
         league = matchup.league.get(pitcher_row.pitch_type)
-        if batter_row is None or league is None or league.plate_appearances <= 0:
-            continue  # a pitch type missing on either side leaves both sums
+        if (
+            batter_row is None
+            or batter_row.expected_woba is None
+            or league is None
+            or league.plate_appearances <= 0
+        ):
+            continue  # a pitch type unreadable on either side leaves both sums
         weight_total += pitcher_row.usage_share
         sample += pitcher_row.pitches
         if batter_row.expected_woba >= league.expected_woba:
@@ -191,14 +236,19 @@ def derive_put_away_exploitation(matchup: MatchupInput) -> DerivedMatchup:
     """Whiff suppression vs league on the starter's best put-away pitch."""
     batter_by_pitch = {row.pitch_type: row for row in matchup.batter_rows}
     candidates = sorted(
-        _qualifying_pitcher_rows(matchup),
-        key=lambda row: row.put_away_share,
+        (row for row in _qualifying_pitcher_rows(matchup) if row.put_away_share is not None),
+        key=lambda row: row.put_away_share or Decimal(0),
         reverse=True,
     )
     for pitcher_row in candidates:
         batter_row = batter_by_pitch.get(pitcher_row.pitch_type)
         league = matchup.league.get(pitcher_row.pitch_type)
-        if batter_row is None or league is None or league.pitches <= 0:
+        if (
+            batter_row is None
+            or batter_row.whiff_share is None
+            or league is None
+            or league.pitches <= 0
+        ):
             continue
         if league.whiff_share <= 0:
             continue

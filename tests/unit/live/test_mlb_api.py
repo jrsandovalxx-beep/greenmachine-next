@@ -69,6 +69,7 @@ _PEOPLE_HITTING = {
                                 "hits": 121,
                                 "homeRuns": 33,
                                 "strikeOuts": 130,
+                                "totalBases": 204,
                             }
                         }
                     ],
@@ -160,6 +161,7 @@ def test_season_hitting_counts_and_bat_side_parse() -> None:
     assert line.bats == "L"
     assert line.plate_appearances == 500
     assert line.home_runs == 33
+    assert line.total_bases == 204
     assert 102 not in lines  # no season split: the assembly layer marks absence
 
 
