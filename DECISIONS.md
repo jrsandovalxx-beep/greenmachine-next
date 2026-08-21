@@ -1868,3 +1868,38 @@ re-drawn fuller (wall band, warning track, mound, base paths) with the wind
 as streaking lanes clipped to the field; per-park wall heights and field
 shapes remain undrawn for want of a ratified source, as with the
 park-orientation table (D-082, D-085).
+
+## D-087 - Pitcher metrics are season-long with a last-season fallback; the mirror is renamed Arsenal
+**Every pitcher figure on the board is a full-season number, never a windowed
+one; when a pitcher has no current-season record, last season's board fills
+in and is labelled with its year (Product Owner, 2026-08-21: "when it comes
+to any and all pitcher data/metrics, it will be based off the whole season,
+and fallback and last season if no data is available").** The matchup popup's
+pitcher table is renamed from "Pitcher mirror" to "Arsenal": it holds every
+pitch he throws with season usage, PA, AVG, SLG, ISO, wOBA, xwOBA, Whiff%,
+K% and Hard-Hit% from the arsenal board — the board publishes no per-pitch
+home-run or barrel counts, so those columns do not exist there rather than
+showing invented zeros. A toggle filters the rows to the pitch types he has
+used against the batter's side; that per-side determination reads the recent
+31-day pitch record (the only per-side split the approved feeds carry) and
+the prose names it, while the numbers themselves stay season-long either
+way. The season pitching line on the Arms tab was already season-scoped and
+is unchanged; only the batter's recent-form section is an L7 surface (per
+the same directive).
+
+## D-088 - The matchup per-pitch table is vs the starter's side over L30; the popup threshold is adjustable
+**The matchup popup's batter per-pitch table shows his metrics against the
+opposing starter's side — right- or left-handed pitching — over the last 30
+days, with the qualifying-mix toggle kept (off: every pitch type; on: only
+the mix) and the usage threshold adjustable from inside the same popup
+(Product Owner, 2026-08-21: "for matchup i should see batter metrics vs that
+side pitcher. L30 days. With option to change and toggle on/off pitch usage
+threshold"; "I want to be able to adjust the threshold somewhere, preferably
+within the same pop up window").** One slider sets the line for the matchup
+table, the Arsenal table's dimming, and the exit-velocity log's pitch-mix
+filter — a display filter only: grading's qualifying usage line stays the
+ratified 15% (D-070) and never moves with the slider. With no opposing
+starter named there is no scope, and the table names the absence rather than
+drawing an unscoped one. This supersedes D-080's season-arsenal batter table
+and the D-066 windowed scope toggle, both absorbed into the popup's final
+shape.
