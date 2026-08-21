@@ -80,6 +80,7 @@ from greenmachine.inputs import InputSnapshot, Window
 from greenmachine.inputs.contract import Handedness, ParkFactor, ParkVenue, VenueType
 from greenmachine.inputs.savant_park_factors import basis_statement, read_factors
 from greenmachine.live.form import FormSection, FormValue
+from greenmachine.live.grading import QUALIFYING_USAGE_SHARE
 from greenmachine.live.mlb_api import FetchFailure, MlbStatsApi
 from greenmachine.live.pipeline import BatterCard, GameCard, SlateBoard, build_board
 from greenmachine.live.savant import BaseballSavant
@@ -95,7 +96,16 @@ from greenmachine.parks import (
 from greenmachine.parks import (
     screen_frames as park_frames,
 )
-from greenmachine.shell import BLOT_CSS, BLOT_HTML, DIAL_CSS, ORB_HTML, SHELL_CSS, TITLE_HTML
+from greenmachine.shell import (
+    BLOT_CSS,
+    BLOT_HTML,
+    DIAL_CSS,
+    FIELD_CSS,
+    ORB_HTML,
+    SHELL_CSS,
+    TITLE_HTML,
+    field_wind_html,
+)
 from greenmachine.splits import ABSENCE_WORDS as SPLIT_ABSENCE_WORDS
 from greenmachine.splits import METRIC_COLUMNS as SPLIT_METRIC_COLUMNS
 from greenmachine.splits import (
@@ -513,6 +523,28 @@ def _temperature_lookup() -> object:
     return read
 
 
+def _wind_lookup() -> object:
+    """A venue -> (wind mph, compass direction) reader over the weather seam;
+    None locally or on absence — same discipline as the temperature lookup."""
+    adapter, live = weather_binding()
+
+    def read(venue: ParkVenue) -> tuple[Decimal, str] | None:
+        if not live or len(LIVE_WEATHER_DIAGNOSTICS) >= WEATHER_FAILURE_CIRCUIT_BREAKER:
+            return None
+        try:
+            field = adapter.forecast_for(venue)
+        except Exception as exc:  # composition-root last resort: wind downgrades to absence
+            LIVE_WEATHER_DIAGNOSTICS.append(
+                f"{venue.venue_id}: {type(exc).__name__} on {type(venue).__name__}"
+            )
+            return None
+        if field.value is None:
+            return None
+        return field.value.wind_speed_mph, field.value.wind_direction
+
+    return read
+
+
 @st.cache_data(ttl=BOARD_TTL_SECONDS, show_spinner=False)
 def live_board(slate_iso: str) -> SlateBoard | FetchFailure:
     """Assemble and grade the slate; cached so a rerun is not a refetch."""
@@ -533,6 +565,7 @@ def live_board(slate_iso: str) -> SlateBoard | FetchFailure:
         fetch_day_events=fetch_day,  # type: ignore[arg-type]
         temperature_for=_temperature_lookup(),  # type: ignore[arg-type]
         park_factors=park_factor_table(),
+        wind_for=_wind_lookup(),  # type: ignore[arg-type]
     )
 
 
@@ -717,35 +750,139 @@ def _bump_selection_epoch() -> None:
     st.session_state["selection_epoch"] = _selection_epoch() + 1
 
 
-def _render_batter_detail(card: BatterCard) -> None:
-    """The batter detail body — GMF-007's portion is the D-068 form section.
+def _exit_velo_frames(card: BatterCard, threshold_on: bool) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The recent exit-velocity sheet, game by game (D-084).
+
+    The pitch mix is shown whole with the threshold off; with it on, only
+    pitch types at or above the qualifying usage share (D-070's 15%) of that
+    game's pitches are listed. The toggle is a view choice over the same
+    rows — nothing is refetched or recomputed.
+    """
+    text_rows: list[dict[str, str]] = []
+    style_rows: list[dict[str, str]] = []
+    for game in card.recent_games:
+        if threshold_on:
+            floor = game.pitches_seen * float(QUALIFYING_USAGE_SHARE)
+            mix = [(name, count) for name, count in game.pitch_mix if count >= floor]
+        else:
+            mix = list(game.pitch_mix)
+        mix_text = (
+            " · ".join(f"{name} {count / game.pitches_seen:.0%}" for name, count in mix)
+            if mix
+            else ("none at the threshold" if threshold_on else "no pitches recorded")
+        )
+        styles: dict[str, str] = {}
+        if game.balls_in_play == 0:
+            avg_text = max_text = "no balls in play"
+            styles["Avg EV"] = _REASON_CSS
+            styles["Max EV"] = _REASON_CSS
+        else:
+            avg_text = (
+                f"{float(game.avg_exit_velocity):.1f}"
+                if game.avg_exit_velocity is not None
+                else "no balls in play"
+            )
+            max_text = (
+                f"{float(game.max_exit_velocity):.1f}"
+                if game.max_exit_velocity is not None
+                else "no balls in play"
+            )
+        text_rows.append(
+            {
+                "Date": game.game_date,
+                "Pitches": str(game.pitches_seen),
+                "BIP": str(game.balls_in_play),
+                "Avg EV": avg_text,
+                "Max EV": max_text,
+                "Pitch mix": mix_text,
+            }
+        )
+        style_rows.append(styles)
+    return pd.DataFrame(text_rows), pd.DataFrame(style_rows)
+
+
+def _game_of(board: SlateBoard, card: BatterCard) -> GameCard | None:
+    """The slate game the selected batter plays in — the park panel's venue."""
+    for game in board.games:
+        if card in game.home_batters or card in game.away_batters:
+            return game
+    return None
+
+
+def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
+    """The batter detail body (D-084): the 2D park with its live wind, the
+    D-068 form section, and the recent exit-velocity sheet behind the
+    pitch-mix threshold toggle.
 
     Reachable from the Sluggers and Matchups row selections (D-078); the
-    redesign's further blocks (matchup window, per-pitch tables) join this
-    view under their own tickets.
+    per-pitch tables and pitcher mirror remain the Matchups popup's content
+    (D-079/D-080).
     """
     st.markdown(f"**{card.full_name}** — {card.team}")
+
+    st.markdown("**Park and conditions**")
+    if game is None:
+        st.caption("This batter's game is not on today's slate board.")
+    else:
+        factor = _side_factor(game, card.batting_side)
+        detail_lines = [
+            f"park factor {float(factor.factor):.0f}" if factor else "park factor not covered"
+        ]
+        if game.venue_type is VenueType.OPEN_AIR and game.temperature_fahrenheit is not None:
+            detail_lines.append(f"{float(game.temperature_fahrenheit):.0f}°F at game time")
+        roofed = game.venue_type is not VenueType.OPEN_AIR
+        st.markdown(
+            field_wind_html(
+                venue_name=game.venue_name,
+                detail_lines=tuple(detail_lines),
+                wind_speed_mph=(
+                    float(game.wind_speed_mph) if game.wind_speed_mph is not None else None
+                ),
+                wind_direction=game.wind_direction,
+                wind_absent_text=(
+                    "roofed — wind never reaches the field"
+                    if roofed
+                    else "wind reading unavailable"
+                ),
+            ),
+            unsafe_allow_html=True,
+        )
+
     st.markdown("**Recent form [L7]**")
     if card.form is None:
         st.caption(
             "Recent form is not covered by source: the form-event feed was not "
             "retrieved for this board, so no window could be resolved."
         )
-        return
-    texts, styles = _form_section_frames(card.form)
-    st.dataframe(styled_text_frame(texts, styles), hide_index=True)
-    st.caption(
-        "Each metric is the last 7 days [L7]; a metric whose L7 window is "
-        "empty falls back to its L14 window, marked '· L14'. A metric below "
-        "its sample floor keeps its value with its exact sample and an "
-        "INSUFFICIENT marker; one with no observations at either reach reads "
-        "'not enough data available' (D-068)."
+    else:
+        texts, styles = _form_section_frames(card.form)
+        st.dataframe(styled_text_frame(texts, styles), hide_index=True)
+        st.caption(
+            "Each metric is the last 7 days [L7]; a metric whose L7 window is "
+            "empty falls back to its L14 window, marked '· L14'. A metric below "
+            "its sample floor keeps its value with its exact sample and an "
+            "INSUFFICIENT marker; one with no observations at either reach reads "
+            "'not enough data available' (D-068)."
+        )
+
+    st.markdown("**Recent exit velocity — game by game**")
+    threshold_on = st.toggle(
+        f"Pitch-mix threshold (≥{float(QUALIFYING_USAGE_SHARE):.0%} usage)",
+        value=False,
+        key=f"pitch_mix_threshold_{card.player_id}",
+        help="On: only pitch types at or above the qualifying usage share of "
+        "that game's pitches are listed. Off: the whole mix.",
     )
+    if not card.recent_games:
+        st.caption("No pitch-by-pitch events for this batter in the form window.")
+        return
+    sheet, sheet_styles = _exit_velo_frames(card, threshold_on)
+    st.dataframe(styled_text_frame(sheet, sheet_styles), hide_index=True)
 
 
 @st.dialog("Batter detail", width="large", on_dismiss=_bump_selection_epoch)
-def _batter_detail_dialog(card: BatterCard) -> None:
-    _render_batter_detail(card)
+def _batter_detail_dialog(card: BatterCard, game: GameCard | None) -> None:
+    _render_batter_detail(card, game)
 
 
 def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCard | None:
@@ -998,7 +1135,7 @@ def render_live_board() -> None:
     # single dialog call per run, and the grids' epoch keys guarantee at most
     # one selection survives a dismiss.
     if selected is not None:
-        _batter_detail_dialog(selected)
+        _batter_detail_dialog(selected, _game_of(board, selected))
     if LIVE_WEATHER_DIAGNOSTICS:
         joined = "; ".join(LIVE_WEATHER_DIAGNOSTICS)
         st.caption(
@@ -1116,6 +1253,7 @@ def main() -> None:
     st.markdown(SHELL_CSS, unsafe_allow_html=True)
     st.markdown(DIAL_CSS, unsafe_allow_html=True)
     st.markdown(BLOT_CSS, unsafe_allow_html=True)
+    st.markdown(FIELD_CSS, unsafe_allow_html=True)
     orb, header = st.columns([1, 5])
     with orb:
         st.markdown(ORB_HTML, unsafe_allow_html=True)

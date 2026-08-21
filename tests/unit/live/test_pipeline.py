@@ -354,3 +354,82 @@ def test_below_floor_samples_still_score_with_the_advisory_status() -> None:
         s for s in batter.result.component_scores if s.component_id is ComponentId.SWEET_SPOT_PCT
     )
     assert score.points_awarded >= 0  # scored, not zeroed by absence
+
+
+def _open_air_game() -> ScheduledGame:
+    import dataclasses
+
+    return dataclasses.replace(
+        _game(),
+        game_pk=777002,
+        venue_id=19,
+        venue_name="Coors Field",
+        home_team="Colorado Rockies",
+    )
+
+
+class _OpenAirApi(_FakeApi):
+    def fetch_slate(self, date_mmddyyyy: str) -> Slate:
+        return Slate(official_date="2026-08-20", games=(_open_air_game(),))
+
+
+def _build_with_wind(api: object, wind: object) -> object:
+    def fetch_day(day: date) -> tuple[PitchEvent, ...]:
+        return tuple(e for e in _recent_events() if e.game_date == day.isoformat())
+
+    return build_board(
+        api=api,  # type: ignore[arg-type]
+        savant=_FakeSavant(),  # type: ignore[arg-type]
+        slate_date=SLATE_DATE,
+        as_of=AS_OF,
+        config=CONFIG,
+        fetch_day_events=fetch_day,
+        temperature_for=lambda venue: Decimal("78"),
+        park_factors=_park_factors(),
+        wind_for=wind,  # type: ignore[arg-type]
+    )
+
+
+def test_wind_reaches_an_open_air_game_card() -> None:
+    board = _build_with_wind(_OpenAirApi(), lambda venue: (Decimal("9"), "WSW"))
+    assert not isinstance(board, FetchFailure)
+    game = board.games[0]
+    assert game.venue_name == "Coors Field"
+    assert game.wind_speed_mph == Decimal("9")
+    assert game.wind_direction == "WSW"
+
+
+def test_a_roofed_game_carries_no_wind() -> None:
+    """Chase Field is a retractable roof: with no roof-state source in v1 the
+    wind reading never applies (D-073), so the card carries no wind."""
+    board = _build_with_wind(_FakeApi(), lambda venue: (Decimal("9"), "WSW"))
+    assert not isinstance(board, FetchFailure)
+    game = board.games[0]
+    assert game.venue_name == "Chase Field"
+    assert game.wind_speed_mph is None
+    assert game.wind_direction is None
+
+
+def test_recent_games_group_events_by_date_newest_first() -> None:
+    from greenmachine.live.pipeline import _exit_velo_games
+
+    base = _recent_events()[0]
+    import dataclasses
+
+    older = [
+        dataclasses.replace(base, game_date="2026-08-17", pitch_type="SL"),
+        dataclasses.replace(base, game_date="2026-08-17", pitch_type="SL", launch_speed=None),
+        dataclasses.replace(base, game_date="2026-08-19", pitch_type="FF"),
+        dataclasses.replace(base, game_date="2026-08-19", pitch_type="FF"),
+    ]
+    rows = _exit_velo_games(tuple(older))
+    assert [row.game_date for row in rows] == ["2026-08-19", "2026-08-17"]
+    newest, older_row = rows
+    assert newest.pitches_seen == 2 and newest.balls_in_play == 2
+    assert newest.avg_exit_velocity == Decimal("96")
+    assert newest.max_exit_velocity == Decimal("96")
+    assert newest.pitch_mix == (("FF", 2),)
+    # The older game: one whiff (no launch speed) halves the in-play count,
+    # and the mix still counts every pitch.
+    assert older_row.pitches_seen == 2 and older_row.balls_in_play == 1
+    assert older_row.pitch_mix == (("SL", 2),)

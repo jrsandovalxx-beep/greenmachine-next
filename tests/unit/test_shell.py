@@ -7,12 +7,20 @@ for a font is not a theme, it is a dependency.
 
 from __future__ import annotations
 
-from greenmachine.shell import BLOT_CSS, BLOT_HTML, DIAL_CSS, ORB_HTML, SHELL_CSS, TITLE_HTML
+from greenmachine.shell import (
+    BLOT_CSS,
+    BLOT_HTML,
+    DIAL_CSS,
+    FIELD_CSS,
+    ORB_HTML,
+    SHELL_CSS,
+    TITLE_HTML,
+)
 
 # The SVG namespace identifier is a constant string, never fetched.
 _SVG_NAMESPACE = "http://www.w3.org/2000/svg"
 
-_SHELL_ARTIFACTS = (SHELL_CSS, DIAL_CSS, ORB_HTML, TITLE_HTML, BLOT_CSS, BLOT_HTML)
+_SHELL_ARTIFACTS = (SHELL_CSS, DIAL_CSS, ORB_HTML, TITLE_HTML, BLOT_CSS, BLOT_HTML, FIELD_CSS)
 
 
 def test_the_shell_makes_no_remote_request() -> None:
@@ -62,3 +70,37 @@ def test_the_shell_copies_no_console_artwork() -> None:
     """Inspired-by, never copied: no console maker's mark appears anywhere."""
     for artifact in _SHELL_ARTIFACTS:
         assert "xbox" not in artifact.lower()
+
+
+def test_the_field_panel_draws_the_diamond_and_the_wind_blows() -> None:
+    """D-084: the field panel is drawn artwork (no image fetch), and the
+    wind flow bears the way the wind blows — compass readings name where it
+    blows FROM, so the arrow is rotated one-eighty on."""
+    from greenmachine.shell import field_wind_html
+
+    assert "@keyframes gm-wind-drift" in FIELD_CSS
+    html = field_wind_html(
+        venue_name="Coors Field",
+        detail_lines=(),
+        wind_speed_mph=9.0,
+        wind_direction="W",
+    )
+    # Wind from the west blows toward the east: bearing 90, and east is the
+    # SVG's unrotated axis — the flow renders unrotated.
+    assert "rotate(0.0" in html
+    assert "gm-wind-flow" in html
+    assert "wind 9 mph from the W" in html
+
+
+def test_the_field_panel_states_a_roofed_venue_without_a_flow() -> None:
+    from greenmachine.shell import field_wind_html
+
+    html = field_wind_html(
+        venue_name="Chase Field",
+        detail_lines=(),
+        wind_speed_mph=None,
+        wind_direction=None,
+        wind_absent_text="roofed — wind never reaches the field",
+    )
+    assert "gm-wind-flow" not in html
+    assert "roofed — wind never reaches the field" in html
