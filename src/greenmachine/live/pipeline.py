@@ -33,6 +33,7 @@ from greenmachine.domain.values import GameId, PlayerId, SourceCaptureId, VenueI
 from greenmachine.inputs.contract import Handedness, ParkFactor, ParkVenue, VenueType
 from greenmachine.inputs.park_reference import PARK_VENUES
 from greenmachine.live.form import (
+    AIR_BALL_TYPES,
     BARREL_CLASSIFICATION,
     HARD_HIT_THRESHOLD_MPH,
     FormSection,
@@ -73,8 +74,9 @@ MATCHUP_WINDOW_DAYS = 30
 # D-081's reach: a starter whose mix has no pitches in the matchup window
 # extends the read to L45 before falling back to the season board.
 MIX_REACH_DAYS = 45
-# D-079's pull-air column counts pulled air balls at or past this distance.
-PULL_AIR_DISTANCE_FLOOR_FT = Decimal("350")
+# D-090's distance column counts batted balls at or past this distance,
+# any direction — it is its own metric, separate from Pull Air %.
+LONG_BALL_DISTANCE_FLOOR_FT = Decimal("350")
 SEASON_WINDOW_MONTH = 3
 SEASON_WINDOW_DAY = 1
 SEASON_IDS_PER_REQUEST = 90
@@ -211,7 +213,8 @@ class BatterGridLine:
     batting_average: Decimal | None
     slugging: Decimal | None
     iso: Decimal | None
-    pull_air_350_share: Decimal | None
+    distance_350_share: Decimal | None
+    pull_air_share: Decimal | None
     expected_woba: Decimal | None
     whiff_share: Decimal | None
 
@@ -466,13 +469,23 @@ def _batter_grid_line(events: Sequence[PitchEvent]) -> BatterGridLine | None:
         for event in batted
         if event.launch_speed is not None and event.launch_speed >= HARD_HIT_THRESHOLD_MPH
     )
-    long_pulls = sum(
+    long_balls = sum(
         1
         for event in batted
-        if is_pull_air(event)
-        and event.hit_distance is not None
-        and event.hit_distance >= PULL_AIR_DISTANCE_FLOOR_FT
+        if event.hit_distance is not None and event.hit_distance >= LONG_BALL_DISTANCE_FLOOR_FT
     )
+    # Pull Air % mirrors the form section: pulled air balls over measurable
+    # air balls — a ball without coordinates or a known side leaves both
+    # counts (D-090 keeps it a separate metric from the distance column).
+    measurable_air = [
+        event
+        for event in batted
+        if event.bb_type in AIR_BALL_TYPES
+        and event.hc_x is not None
+        and event.hc_y is not None
+        and event.batter_side in ("L", "R")
+    ]
+    pulls = sum(1 for event in measurable_air if is_pull_air(event))
     woba_ending = [
         event for event in ending if event.estimated_woba is not None and event.woba_denom
     ]
@@ -502,7 +515,8 @@ def _batter_grid_line(events: Sequence[PitchEvent]) -> BatterGridLine | None:
         batting_average=average,
         slugging=slugging,
         iso=(slugging - average if average is not None and slugging is not None else None),
-        pull_air_350_share=(Decimal(long_pulls) / Decimal(len(batted))) if batted else None,
+        distance_350_share=(Decimal(long_balls) / Decimal(len(batted))) if batted else None,
+        pull_air_share=(Decimal(pulls) / Decimal(len(measurable_air)) if measurable_air else None),
         expected_woba=(woba_total / woba_denominator) if woba_denominator else None,
         whiff_share=Decimal(whiffs) / Decimal(swings) if swings else None,
     )
@@ -517,8 +531,8 @@ def _season_grid_line(
     from the season sources: the hitting line for AB/H/HR/AVG/SLG/ISO, the
     statcast board for EV/barrels/hard-hit, and the arsenal board for
     PA-weighted xwOBA and pitch-weighted Swing-Str. No season source
-    publishes a 350-foot pull-air read, so that cell stays None — the
-    surface names the absence (D-081)."""
+    publishes a 350-foot distance read or a pull-air read, so those cells
+    stay None — the surface names the absence (D-081/D-090)."""
     if line is None and statcast is None and not arsenal_rows:
         return None
     at_bats = line.at_bats if line else 0
@@ -553,7 +567,8 @@ def _season_grid_line(
         batting_average=average,
         slugging=slugging,
         iso=(slugging - average if average is not None and slugging is not None else None),
-        pull_air_350_share=None,
+        distance_350_share=None,
+        pull_air_share=None,
         expected_woba=(woba_total / Decimal(woba_pa)) if woba_pa else None,
         whiff_share=(whiff_total / Decimal(whiff_pitches)) if whiff_pitches else None,
     )

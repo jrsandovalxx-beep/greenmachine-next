@@ -814,6 +814,8 @@ def _exit_velo_frames(
     for event in card.recent_events:
         if event.pitch_type:
             counts[event.pitch_type] = counts.get(event.pitch_type, 0) + 1
+    # Dist carries the source's projected hit distance (D-091); a pitch
+    # with no reading shows a dash, never an invented number.
     qualifying = {name for name, count in counts.items() if total and count / total >= threshold}
     text_rows: list[dict[str, str]] = []
     style_rows: list[dict[str, str]] = []
@@ -828,6 +830,7 @@ def _exit_velo_frames(
             "Event": _EVENT_LABELS.get(event.event, event.event.replace("_", " ")),
             "EV": f"{float(event.launch_speed):.1f}" if event.launch_speed is not None else "—",
             "LA": f"{float(event.launch_angle):.0f}" if event.launch_angle is not None else "—",
+            "Dist": (f"{float(event.hit_distance):.0f}" if event.hit_distance is not None else "—"),
             "Type": _BB_TYPE_CODES.get(event.bb_type, "—"),
         }
         styles: dict[str, str] = {}
@@ -1277,7 +1280,8 @@ def _grid_line_cells(line: BatterGridLine | None) -> tuple[dict[str, str], dict[
             "AVG": "—",
             "SLG": "—",
             "ISO": "—",
-            "+350 Pull Air %": "—",
+            "+350 ft %": "—",
+            "Pull Air %": "—",
             "xwOBA": "—",
             "Swing-Str %": "—",
         }
@@ -1290,9 +1294,10 @@ def _grid_line_cells(line: BatterGridLine | None) -> tuple[dict[str, str], dict[
         "AVG": (_avg_text(line.batting_average) if line.batting_average is not None else None),
         "SLG": _avg_text(line.slugging) if line.slugging is not None else None,
         "ISO": _avg_text(line.iso) if line.iso is not None else None,
-        "+350 Pull Air %": (
-            _pct_text(line.pull_air_350_share) if line.pull_air_350_share is not None else None
+        "+350 ft %": (
+            _pct_text(line.distance_350_share) if line.distance_350_share is not None else None
         ),
+        "Pull Air %": (_pct_text(line.pull_air_share) if line.pull_air_share is not None else None),
         "xwOBA": _avg_text(line.expected_woba) if line.expected_woba is not None else None,
         "Swing-Str %": _pct_text(line.whiff_share) if line.whiff_share is not None else None,
     }
@@ -1330,8 +1335,8 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
         value=False,
         key="matchups_season_view",
         help=(
-            "D-079's toggle. Season +350 ft Pull Air % has no published "
-            "source, so that cell names the absence."
+            "D-079's toggle. Season +350 ft % and Pull Air % have no "
+            "published source, so those cells name the absence."
         ),
     )
     selected: BatterCard | None = None

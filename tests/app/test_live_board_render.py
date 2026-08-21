@@ -393,6 +393,7 @@ def _pitch_event(**overrides: object) -> object:
         "estimated_woba": None,
         "woba_value": None,
         "woba_denom": None,
+        "hit_distance": Decimal("360"),
     }
     base.update(overrides)
     return PitchEvent(**base)  # type: ignore[arg-type]
@@ -406,17 +407,25 @@ def test_exit_velo_log_lists_pa_ending_pitches_with_heat_and_hr_marks() -> None:
     import streamlit_app
 
     events = (
-        _pitch_event(),  # FF fly out at 91.2
+        _pitch_event(),  # FF fly out at 91.2, 360 ft
         _pitch_event(event="home_run", launch_speed=Decimal("104.1"), pitch_type="SL"),
         _pitch_event(event="", launch_speed=None, launch_angle=None),  # taken pitch
-        _pitch_event(event="strikeout", launch_speed=None, launch_angle=None, pitch_type="CH"),
+        _pitch_event(
+            event="strikeout",
+            launch_speed=None,
+            launch_angle=None,
+            hit_distance=None,
+            pitch_type="CH",
+        ),
     )
     card = SimpleNamespace(recent_events=events)
     texts, styles = streamlit_app._exit_velo_frames(card, False, 0.15)
     assert len(texts) == 3  # the taken pitch is not a row
-    assert list(texts.columns) == ["Date", "Pitch", "Event", "EV", "LA", "Type"]
+    assert list(texts.columns) == ["Date", "Pitch", "Event", "EV", "LA", "Dist", "Type"]
     assert texts.at[0, "EV"] == "91.2"
     assert texts.at[0, "Type"] == "FB"
+    assert texts.at[0, "Dist"] == "360"  # D-091: the hit's projected distance
+    assert texts.at[2, "Dist"] == "—"  # a strikeout carries no reading
     assert texts.at[1, "Event"] == "HR"
     assert styles.at[1, "Event"] == streamlit_app._HR_CSS
     assert styles.at[1, "EV"] == streamlit_app._EV_HEAT[0][1]  # 104.1 is the hottest band
@@ -632,7 +641,8 @@ def _grid_line(**overrides: object) -> object:
         "batting_average": Decimal("0.4"),
         "slugging": Decimal("1.0"),
         "iso": Decimal("0.6"),
-        "pull_air_350_share": Decimal("0.25"),
+        "distance_350_share": Decimal("0.25"),
+        "pull_air_share": Decimal("0.4"),
         "expected_woba": Decimal("0.45"),
         "whiff_share": Decimal("0.12"),
     }
@@ -660,7 +670,8 @@ def test_grid_line_cells_render_rates_and_named_absences() -> None:
         "AVG",
         "SLG",
         "ISO",
-        "+350 Pull Air %",
+        "+350 ft %",
+        "Pull Air %",
         "xwOBA",
         "Swing-Str %",
     }
@@ -670,16 +681,19 @@ def test_grid_line_cells_render_rates_and_named_absences() -> None:
     assert texts["AB"] == "5"
     assert texts["EV"] == "95.5"
     assert texts["AVG"] == ".400"
-    assert texts["+350 Pull Air %"] == "25.0%"
+    assert texts["+350 ft %"] == "25.0%"
+    assert texts["Pull Air %"] == "40.0%"
     assert texts["xwOBA"] == ".450"
     assert styles == {}
 
     texts, styles = streamlit_app._grid_line_cells(
-        _grid_line(pull_air_350_share=None, batted_balls=None)
+        _grid_line(distance_350_share=None, pull_air_share=None, batted_balls=None)
     )
-    assert texts["+350 Pull Air %"] == "—"
+    assert texts["+350 ft %"] == "—"
+    assert texts["Pull Air %"] == "—"
     assert texts["BIP"] == "—"
-    assert styles["+350 Pull Air %"] == streamlit_app._REASON_CSS
+    assert styles["+350 ft %"] == streamlit_app._REASON_CSS
+    assert styles["Pull Air %"] == streamlit_app._REASON_CSS
 
 
 def _board_with_grid_lines() -> SlateBoard:
@@ -698,7 +712,8 @@ def _board_with_grid_lines() -> SlateBoard:
         hits=121,
         home_runs=33,
         exit_velocity=Decimal("91.5"),
-        pull_air_350_share=None,
+        distance_350_share=None,
+        pull_air_share=None,
     )
 
     def attach(cards: tuple[_BatterCard, ...]) -> tuple[_BatterCard, ...]:
@@ -737,7 +752,7 @@ def test_matchups_grid_has_the_d079_columns_and_a_named_window(
         frames = []
         for element in at.dataframe:
             frame = _display_values(element).astype(str)
-            if "+350 Pull Air %" in frame.columns:
+            if "+350 ft %" in frame.columns:
                 frames.append(frame)
         return frames
 
@@ -755,7 +770,8 @@ def test_matchups_grid_has_the_d079_columns_and_a_named_window(
         "AVG",
         "SLG",
         "ISO",
-        "+350 Pull Air %",
+        "+350 ft %",
+        "Pull Air %",
         "xwOBA",
         "Swing-Str %",
         "Form (EV)",
@@ -775,5 +791,6 @@ def test_matchups_grid_has_the_d079_columns_and_a_named_window(
     assert not at.exception, [str(e.value) for e in at.exception]
     grids = grid_frames()
     assert set(grids[0]["AB"]) == {"440"}  # the season scope
-    assert set(grids[0]["+350 Pull Air %"]) == {"—"}  # no season source (D-081)
+    assert set(grids[0]["+350 ft %"]) == {"—"}  # no season source (D-081/D-090)
+    assert set(grids[0]["Pull Air %"]) == {"—"}
     assert grids[0]["Grade"].tolist() == away_grades  # the grade stays L30
