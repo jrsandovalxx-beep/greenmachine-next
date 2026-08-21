@@ -588,3 +588,28 @@ def test_arsenal_side_filter_keeps_metrics_season_long() -> None:
     # Season figures, untouched by the filter.
     assert texts.at[0, "PA"] == "100"
     assert texts.at[0, "Usage%"] == "45.0%"
+
+
+def test_a_dialog_failure_cannot_blank_the_board(tmp_path: Path) -> None:
+    """D-075, extended to the detail dialog: if the dialog body raises, the
+    run survives with a named warning and the board stays rendered. Drives
+    the real ``_open_batter_detail`` guard inside a genuine app runtime."""
+    script = tmp_path / "dialog_guard_app.py"
+    script.write_text(
+        "import sys\n"
+        f"sys.path.insert(0, {str(REPO_ROOT)!r})\n"
+        "import streamlit as st\n"
+        "import streamlit_app\n"
+        "\n"
+        "def _boom(card, game):\n"
+        "    raise RuntimeError('synthetic dialog failure')\n"
+        "\n"
+        "streamlit_app._batter_detail_dialog = _boom\n"
+        "streamlit_app._open_batter_detail(object(), None)\n"
+        "st.dataframe({'board': [1]})\n"
+    )
+    at = AppTest.from_file(str(script), default_timeout=_TIMEOUT)
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert any("batter detail" in str(w.value) for w in at.warning)
+    assert len(at.dataframe) == 1

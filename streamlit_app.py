@@ -1067,8 +1067,13 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
         )
     elif not card.pitch_lines:
         st.caption(
-            f"He has seen no pitches from {throws_text}-handed pitching in "
-            "the last 30 days on this board."
+            (
+                f"He has seen no pitches from {throws_text}-handed pitching in "
+                if throws_text
+                else "The starter's throwing side is not on the board, or he "
+                "has seen nothing from it in "
+            )
+            + "the last 30 days on this board."
         )
     else:
         mix_on = st.toggle(
@@ -1380,6 +1385,19 @@ def _render_tab(label: str, render: Callable[[], BatterCard | None]) -> BatterCa
         return None
 
 
+def _open_batter_detail(card: BatterCard, game: GameCard | None) -> None:
+    """Open the run's one detail dialog. The dialog is a view like any other:
+    its failure must never end the whole script run (D-075), so it degrades
+    to a named warning and the board stays up."""
+    try:
+        _batter_detail_dialog(card, game)
+    except Exception as exc:
+        st.warning(
+            "The batter detail could not be opened "
+            f"({type(exc).__name__}). The board is unaffected."
+        )
+
+
 def render_live_board() -> None:
     """The four live tabs (D-072). Live only in a deployed environment: a local
     render never becomes a network call, mirroring the weather seam."""
@@ -1421,7 +1439,7 @@ def render_live_board() -> None:
     # single dialog call per run, and the grids' epoch keys guarantee at most
     # one selection survives a dismiss.
     if selected is not None:
-        _batter_detail_dialog(selected, _game_of(board, selected))
+        _open_batter_detail(selected, _game_of(board, selected))
     if LIVE_WEATHER_DIAGNOSTICS:
         joined = "; ".join(LIVE_WEATHER_DIAGNOSTICS)
         st.caption(
