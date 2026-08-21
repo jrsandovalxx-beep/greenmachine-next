@@ -119,4 +119,4 @@ def test_board_renders_with_selectable_grids_and_invites_selection(
     at.run()
     assert not at.exception, [str(e.value) for e in at.exception]
     captions = [element.value for element in at.caption]
-    assert any("Select a row to open the batter's recent-form detail." in c for c in captions)
+    assert any("Select a row to open the batter's detail." in c for c in captions)

@@ -172,16 +172,46 @@ def _outage_board() -> SlateBoard:
     return board
 
 
+def _graded_board() -> SlateBoard:
+    """The outage board with grades set S, A, B, D across its four cards —
+    the D-084 shortlist must keep exactly the first two."""
+    import dataclasses
+
+    from greenmachine.domain.enums import Grade
+    from greenmachine.domain.grade_result import EvaluatedGradeResult
+    from greenmachine.live.pipeline import BatterCard, GameCard
+
+    board = _outage_board()
+    grades = [Grade.S, Grade.A, Grade.B, Grade.D]
+
+    def regrade(cards: tuple[BatterCard, ...]) -> tuple[BatterCard, ...]:
+        out: list[BatterCard] = []
+        for card in cards:
+            grade = grades.pop(0) if grades else Grade.D
+            result = card.result
+            assert isinstance(result, EvaluatedGradeResult)
+            out.append(dataclasses.replace(card, result=dataclasses.replace(result, grade=grade)))
+        return tuple(out)
+
+    game = board.games[0]
+    regraded = dataclasses.replace(
+        game, home_batters=regrade(game.home_batters), away_batters=regrade(game.away_batters)
+    )
+    assert isinstance(regraded, GameCard)
+    return dataclasses.replace(board, games=(regraded, *board.games[1:]))
+
+
 @pytest.fixture
 def _staged_app(monkeypatch: pytest.MonkeyPatch) -> SlateBoard:
-    """The app in its deployed posture, with the outage board and no network."""
+    """The app in its deployed posture, with the graded outage board and no
+    network."""
     import streamlit as st
 
     import greenmachine.live.pipeline as pipeline
     from greenmachine.inputs import AbsenceReason, SnapshotField, WeatherForecast
     from greenmachine.weather.nws import SOURCE_ID, NwsWeatherAdapter
 
-    board = _outage_board()
+    board = _graded_board()
     monkeypatch.setattr(pipeline, "build_board", lambda **kwargs: board)
     monkeypatch.setenv("GM_ENVIRONMENT", "staging")
     monkeypatch.setattr(
@@ -224,15 +254,17 @@ def _display_values(element: object) -> pd.DataFrame:
 
 def test_missing_cells_name_their_reason(_staged_app: SlateBoard) -> None:
     """D-023/D-025 on the live surface: a missing metric is its reason in
-    words — never a blank, a zero, or the literal string 'None'."""
+    words — never a blank, a zero, or the literal string 'None'. On the
+    D-084 shortlist those reasons ride in the tags box."""
     at = AppTest.from_file(str(_APP_PATH), default_timeout=_TIMEOUT)
     at.run()
     assert not at.exception, [str(e.value) for e in at.exception]
     display = _display_values(at.dataframe[0]).astype(str)
     assert not display.isin(["None", "nan"]).any().any()
-    # The uncovered batter's cells carry the board's plain-language reasons.
-    cells = set(display.to_numpy().ravel())
-    assert "not covered by source" in cells
+    # The uncovered shortlist batter's tags name the absences in words.
+    tags = " ".join(display["Tags"].tolist()).lower()
+    assert "missing:" in tags
+    assert "source unavailable" in tags
 
 
 def test_main_screen_is_the_shell_plus_the_live_board(_staged_app: SlateBoard) -> None:
@@ -304,21 +336,36 @@ def test_parks_snapshot_declares_a_live_weather_source() -> None:
     assert SOURCE in snapshot.sources
 
 
-def test_slugger_frames_carry_value_reason_and_highlight() -> None:
-    """The live board's frame is uniformly textual: the data grid prints a
-    numeric null as the literal "None" whatever the styler says (D-076), so
-    the value or its reason IS the cell's text, and the style frame carries
-    the green highlight decided at build time — no NaN is ever compared."""
+def test_shortlist_keeps_only_a_and_s_with_the_d084_columns() -> None:
+    """D-084: the Sluggers tab is the shortlist — grades A and S only, and
+    exactly the shortlist columns; every cell is display text (D-076), the
+    grade is lit, and the cards stay row-aligned for selection (GMF-007)."""
     import streamlit_app
 
-    board = _outage_board()
-    texts, styles, cards = streamlit_app._slugger_frames(board, {"EV": Decimal("90")})
-    # Row 0 is the covered batter (EV 91.5 ≥ 90): the formatted value, green.
-    assert texts.at[0, "EV"] == "91.5"
-    assert styles.at[0, "EV"] == streamlit_app._HIGHLIGHT
-    # Row 1 is the batter every feed missed: the reason as the cell's text,
-    # muted styling.
-    assert texts.at[1, "EV"] == "not covered by source"
-    assert styles.at[1, "EV"] == streamlit_app._REASON_CSS
+    texts, styles, cards = streamlit_app._slugger_frames(_graded_board())
+    assert list(texts.columns) == [
+        "Batter",
+        "Team",
+        "Versus",
+        "Grade",
+        "Park factor",
+        "Weather",
+        "Tags",
+    ]
+    assert list(texts["Grade"]) == ["S", "A"]
+    assert styles["Grade"].tolist() == [streamlit_app._HIGHLIGHT] * 2
+    # Park factor formatted as the whole-number factor for the batting side.
+    assert texts["Park factor"].isin(["112", "98", "not covered"]).all()
+    # The outage venue is roofed: the weather cell says so, in words.
+    assert set(texts["Weather"]) == {"roofed — indoor neutral value"}
     # The third return is the card behind each row, in row order (GMF-007).
     assert [card.full_name for card in cards] == list(texts["Batter"])
+
+
+def test_shortlist_empty_when_nothing_grades_a_or_s() -> None:
+    """All-D slate: the shortlist is empty and the tab says so plainly."""
+    import streamlit_app
+
+    texts, _styles, cards = streamlit_app._slugger_frames(_outage_board())
+    assert texts.empty
+    assert cards == []

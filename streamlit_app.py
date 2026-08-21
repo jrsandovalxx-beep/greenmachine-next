@@ -58,7 +58,7 @@ import streamlit as st
 from greenmachine.common.clock import SystemClock
 from greenmachine.config.loader import load_config
 from greenmachine.config.schema import GreenMachineConfig
-from greenmachine.domain.enums import ComponentId, MissingReason, SampleStatus, WindowProfile
+from greenmachine.domain.enums import Grade, SampleStatus
 from greenmachine.domain.grade_result import EvaluatedGradeResult
 from greenmachine.fixtures import FixtureWeatherAdapter, grid_demo_snapshot, parks_demo_snapshot
 from greenmachine.grid import (
@@ -536,32 +536,6 @@ def live_board(slate_iso: str) -> SlateBoard | FetchFailure:
     )
 
 
-def _top_bucket_lower(config: GreenMachineConfig, component_id: ComponentId) -> Decimal | None:
-    """The lower edge of a component's top bucket — the highlight threshold.
-
-    Read from the loaded configuration, never restated here: the config file
-    is the single place thresholds live.
-    """
-    for component in config.components:
-        if component.component_id is component_id:
-            for profile in component.profiles:
-                if profile.window_profile is WindowProfile.RECENT_7D:
-                    block = profile.scoring[0]
-                    buckets = getattr(block, "buckets", None)
-                    if buckets:
-                        return Decimal(str(buckets[-1].lower))
-    return None
-
-
-_MISSING_TEXT: dict[MissingReason, str] = {
-    MissingReason.NO_EVENTS_IN_WINDOW: "no events in window",
-    MissingReason.SOURCE_UNAVAILABLE: "source unavailable",
-    MissingReason.TRACKING_UNAVAILABLE: "tracking unavailable",
-    MissingReason.PLAYER_NOT_COVERED: "not covered by source",
-    MissingReason.INVALID_SOURCE_VALUE: "invalid source value",
-    MissingReason.EXPECTED_PITCHER_UNKNOWN: "starter unknown",
-}
-
 _NOT_EVALUABLE = "not evaluable"
 
 
@@ -579,40 +553,39 @@ _REASON_CSS = "color: #7d8f84; font-style: italic"
 # reason as the highlight — an alpha background reads as a washed-out block.
 _INSUFFICIENT_CSS = "background-color: #7a5c14; color: #ffe9a8"
 
-# Display precision per live-board metric column. Every cell on the live board
-# is display text — the value formatted here, or the absence's reason in
-# words — because the data grid prints a null as the literal "None" and never
-# consults the styler for it (D-076).
-_LIVE_METRIC_PRECISION = {
-    "Total": 1,
-    "EV": 1,
-    "Barrel%": 1,
-    "Hard-Hit%": 1,
-    "Sweet%": 1,
-    "Bat Speed": 1,
-    "Ideal AA%": 1,
-    "Pull-Air%": 1,
-    "Park": 0,
-}
+
+def _weather_text(game: GameCard) -> tuple[str, bool]:
+    """(text, is-absent) for the shortlist's weather column: the temperature
+    for open-air venues, or the plain reason there is no reading (D-084)."""
+    if game.venue_type is not VenueType.OPEN_AIR:
+        return "roofed — indoor neutral value", False
+    if game.temperature_fahrenheit is None:
+        return "source unavailable", True
+    return f"{float(game.temperature_fahrenheit):.0f}°F, open air", False
 
 
-def _reason_text(component: ComponentId, reasons: dict[ComponentId, MissingReason]) -> str:
-    reason = reasons.get(component)
-    return _MISSING_TEXT[reason] if reason is not None else "not observed"
+def _card_tags(card: BatterCard) -> str:
+    """The shortlist's tags box: advisories and absences as compact tags."""
+    tags: list[str] = []
+    insufficient, missing = _component_flags(card)
+    if insufficient:
+        tags.append(f"low sample: {insufficient}")
+    if missing:
+        tags.append(f"missing: {missing}")
+    if card.lineup_is_estimate:
+        tags.append("est. lineup")
+    return " · ".join(tags)
 
 
-def _slugger_frames(
-    board: SlateBoard, edges: dict[str, Decimal | None]
-) -> tuple[pd.DataFrame, pd.DataFrame, list[BatterCard]]:
-    """(texts, styles, cards) — every cell is display text, cards row-aligned.
+def _slugger_frames(board: SlateBoard) -> tuple[pd.DataFrame, pd.DataFrame, list[BatterCard]]:
+    """(texts, styles, cards) — the D-084 shortlist: grades A and S only.
 
-    A metric cell says the formatted value, or the plain-language reason it is
-    absent (D-023/D-025); highlighting is decided here against the edge, at
-    build time, where a missing cell is simply never compared. The frame is
-    uniformly textual on purpose: the data grid prints a numeric null as the
-    literal "None" regardless of the styler, so the text IS the data (D-076).
-    The third return is the card behind each row, in row order, so a grid
-    selection resolves to a batter without a second ordering to drift (GMF-007).
+    The shortlist is a reading list, not a metrics table: batter, team, the
+    pitcher they face, the grade, the park factor for their batting side, the
+    weather, and a tags box carrying the advisories (low sample, missing
+    components, estimated lineup). Per-batter metrics moved into the batter
+    detail popup (D-084). The third return is the card behind each row, in
+    row order, so a grid selection resolves to a batter (GMF-007).
     """
     text_rows: list[dict[str, str]] = []
     style_rows: list[dict[str, str]] = []
@@ -623,73 +596,28 @@ def _slugger_frames(
             (game.home_batters, game.away_pitcher),
         ):
             for card in batters:
+                if not isinstance(card.result, EvaluatedGradeResult):
+                    continue
+                if card.result.grade not in (Grade.S, Grade.A):
+                    continue
                 factor = _side_factor(game, card.batting_side)
-                insufficient, missing = _component_flags(card)
-                reasons = {
-                    obs.component_id: obs.missing_reason for obs in card.result.missing_observations
-                }
-                statcast = card.statcast
-                form = card.form
-                evaluated = isinstance(card.result, EvaluatedGradeResult)
-                values: dict[str, tuple[Decimal | None, ComponentId | None]] = {
-                    "Total": (card.result.total_score if evaluated else None, None),
-                    "EV": (
-                        statcast.exit_velocity_avg if statcast else None,
-                        ComponentId.EXIT_VELOCITY,
-                    ),
-                    "Barrel%": (
-                        statcast.barrel_share * 100 if statcast else None,
-                        ComponentId.BARREL_PCT,
-                    ),
-                    "Hard-Hit%": (
-                        statcast.hard_hit_share * 100 if statcast else None,
-                        ComponentId.HARD_HIT_PCT,
-                    ),
-                    "Sweet%": (
-                        form.sweet_spot_pct.value if form else None,
-                        ComponentId.SWEET_SPOT_PCT,
-                    ),
-                    "Bat Speed": (
-                        form.bat_speed_mph.value if form else None,
-                        ComponentId.BAT_SPEED,
-                    ),
-                    "Ideal AA%": (
-                        form.ideal_attack_angle_pct.value if form else None,
-                        ComponentId.ATTACK_ANGLE_QUALITY,
-                    ),
-                    "Pull-Air%": (
-                        form.pull_air_pct.value if form else None,
-                        ComponentId.PULL_PCT_AIR_BALLS,
-                    ),
-                    "Park": (
-                        factor.factor if factor is not None else None,
-                        ComponentId.PARK,
-                    ),
-                }
-                texts: dict[str, str] = {
+                weather, weather_absent = _weather_text(game)
+                texts = {
                     "Batter": card.full_name,
                     "Team": card.team,
-                    "Vs": opposing.full_name if opposing else "TBD",
-                    "Grade": card.result.grade.value if evaluated else _NOT_EVALUABLE,
+                    "Versus": opposing.full_name if opposing else "TBD",
+                    "Grade": card.result.grade.value,
+                    "Park factor": (
+                        f"{float(factor.factor):.0f}" if factor is not None else "not covered"
+                    ),
+                    "Weather": weather,
+                    "Tags": _card_tags(card),
                 }
-                styles: dict[str, str] = {}
-                for column, (value, component) in values.items():
-                    if value is None:
-                        texts[column] = (
-                            _NOT_EVALUABLE
-                            if component is None
-                            else _reason_text(component, reasons)
-                        )
-                        styles[column] = _REASON_CSS
-                        continue
-                    numeric = float(value)
-                    texts[column] = f"{numeric:.{_LIVE_METRIC_PRECISION[column]}f}"
-                    edge = edges.get(column)
-                    if edge is not None and numeric >= float(edge):
-                        styles[column] = _HIGHLIGHT
-                texts["Low sample"] = insufficient
-                texts["Missing"] = missing
-                texts["Lineup"] = "est." if card.lineup_is_estimate else ""
+                styles = {"Grade": _HIGHLIGHT}
+                if factor is None:
+                    styles["Park factor"] = _REASON_CSS
+                if weather_absent:
+                    styles["Weather"] = _REASON_CSS
                 text_rows.append(texts)
                 style_rows.append(styles)
                 cards.append(card)
@@ -699,12 +627,13 @@ def _slugger_frames(
 def _component_flags(card: BatterCard) -> tuple[str, str]:
     """(insufficient-sample tags, missing-with-reason tags) for one card."""
     insufficient = [
-        obs.component_id.value
+        obs.component_id.value.replace("_", " ")
         for obs in card.result.present_observations
         if obs.sample_status is SampleStatus.INSUFFICIENT
     ]
     missing = [
-        f"{obs.component_id.value} ({obs.missing_reason.value})"
+        f"{obs.component_id.value.replace('_', ' ')} "
+        f"({obs.missing_reason.value.replace('_', ' ').lower()})"
         for obs in card.result.missing_observations
     ]
     return ", ".join(insufficient), ", ".join(missing)
@@ -821,23 +750,16 @@ def _batter_detail_dialog(card: BatterCard) -> None:
 
 def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCard | None:
     st.caption(
-        "Every lineup batter on the slate, graded under the provisional v1 model "
-        "(D-071). Green cells are at or above the component's top bucket edge, "
-        "read live from the config. 'Low sample' lists components below their "
-        "floor — still scored, carrying the advisory. 'Missing' names absences "
-        "with their reasons. Estimated lineups are marked 'est.' until orders post."
+        "The shortlist (D-084): only batters graded A or S under the provisional "
+        "v1 model (D-071). Park factor is the batter-side home-run factor; "
+        "weather is the venue reading; the tags box carries advisories — low "
+        "samples, missing components, estimated lineups. Select a row to open "
+        "the batter's detail."
     )
-    edges = {
-        "EV": _top_bucket_lower(config, ComponentId.EXIT_VELOCITY),
-        "Barrel%": _top_bucket_lower(config, ComponentId.BARREL_PCT),
-        "Hard-Hit%": _top_bucket_lower(config, ComponentId.HARD_HIT_PCT),
-        "Sweet%": _top_bucket_lower(config, ComponentId.SWEET_SPOT_PCT),
-        "Bat Speed": _top_bucket_lower(config, ComponentId.BAT_SPEED),
-        "Ideal AA%": _top_bucket_lower(config, ComponentId.ATTACK_ANGLE_QUALITY),
-        "Pull-Air%": _top_bucket_lower(config, ComponentId.PULL_PCT_AIR_BALLS),
-        "Park": _top_bucket_lower(config, ComponentId.PARK),
-    }
-    texts, styles, cards = _slugger_frames(board, edges)
+    texts, styles, cards = _slugger_frames(board)
+    if texts.empty:
+        st.info("No batter grades A or S on today's slate.")
+        return None
     event = st.dataframe(
         styled_text_frame(texts, styles),
         hide_index=True,
@@ -848,7 +770,7 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
     )
     selected_rows = event.selection.rows
     if not selected_rows:
-        st.caption("Select a row to open the batter's recent-form detail.")
+        st.caption("Select a row to open the batter's detail.")
         return None
     return cards[selected_rows[0]]
 
