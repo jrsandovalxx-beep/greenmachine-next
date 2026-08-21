@@ -312,7 +312,7 @@ def test_slugger_frames_carry_value_reason_and_highlight() -> None:
     import streamlit_app
 
     board = _outage_board()
-    texts, styles = streamlit_app._slugger_frames(board, {"EV": Decimal("90")})
+    texts, styles, cards = streamlit_app._slugger_frames(board, {"EV": Decimal("90")})
     # Row 0 is the covered batter (EV 91.5 ≥ 90): the formatted value, green.
     assert texts.at[0, "EV"] == "91.5"
     assert styles.at[0, "EV"] == streamlit_app._HIGHLIGHT
@@ -320,3 +320,5 @@ def test_slugger_frames_carry_value_reason_and_highlight() -> None:
     # muted styling.
     assert texts.at[1, "EV"] == "not covered by source"
     assert styles.at[1, "EV"] == streamlit_app._REASON_CSS
+    # The third return is the card behind each row, in row order (GMF-007).
+    assert [card.full_name for card in cards] == list(texts["Batter"])

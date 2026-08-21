@@ -79,6 +79,7 @@ from greenmachine.grid import (
 from greenmachine.inputs import InputSnapshot, Window
 from greenmachine.inputs.contract import Handedness, ParkFactor, ParkVenue, VenueType
 from greenmachine.inputs.savant_park_factors import basis_statement, read_factors
+from greenmachine.live.form import FormSection, FormValue
 from greenmachine.live.mlb_api import FetchFailure, MlbStatsApi
 from greenmachine.live.pipeline import BatterCard, GameCard, SlateBoard, build_board
 from greenmachine.live.savant import BaseballSavant
@@ -573,6 +574,11 @@ _HIGHLIGHT = "background-color: #427010; color: #eaffcf"
 # Muted italic for a cell that carries a reason instead of a value.
 _REASON_CSS = "color: #7d8f84; font-style: italic"
 
+# Opaque amber for a value shown with its INSUFFICIENT advisory: present, but
+# below its sample floor (D-068). Opaque for the same canvas-compositing
+# reason as the highlight — an alpha background reads as a washed-out block.
+_INSUFFICIENT_CSS = "background-color: #7a5c14; color: #ffe9a8"
+
 # Display precision per live-board metric column. Every cell on the live board
 # is display text — the value formatted here, or the absence's reason in
 # words — because the data grid prints a null as the literal "None" and never
@@ -597,17 +603,20 @@ def _reason_text(component: ComponentId, reasons: dict[ComponentId, MissingReaso
 
 def _slugger_frames(
     board: SlateBoard, edges: dict[str, Decimal | None]
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """(texts, styles) for ``styled_text_frame`` — every cell is display text.
+) -> tuple[pd.DataFrame, pd.DataFrame, list[BatterCard]]:
+    """(texts, styles, cards) — every cell is display text, cards row-aligned.
 
     A metric cell says the formatted value, or the plain-language reason it is
     absent (D-023/D-025); highlighting is decided here against the edge, at
     build time, where a missing cell is simply never compared. The frame is
     uniformly textual on purpose: the data grid prints a numeric null as the
     literal "None" regardless of the styler, so the text IS the data (D-076).
+    The third return is the card behind each row, in row order, so a grid
+    selection resolves to a batter without a second ordering to drift (GMF-007).
     """
     text_rows: list[dict[str, str]] = []
     style_rows: list[dict[str, str]] = []
+    cards: list[BatterCard] = []
     for game in board.games:
         for batters, opposing in (
             (game.away_batters, game.home_pitcher),
@@ -683,7 +692,8 @@ def _slugger_frames(
                 texts["Lineup"] = "est." if card.lineup_is_estimate else ""
                 text_rows.append(texts)
                 style_rows.append(styles)
-    return pd.DataFrame(text_rows), pd.DataFrame(style_rows)
+                cards.append(card)
+    return pd.DataFrame(text_rows), pd.DataFrame(style_rows), cards
 
 
 def _component_flags(card: BatterCard) -> tuple[str, str]:
@@ -708,7 +718,108 @@ def _side_factor(game: GameCard, side: str | None) -> ParkFactor | None:
     return None
 
 
-def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> None:
+# --------------------------------------------------------------------------
+# GMF-007: the recent-form section (D-068) behind the batter detail dialog
+# --------------------------------------------------------------------------
+
+# Display precision per form metric: the rates and angles at one decimal,
+# matching the live board; xwOBA at the three-decimal convention.
+_FORM_PRECISION = {
+    "Barrel%": 1,
+    "EV": 1,
+    "AtkAng": 1,
+    "IdealAtkAng%": 1,
+    "Pull Air %": 1,
+    "Hard%": 1,
+    "xwOBA": 3,
+}
+
+# D-078's wording for a metric with no observations at either window reach.
+_FORM_ABSENT_TEXT = "not enough data available"
+
+
+def _form_section_frames(form: FormSection) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(texts, styles) for ``styled_text_frame`` — D-068's one-row section.
+
+    The columns are exactly D-068's seven, in its order. A metric present and
+    sufficient shows its value; one resolved on the L14 fallback names the
+    window ("· L14"); one below its sample floor keeps its value with its
+    exact sample and an INSUFFICIENT marker on amber — present, never absent
+    (D-023/D-025); one with no observations at either reach reads "not enough
+    data available" (D-078). Built on the §GMF-002 grid machinery, like every
+    live surface.
+    """
+    fields: tuple[tuple[str, FormValue], ...] = (
+        ("Barrel%", form.barrel_pct),
+        ("EV", form.exit_velocity),
+        ("AtkAng", form.attack_angle_degrees),
+        ("IdealAtkAng%", form.ideal_attack_angle_pct),
+        ("Pull Air %", form.pull_air_pct),
+        ("Hard%", form.hard_hit_pct),
+        ("xwOBA", form.xwoba),
+    )
+    texts: dict[str, str] = {}
+    styles: dict[str, str] = {}
+    for column, metric in fields:
+        if metric.value is None:
+            texts[column] = _FORM_ABSENT_TEXT
+            styles[column] = _REASON_CSS
+            continue
+        value_text = f"{float(metric.value):.{_FORM_PRECISION[column]}f}"
+        if not metric.sufficient:
+            texts[column] = f"{value_text} · n={metric.sample} · INSUFFICIENT"
+            styles[column] = _INSUFFICIENT_CSS
+        elif metric.window_days == 14:
+            texts[column] = f"{value_text} · L14"
+        else:
+            texts[column] = value_text
+    return pd.DataFrame([texts]), pd.DataFrame([styles])
+
+
+# Every selectable grid's key carries this epoch. Dismissing the detail dialog
+# bumps it, so the grids remount under fresh keys with empty selections —
+# otherwise the dismissed dialog reopens on the next rerun, because a data
+# grid's row selection persists in the widget's state.
+def _selection_epoch() -> int:
+    return int(st.session_state.get("selection_epoch", 0))
+
+
+def _bump_selection_epoch() -> None:
+    st.session_state["selection_epoch"] = _selection_epoch() + 1
+
+
+def _render_batter_detail(card: BatterCard) -> None:
+    """The batter detail body — GMF-007's portion is the D-068 form section.
+
+    Reachable from the Sluggers and Matchups row selections (D-078); the
+    redesign's further blocks (matchup window, per-pitch tables) join this
+    view under their own tickets.
+    """
+    st.markdown(f"**{card.full_name}** — {card.team}")
+    st.markdown("**Recent form [L7]**")
+    if card.form is None:
+        st.caption(
+            "Recent form is not covered by source: the form-event feed was not "
+            "retrieved for this board, so no window could be resolved."
+        )
+        return
+    texts, styles = _form_section_frames(card.form)
+    st.dataframe(styled_text_frame(texts, styles), hide_index=True)
+    st.caption(
+        "Each metric is the last 7 days [L7]; a metric whose L7 window is "
+        "empty falls back to its L14 window, marked '· L14'. A metric below "
+        "its sample floor keeps its value with its exact sample and an "
+        "INSUFFICIENT marker; one with no observations at either reach reads "
+        "'not enough data available' (D-068)."
+    )
+
+
+@st.dialog("Batter detail", width="large", on_dismiss=_bump_selection_epoch)
+def _batter_detail_dialog(card: BatterCard) -> None:
+    _render_batter_detail(card)
+
+
+def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCard | None:
     st.caption(
         "Every lineup batter on the slate, graded under the provisional v1 model "
         "(D-071). Green cells are at or above the component's top bucket edge, "
@@ -726,13 +837,20 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> None:
         "Pull-Air%": _top_bucket_lower(config, ComponentId.PULL_PCT_AIR_BALLS),
         "Park": _top_bucket_lower(config, ComponentId.PARK),
     }
-    texts, styles = _slugger_frames(board, edges)
-    st.dataframe(
+    texts, styles, cards = _slugger_frames(board, edges)
+    event = st.dataframe(
         styled_text_frame(texts, styles),
         hide_index=True,
         height=frame_height("Roomy", len(texts)),
-        key="live_sluggers",
+        on_select="rerun",
+        selection_mode="single-row",
+        key=f"live_sluggers_{_selection_epoch()}",
     )
+    selected_rows = event.selection.rows
+    if not selected_rows:
+        st.caption("Select a row to open the batter's recent-form detail.")
+        return None
+    return cards[selected_rows[0]]
 
 
 def _render_arms(board: SlateBoard) -> None:
@@ -790,12 +908,14 @@ def _render_arms(board: SlateBoard) -> None:
     )
 
 
-def _render_matchups(board: SlateBoard) -> None:
+def _render_matchups(board: SlateBoard) -> BatterCard | None:
     st.caption(
         "Per game: the venue, the expected starters, and both lineups with "
         "grades. Lineups marked estimated are the club's highest-usage bats "
-        "until the posted order arrives."
+        "until the posted order arrives. Select a batter row to open their "
+        "recent-form detail."
     )
+    selected: BatterCard | None = None
     for game in board.games:
         pitchers = " vs ".join(
             card.full_name if card else "TBD" for card in (game.away_pitcher, game.home_pitcher)
@@ -824,10 +944,17 @@ def _render_matchups(board: SlateBoard) -> None:
                         }
                     )
                     style_rows.append({} if evaluated else {"Total": _REASON_CSS})
-                st.dataframe(
+                event = st.dataframe(
                     styled_text_frame(pd.DataFrame(text_rows), pd.DataFrame(style_rows)),
                     hide_index=True,
+                    on_select="rerun",
+                    selection_mode="single-row",
+                    key=f"matchups_{game.game_pk}_{label.lower()}_{_selection_epoch()}",
                 )
+                rows = event.selection.rows
+                if rows and selected is None:
+                    selected = batters[rows[0]]
+    return selected
 
 
 def _render_conditions(board: SlateBoard) -> None:
@@ -887,7 +1014,7 @@ def _render_conditions(board: SlateBoard) -> None:
             st.markdown(f"- {line}")
 
 
-def _render_tab(label: str, render: Callable[[], None]) -> None:
+def _render_tab(label: str, render: Callable[[], BatterCard | None]) -> BatterCard | None:
     """One tab's failure degrades to a named warning, never a blanked page.
 
     An exception escaping a tab renderer ends the whole Streamlit script run —
@@ -895,15 +1022,17 @@ def _render_tab(label: str, render: Callable[[], None]) -> None:
     deployed app when a NaN cell reached the highlight mapper (pandas stores a
     missing numeric as NaN, and ``Decimal('NaN') >= edge`` raises
     ``decimal.InvalidOperation``). Each view now stands or falls on its own
-    (D-075).
+    (D-075). The renderer's return — the batter selected on its grid, if any —
+    propagates so the board can open the one detail dialog per run.
     """
     try:
-        render()
+        return render()
     except Exception as exc:
         st.warning(
             f"The {label} view could not be rendered "
             f"({type(exc).__name__}). The remaining views are unaffected."
         )
+        return None
 
 
 def render_live_board() -> None:
@@ -929,6 +1058,7 @@ def render_live_board() -> None:
         f"{BOARD_TTL_SECONDS // 60} minutes; form windows hourly."
     )
     sluggers, arms, matchups, conditions = st.tabs(["Sluggers", "Arms", "Matchups", "Conditions"])
+    selected: BatterCard | None = None
     for label, container, render in (
         ("Sluggers", sluggers, lambda: _render_sluggers(board, production_config())),
         ("Arms", arms, lambda: _render_arms(board)),
@@ -936,7 +1066,14 @@ def render_live_board() -> None:
         ("Conditions", conditions, lambda: _render_conditions(board)),
     ):
         with container:
-            _render_tab(label, render)
+            choice = _render_tab(label, render)
+        if selected is None:
+            selected = choice
+    # One dialog per script run, opened after the tabs: Streamlit allows a
+    # single dialog call per run, and the grids' epoch keys guarantee at most
+    # one selection survives a dismiss.
+    if selected is not None:
+        _batter_detail_dialog(selected)
     if LIVE_WEATHER_DIAGNOSTICS:
         joined = "; ".join(LIVE_WEATHER_DIAGNOSTICS)
         st.caption(
