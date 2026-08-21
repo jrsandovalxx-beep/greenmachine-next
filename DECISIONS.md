@@ -1824,3 +1824,18 @@ the chosen tab into place, in the spirit of the PO's reference video
 (20–22 s mark) — implemented as original CSS artwork only (Product Owner,
 2026-08-21).** D-003's constraints stand: no console maker's marks, no remote
 asset of any kind.
+
+## D-084 - Sluggers shortlist columns; the expand is park, form, exit-velo
+**The Sluggers grid becomes the D-077 shortlist in shape: columns Batter,
+Team, Versus, Grade, Park factor, Weather details, and a Tags box; the
+per-batter metric columns leave the grid (they live in the expand and on the
+Matchups surfaces), and only batters graded A or S are listed — the Product
+Owner's final ruling on the D-077 grade cut (2026-08-21).** The Sluggers
+batter-expanded view holds exactly three blocks: the 2D stadium panel with
+wind animation (D-082's panel, placed in the expand), the D-068 L7 form
+section, and the recent exit-velocity game-by-game sheet, with a pitch-mix
+threshold off/on toggle applying to the whole expanded view only. The
+per-pitch tables and the pitcher mirror remain the Matchups popup's content
+(D-079/D-080), not the Sluggers expand. The D-083 dial motion stands as
+ratified: items ride a rotary ring and the selection slides into place,
+original CSS artwork only.

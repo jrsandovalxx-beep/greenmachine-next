@@ -95,7 +95,7 @@ from greenmachine.parks import (
 from greenmachine.parks import (
     screen_frames as park_frames,
 )
-from greenmachine.shell import ORB_HTML, SHELL_CSS, TITLE_HTML
+from greenmachine.shell import BLOT_CSS, BLOT_HTML, DIAL_CSS, ORB_HTML, SHELL_CSS, TITLE_HTML
 from greenmachine.splits import ABSENCE_WORDS as SPLIT_ABSENCE_WORDS
 from greenmachine.splits import METRIC_COLUMNS as SPLIT_METRIC_COLUMNS
 from greenmachine.splits import (
@@ -513,7 +513,7 @@ def _temperature_lookup() -> object:
     return read
 
 
-@st.cache_data(ttl=BOARD_TTL_SECONDS, show_spinner="Building today's slate board...")
+@st.cache_data(ttl=BOARD_TTL_SECONDS, show_spinner=False)
 def live_board(slate_iso: str) -> SlateBoard | FetchFailure:
     """Assemble and grade the slate; cached so a rerun is not a refetch."""
     api, savant = live_mlb_adapters()
@@ -1048,7 +1048,10 @@ def render_live_board() -> None:
             "NWS adapter, then grades every batter under the v1 config (D-071)."
         )
         return
+    blot = st.empty()
+    blot.markdown(BLOT_HTML, unsafe_allow_html=True)
     board = live_board(date.today().isoformat())
+    blot.empty()
     if isinstance(board, FetchFailure):
         st.warning(f"Today's schedule could not be fetched: {board.reason}")
         return
@@ -1189,6 +1192,8 @@ def main() -> None:
     st.set_page_config(page_title="GreenMachine", layout="wide")
     bridge_secrets_into_environment()
     st.markdown(SHELL_CSS, unsafe_allow_html=True)
+    st.markdown(DIAL_CSS, unsafe_allow_html=True)
+    st.markdown(BLOT_CSS, unsafe_allow_html=True)
     orb, header = st.columns([1, 5])
     with orb:
         st.markdown(ORB_HTML, unsafe_allow_html=True)
