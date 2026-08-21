@@ -82,7 +82,14 @@ from greenmachine.inputs.savant_park_factors import basis_statement, read_factor
 from greenmachine.live.form import FormSection, FormValue
 from greenmachine.live.grading import QUALIFYING_USAGE_SHARE
 from greenmachine.live.mlb_api import FetchFailure, MlbStatsApi
-from greenmachine.live.pipeline import BatterCard, GameCard, SlateBoard, build_board
+from greenmachine.live.pipeline import (
+    BatterCard,
+    GameCard,
+    PitcherCard,
+    PitchLine,
+    SlateBoard,
+    build_board,
+)
 from greenmachine.live.savant import BaseballSavant
 from greenmachine.live.transport import UrllibTransport as MlbTransport
 from greenmachine.parks import ALL_COLUMNS as PARK_COLUMNS
@@ -837,6 +844,148 @@ def _exit_velo_frames(card: BatterCard, threshold_on: bool) -> tuple[pd.DataFram
     return pd.DataFrame(text_rows), pd.DataFrame(style_rows)
 
 
+_BELOW_MIX_CSS = "color: #8a9a8f"  # below the qualifying usage share: listed, dimmed
+
+
+def _avg_text(value: Decimal | None) -> str:
+    """A rate in the baseball three-digit shape (.250), a dash when absent."""
+    if value is None:
+        return "—"
+    text = f"{float(value):.3f}"
+    return text[1:] if text.startswith("0") else text
+
+
+def _pct_text(value: Decimal | None) -> str:
+    return "—" if value is None else f"{float(value):.1%}"
+
+
+def _pitch_line_frames(
+    lines: tuple[PitchLine, ...],
+    *,
+    whiff_column: str,
+    qualifying_only: bool,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """A per-pitch table (D-080): usage, results, and contact quality, all
+    computed pipeline-side over the scope the surrounding prose names
+    (§GMF-008 — the view formats, never derives).
+
+    Rows below the qualifying usage share are dimmed; with the mix filter on
+    they leave the grid. A rate absent at source reads as a dash, never a
+    zero, and carries the absence style.
+    """
+    text_rows: list[dict[str, str]] = []
+    style_rows: list[dict[str, str]] = []
+    for line in lines:
+        below = line.usage_share < QUALIFYING_USAGE_SHARE
+        if qualifying_only and below:
+            continue
+        texts = {
+            "Pitch": line.pitch_name or line.pitch_type,
+            "Usage%": f"{float(line.usage_share):.1%}",
+            "PA": str(line.plate_appearances),
+            "AVG": _avg_text(line.batting_average),
+            "SLG": _avg_text(line.slugging),
+            "ISO": _avg_text(line.iso),
+            "HR": str(line.home_runs),
+            "Barrel%": _pct_text(line.barrel_share),
+            "Hard-Hit%": _pct_text(line.hard_hit_share),
+            "xwOBA": _avg_text(line.expected_woba),
+            whiff_column: _pct_text(line.whiff_share),
+        }
+        styles: dict[str, str] = {}
+        if below:
+            styles = {column: _BELOW_MIX_CSS for column in texts}
+        else:
+            rates: tuple[tuple[str, Decimal | None], ...] = (
+                ("AVG", line.batting_average),
+                ("SLG", line.slugging),
+                ("ISO", line.iso),
+                ("Barrel%", line.barrel_share),
+                ("Hard-Hit%", line.hard_hit_share),
+                ("xwOBA", line.expected_woba),
+                (whiff_column, line.whiff_share),
+            )
+            styles = {column: _REASON_CSS for column, value in rates if value is None}
+        text_rows.append(texts)
+        style_rows.append(styles)
+    return pd.DataFrame(text_rows), pd.DataFrame(style_rows)
+
+
+def _pitcher_mirror_frames(
+    pitcher: PitcherCard, side: str | None, side_scoped: bool
+) -> tuple[pd.DataFrame, pd.DataFrame, str]:
+    """The pitcher mirror (D-080): his per-pitch table in the chosen usage
+    scope — D-066's toggle. All three usage states survive both positions
+    (§GMF-008): qualifying rows read plain, below-threshold rows dim, and a
+    pitch on his season board that never reached this scope is a named-absent
+    row, never a zero. The returned prose names the scope's denominator so a
+    suppression can always be traced to the scope that produced it.
+    """
+    if side_scoped and side == "L":
+        lines = pitcher.pitch_lines_vs_left
+        scope = "left-handed batters"
+    elif side_scoped and side == "R":
+        lines = pitcher.pitch_lines_vs_right
+        scope = "right-handed batters"
+    else:
+        lines = pitcher.pitch_lines_all
+        scope = ""
+    texts, styles = _pitch_line_frames(lines, whiff_column="Whiff%", qualifying_only=False)
+    seen = {line.pitch_type for line in lines}
+    absent_texts: list[dict[str, str]] = []
+    for row in pitcher.arsenal:
+        if row.pitch_type in seen:
+            continue
+        absent_texts.append(
+            {
+                "Pitch": row.pitch_name or row.pitch_type,
+                "Usage%": "not in this scope",
+                "PA": "0",
+                "AVG": "—",
+                "SLG": "—",
+                "ISO": "—",
+                "HR": "0",
+                "Barrel%": "—",
+                "Hard-Hit%": "—",
+                "xwOBA": "—",
+                "Whiff%": "—",
+            }
+        )
+    if absent_texts:
+        texts = pd.concat([texts, pd.DataFrame(absent_texts)], ignore_index=True)
+        styles = pd.concat(
+            [
+                styles,
+                pd.DataFrame([{column: _REASON_CSS for column in row} for row in absent_texts]),
+            ],
+            ignore_index=True,
+        )
+    total = sum(line.pitches for line in lines)
+    if not scope:
+        denominator = f"every pitch he threw in the recent form window ({total} pitches)"
+    elif total:
+        denominator = f"the {total} pitches he threw to {scope} in the recent form window"
+    else:
+        return (
+            texts,
+            styles,
+            f"{pitcher.full_name} threw no pitches to {scope} in the recent form "
+            "window — every pitch on his season board is named absent in this scope.",
+        )
+    prose = (
+        f"Usage is each pitch's share of {denominator}. Dimmed rows sit below the "
+        f"{float(QUALIFYING_USAGE_SHARE):.0%} qualifying share in this scope; pitches on "
+        "his season board that never reached this scope are named absent, never zeroed "
+        "(D-066/§GMF-008)."
+    )
+    return texts, styles, prose
+
+
+def _opposing_pitcher(game: GameCard, card: BatterCard) -> PitcherCard | None:
+    """The starter this batter grades against — the other club's probable."""
+    return game.away_pitcher if card.team == game.home_team else game.home_pitcher
+
+
 def _game_of(board: SlateBoard, card: BatterCard) -> GameCard | None:
     """The slate game the selected batter plays in — the park panel's venue."""
     for game in board.games:
@@ -850,9 +999,9 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
     D-068 form section, and the recent exit-velocity sheet behind the
     pitch-mix threshold toggle.
 
-    Reachable from the Sluggers and Matchups row selections (D-078); the
-    per-pitch tables and pitcher mirror remain the Matchups popup's content
-    (D-079/D-080).
+    Reachable from the Sluggers and Matchups row selections (D-078), it is
+    also the D-080 expanded matchup view: the batter's per-pitch table and
+    the pitcher's mirror with its usage-scope toggle (D-066, §GMF-008).
     """
     st.markdown(f"**{card.full_name}** — {card.team}")
 
@@ -900,6 +1049,66 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
             "INSUFFICIENT marker; one with no observations at either reach reads "
             "'not enough data available' (D-068)."
         )
+
+    st.markdown("**Matchup — per-pitch table**")
+    if not card.pitch_lines:
+        st.caption(
+            "No season arsenal coverage for this batter — the per-pitch "
+            "table cannot be drawn (source absence, named)."
+        )
+    else:
+        mix_on = st.toggle(
+            f"Qualifying pitch mix only (≥{float(QUALIFYING_USAGE_SHARE):.0%} usage)",
+            value=False,
+            key=f"matchup_mix_{card.player_id}",
+            help="Off: every pitch type on his season line. On: only the "
+            "qualifying mix — the pitch types at or above the usage share.",
+        )
+        pitch_texts, pitch_styles = _pitch_line_frames(
+            card.pitch_lines, whiff_column="Swing-Str%", qualifying_only=mix_on
+        )
+        if pitch_texts.empty:
+            st.caption("No pitch type meets the qualifying usage share on his season line.")
+        else:
+            st.dataframe(styled_text_frame(pitch_texts, pitch_styles), hide_index=True)
+        st.caption(
+            "Season arsenal figures — usage is each pitch's share of what he "
+            "has faced this year; HR and Barrel% refresh from the recent form "
+            "window. Rows dimmed sit below the qualifying usage share "
+            "(D-066/§GMF-008)."
+        )
+
+    st.markdown("**Pitcher mirror**")
+    pitcher = _opposing_pitcher(game, card) if game is not None else None
+    if pitcher is None:
+        st.caption(
+            "No opposing starter is named for this game — the mirror appears once probables post."
+        )
+    else:
+        side_known = card.batting_side in ("L", "R")
+        side_scoped = False
+        if side_known:
+            side_text = "left" if card.batting_side == "L" else "right"
+            side_scoped = st.toggle(
+                f"Usage vs {side_text}-handed batters only",
+                value=True,
+                key=f"mirror_scope_{card.player_id}",
+                help="On (default): usage divides by his pitches to batters of "
+                "this side. Off: by every pitch he threw in the recent window.",
+            )
+        else:
+            st.caption(
+                "His batting side is unresolved for this matchup — the mirror "
+                "shows the all-batters scope."
+            )
+        mirror_texts, mirror_styles, mirror_prose = _pitcher_mirror_frames(
+            pitcher, card.batting_side, side_scoped
+        )
+        if mirror_texts.empty:
+            st.caption(mirror_prose)
+        else:
+            st.dataframe(styled_text_frame(mirror_texts, mirror_styles), hide_index=True)
+            st.caption(mirror_prose)
 
     st.markdown("**Recent exit velocity — event log**")
     threshold_on = st.toggle(

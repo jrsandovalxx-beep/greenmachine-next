@@ -443,3 +443,167 @@ def test_exit_velo_threshold_filters_the_log_to_the_qualifying_mix() -> None:
     assert set(texts_off["Pitch"]) == {"FF", "SL", "CH"}
     # CH at 10% of the window is below the qualifying share: its rows leave.
     assert set(texts_on["Pitch"]) == {"FF", "SL"}
+
+
+def _pitch_line(**overrides: object) -> object:
+    from greenmachine.live.pipeline import PitchLine
+
+    base = {
+        "pitch_type": "FF",
+        "pitch_name": "4-Seam Fastball",
+        "pitches": 60,
+        "usage_share": Decimal("0.30"),
+        "plate_appearances": 15,
+        "batting_average": Decimal("0.280"),
+        "slugging": Decimal("0.520"),
+        "iso": Decimal("0.240"),
+        "home_runs": 2,
+        "barrel_share": Decimal("0.10"),
+        "hard_hit_share": Decimal("0.45"),
+        "expected_woba": Decimal("0.355"),
+        "whiff_share": Decimal("0.24"),
+    }
+    base.update(overrides)
+    return PitchLine(**base)  # type: ignore[arg-type]
+
+
+def test_per_pitch_table_formats_rates_and_dims_below_threshold() -> None:
+    """D-080/§GMF-008: the view only formats — rates arrive computed, a
+    missing rate is a styled dash, and a below-mix row is dimmed, not cut."""
+
+    import streamlit_app
+
+    lines = (
+        _pitch_line(),
+        _pitch_line(
+            pitch_type="CH",
+            pitch_name="Changeup",
+            usage_share=Decimal("0.08"),
+            barrel_share=None,
+            whiff_share=None,
+        ),
+    )
+    texts, styles = streamlit_app._pitch_line_frames(
+        lines, whiff_column="Swing-Str%", qualifying_only=False
+    )
+    assert list(texts.columns)[:3] == ["Pitch", "Usage%", "PA"]
+    assert "Swing-Str%" in texts.columns
+    assert texts.at[0, "Usage%"] == "30.0%"
+    assert texts.at[0, "AVG"] == ".280"
+    assert texts.at[0, "xwOBA"] == ".355"
+    # The changeup is below the qualifying share: dimmed, still listed.
+    assert texts.at[1, "Pitch"] == "Changeup"
+    assert styles.at[1, "Usage%"] == streamlit_app._BELOW_MIX_CSS
+    # Its absent rates are dashes, never zeros — even on a dimmed row.
+    assert texts.at[1, "Barrel%"] == "—"
+    assert texts.at[1, "Swing-Str%"] == "—"
+    texts_on, _ = streamlit_app._pitch_line_frames(
+        lines, whiff_column="Swing-Str%", qualifying_only=True
+    )
+    assert list(texts_on["Pitch"]) == ["4-Seam Fastball"]
+
+
+def test_pitcher_mirror_scopes_and_the_three_usage_states() -> None:
+    """D-066/§GMF-008: the toggle picks the side scope by default; qualifying,
+    below-threshold, and absent rows all survive in both positions; the prose
+    names the denominator behind every suppression."""
+    from types import SimpleNamespace
+
+    import streamlit_app
+
+    from greenmachine.live.savant import PitchArsenalRow
+
+    pitcher = SimpleNamespace(
+        full_name="Ace Righty",
+        pitch_lines_vs_left=(
+            _pitch_line(pitches=40, usage_share=Decimal("0.80")),
+            _pitch_line(
+                pitch_type="SL",
+                pitch_name="Slider",
+                pitches=10,
+                usage_share=Decimal("0.20"),
+            ),
+        ),
+        pitch_lines_vs_right=(),
+        pitch_lines_all=(
+            _pitch_line(pitches=90, usage_share=Decimal("0.45")),
+            _pitch_line(
+                pitch_type="CH",
+                pitch_name="Changeup",
+                pitches=110,
+                usage_share=Decimal("0.55"),
+            ),
+        ),
+        arsenal=(
+            PitchArsenalRow(
+                player_id=2,
+                team="LAD",
+                pitch_type="FF",
+                pitch_name="4-Seam Fastball",
+                pitches=400,
+                usage_share=Decimal("0.5"),
+                plate_appearances=100,
+                batting_average=Decimal("0.250"),
+                slugging=Decimal("0.400"),
+                woba=Decimal("0.300"),
+                whiff_share=Decimal("0.2"),
+                strikeout_share=Decimal("0.2"),
+                put_away_share=Decimal("0.15"),
+                expected_woba=Decimal("0.300"),
+                hard_hit_share=Decimal("0.4"),
+            ),
+            PitchArsenalRow(
+                player_id=2,
+                team="LAD",
+                pitch_type="CU",
+                pitch_name="Curveball",
+                pitches=200,
+                usage_share=Decimal("0.25"),
+                plate_appearances=50,
+                batting_average=Decimal("0.220"),
+                slugging=Decimal("0.350"),
+                woba=Decimal("0.280"),
+                whiff_share=Decimal("0.25"),
+                strikeout_share=Decimal("0.25"),
+                put_away_share=Decimal("0.2"),
+                expected_woba=Decimal("0.280"),
+                hard_hit_share=Decimal("0.35"),
+            ),
+        ),
+    )
+    texts, styles, prose = streamlit_app._pitcher_mirror_frames(pitcher, "L", True)
+    assert list(texts["Pitch"]) == ["4-Seam Fastball", "Slider", "Curveball"]
+    # Qualifying row plain, slider at exactly the share plain, curveball absent.
+    assert pd.isna(styles.at[1, "Usage%"])  # qualifying row carries no style
+    assert texts.at[2, "Usage%"] == "not in this scope"
+    assert texts.at[2, "PA"] == "0"
+    assert styles.at[2, "Usage%"] == streamlit_app._REASON_CSS
+    assert "left-handed batters" in prose
+    assert "50 pitches" in prose
+    assert "named absent" in prose
+    # The other position: all pitches, its own denominator, and now the
+    # slider is the absent one while the changeup qualifies.
+    texts_all, _, prose_all = streamlit_app._pitcher_mirror_frames(pitcher, "L", False)
+    assert list(texts_all["Pitch"]) == ["4-Seam Fastball", "Changeup", "Curveball"]
+    assert texts_all.at[1, "Usage%"] == "55.0%"
+    assert "every pitch he threw" in prose_all
+    assert "200 pitches" in prose_all
+
+
+def test_pitcher_mirror_names_an_empty_side_scope() -> None:
+    """§GMF-008: a scope with no pitches at all says so — the suppression is
+    the scope's, and the prose owns it."""
+    from types import SimpleNamespace
+
+    import streamlit_app
+
+    pitcher = SimpleNamespace(
+        full_name="Ace Righty",
+        pitch_lines_vs_left=(),
+        pitch_lines_vs_right=(),
+        pitch_lines_all=(_pitch_line(),),
+        arsenal=(),
+    )
+    texts, _, prose = streamlit_app._pitcher_mirror_frames(pitcher, "L", True)
+    assert texts.empty
+    assert "no pitches to left-handed batters" in prose
