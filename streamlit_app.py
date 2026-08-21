@@ -750,53 +750,89 @@ def _bump_selection_epoch() -> None:
     st.session_state["selection_epoch"] = _selection_epoch() + 1
 
 
-def _exit_velo_frames(card: BatterCard, threshold_on: bool) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """The recent exit-velocity sheet, game by game (D-084).
+_BB_TYPE_CODES = {
+    "ground_ball": "GB",
+    "fly_ball": "FB",
+    "line_drive": "LD",
+    "popup": "PU",
+}
 
-    The pitch mix is shown whole with the threshold off; with it on, only
-    pitch types at or above the qualifying usage share (D-070's 15%) of that
-    game's pitches are listed. The toggle is a view choice over the same
-    rows — nothing is refetched or recomputed.
+_EVENT_LABELS = {
+    "field_out": "Out",
+    "force_out": "Out",
+    "single": "Single",
+    "double": "Double",
+    "triple": "Triple",
+    "home_run": "HR",
+    "strikeout": "Strikeout",
+    "walk": "Walk",
+    "hit_by_pitch": "HBP",
+    "sac_fly": "Sac Fly",
+    "sac_bunt": "Sac Bunt",
+    "field_error": "Error",
+    "grounded_into_double_play": "Double Play",
+    "double_play": "Double Play",
+    "fielders_choice": "Fielder's Choice",
+    "fielders_choice_out": "Fielder's Choice",
+    "intent_walk": "Int. Walk",
+    "strikeout_double_play": "Strikeout",
+}
+
+# Exit-velocity heat, hottest at the top — opaque blends on the dark cell so
+# the grid's white compositing never washes them out (the D-076 rule).
+_EV_HEAT = (
+    (100.0, "background-color: #a41616; color: #ffe9e9"),
+    (95.0, "background-color: #7a1f12; color: #ffd9c8"),
+    (88.0, "background-color: #5c2a10; color: #ffe0b8"),
+)
+_HR_CSS = "background-color: #2e7d32; color: #eaffcf; font-weight: 700"
+
+
+def _exit_velo_frames(card: BatterCard, threshold_on: bool) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The recent exit-velocity log: one row per plate-appearance-ending
+    pitch (D-086), newest game first.
+
+    The threshold is a pitch-type filter over these rows — off lists every
+    pitch type; on keeps only the qualifying pitch mix (types at or above the
+    qualifying usage share across the window, D-070's 15%). The mix counts
+    every pitch seen; the log lists the pitches that ended a plate
+    appearance, so its exit-velocity cells are always about contact (or its
+    absence: a strikeout carries no reading, shown as a dash).
     """
+    total = len(card.recent_events)
+    counts: dict[str, int] = {}
+    for event in card.recent_events:
+        if event.pitch_type:
+            counts[event.pitch_type] = counts.get(event.pitch_type, 0) + 1
+    qualifying = {
+        name
+        for name, count in counts.items()
+        if total and count / total >= float(QUALIFYING_USAGE_SHARE)
+    }
     text_rows: list[dict[str, str]] = []
     style_rows: list[dict[str, str]] = []
-    for game in card.recent_games:
-        if threshold_on:
-            floor = game.pitches_seen * float(QUALIFYING_USAGE_SHARE)
-            mix = [(name, count) for name, count in game.pitch_mix if count >= floor]
-        else:
-            mix = list(game.pitch_mix)
-        mix_text = (
-            " · ".join(f"{name} {count / game.pitches_seen:.0%}" for name, count in mix)
-            if mix
-            else ("none at the threshold" if threshold_on else "no pitches recorded")
-        )
+    for event in card.recent_events:
+        if not event.event:
+            continue  # mid-plate-appearance pitch: nothing to log
+        if threshold_on and event.pitch_type not in qualifying:
+            continue
+        texts = {
+            "Date": event.game_date,
+            "Pitch": event.pitch_type or "—",
+            "Event": _EVENT_LABELS.get(event.event, event.event.replace("_", " ")),
+            "EV": f"{float(event.launch_speed):.1f}" if event.launch_speed is not None else "—",
+            "LA": f"{float(event.launch_angle):.0f}" if event.launch_angle is not None else "—",
+            "Type": _BB_TYPE_CODES.get(event.bb_type, "—"),
+        }
         styles: dict[str, str] = {}
-        if game.balls_in_play == 0:
-            avg_text = max_text = "no balls in play"
-            styles["Avg EV"] = _REASON_CSS
-            styles["Max EV"] = _REASON_CSS
-        else:
-            avg_text = (
-                f"{float(game.avg_exit_velocity):.1f}"
-                if game.avg_exit_velocity is not None
-                else "no balls in play"
-            )
-            max_text = (
-                f"{float(game.max_exit_velocity):.1f}"
-                if game.max_exit_velocity is not None
-                else "no balls in play"
-            )
-        text_rows.append(
-            {
-                "Date": game.game_date,
-                "Pitches": str(game.pitches_seen),
-                "BIP": str(game.balls_in_play),
-                "Avg EV": avg_text,
-                "Max EV": max_text,
-                "Pitch mix": mix_text,
-            }
-        )
+        if event.event == "home_run":
+            styles["Event"] = _HR_CSS
+        if event.launch_speed is not None:
+            for floor, css in _EV_HEAT:
+                if float(event.launch_speed) >= floor:
+                    styles["EV"] = css
+                    break
+        text_rows.append(texts)
         style_rows.append(styles)
     return pd.DataFrame(text_rows), pd.DataFrame(style_rows)
 
@@ -865,18 +901,22 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
             "'not enough data available' (D-068)."
         )
 
-    st.markdown("**Recent exit velocity — game by game**")
+    st.markdown("**Recent exit velocity — event log**")
     threshold_on = st.toggle(
         f"Pitch-mix threshold (≥{float(QUALIFYING_USAGE_SHARE):.0%} usage)",
         value=False,
         key=f"pitch_mix_threshold_{card.player_id}",
-        help="On: only pitch types at or above the qualifying usage share of "
-        "that game's pitches are listed. Off: the whole mix.",
+        help="Off: every pitch type. On: only the qualifying pitch mix — the "
+        "pitch types at or above the usage share across this window — so the "
+        "log's rows are filtered to those pitches.",
     )
-    if not card.recent_games:
+    if not card.recent_events:
         st.caption("No pitch-by-pitch events for this batter in the form window.")
         return
     sheet, sheet_styles = _exit_velo_frames(card, threshold_on)
+    if sheet.empty:
+        st.caption("No logged plate appearances on these pitches in the window.")
+        return
     st.dataframe(styled_text_frame(sheet, sheet_styles), hide_index=True)
 
 

@@ -1851,3 +1851,20 @@ is still missing wind direction"). Wind in baseball terms — blowing out to
 centre, in from right — stays parked until the park-orientation table lands
 (the D-082 memo); the panel claims only the compass reading, never a
 field-relative direction it cannot yet derive.
+
+## D-086 - The exit-velocity sheet is an event log; the toggle filters pitches
+**The batter detail's exit-velocity sheet logs one row per
+plate-appearance-ending pitch — Date, Pitch, Event, EV, LA, Type — newest
+game first, over the seven most recent games in the form window; a home run's
+event cell is lit, hot contact carries the red heat scale, and a no-contact
+outcome (strikeout, walk) shows dashes rather than a fabricated reading
+(Product Owner, 2026-08-21, correcting the D-084 game-by-game aggregate with
+the EXV-log and game-by-game references).** The pitch-mix threshold toggle
+filters the log's rows by pitch type: off shows every pitch type, on keeps
+only the qualifying pitch mix — types at or above D-070's 15% usage share
+computed across every pitch seen in the window — so toggling changes the
+exit-velocity events shown, not a summary column. The 2D field panel was
+re-drawn fuller (wall band, warning track, mound, base paths) with the wind
+as streaking lanes clipped to the field; per-park wall heights and field
+shapes remain undrawn for want of a ratified source, as with the
+park-orientation table (D-082, D-085).

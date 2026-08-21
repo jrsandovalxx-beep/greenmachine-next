@@ -410,26 +410,29 @@ def test_a_roofed_game_carries_no_wind() -> None:
     assert game.wind_direction is None
 
 
-def test_recent_games_group_events_by_date_newest_first() -> None:
-    from greenmachine.live.pipeline import _exit_velo_games
-
-    base = _recent_events()[0]
+def test_recent_events_cover_the_newest_games_with_every_pitch() -> None:
+    """D-086: the log's source rows are the newest seven games' events, all
+    pitches kept (the mix needs full counts), newest game first."""
     import dataclasses
 
-    older = [
-        dataclasses.replace(base, game_date="2026-08-17", pitch_type="SL"),
-        dataclasses.replace(base, game_date="2026-08-17", pitch_type="SL", launch_speed=None),
-        dataclasses.replace(base, game_date="2026-08-19", pitch_type="FF"),
-        dataclasses.replace(base, game_date="2026-08-19", pitch_type="FF"),
-    ]
-    rows = _exit_velo_games(tuple(older))
-    assert [row.game_date for row in rows] == ["2026-08-19", "2026-08-17"]
-    newest, older_row = rows
-    assert newest.pitches_seen == 2 and newest.balls_in_play == 2
-    assert newest.avg_exit_velocity == Decimal("96")
-    assert newest.max_exit_velocity == Decimal("96")
-    assert newest.pitch_mix == (("FF", 2),)
-    # The older game: one whiff (no launch speed) halves the in-play count,
-    # and the mix still counts every pitch.
-    assert older_row.pitches_seen == 2 and older_row.balls_in_play == 1
-    assert older_row.pitch_mix == (("SL", 2),)
+    from greenmachine.live.pipeline import _recent_window_events
+
+    base = _recent_events()[0]
+    events = tuple(
+        dataclasses.replace(base, game_date=day)
+        for day in ("2026-08-17", "2026-08-19", "2026-08-19")
+    )
+    rows = _recent_window_events(events)
+    assert [event.game_date for event in rows] == ["2026-08-19", "2026-08-19", "2026-08-17"]
+
+
+def test_recent_events_cap_drops_older_games() -> None:
+    import dataclasses
+
+    from greenmachine.live.pipeline import _recent_window_events
+
+    base = _recent_events()[0]
+    days = [f"2026-08-{day:02d}" for day in range(5, 20)]  # fifteen game days
+    events = tuple(dataclasses.replace(base, game_date=day) for day in days)
+    rows = _recent_window_events(events)
+    assert {event.game_date for event in rows} == set(days[-7:])

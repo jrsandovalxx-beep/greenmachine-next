@@ -268,10 +268,10 @@ DIAL_CSS = (
 FIELD_CSS = (
     "<style>\n"
     "@keyframes gm-wind-drift {\n"
-    "  0% { transform: translateX(-46px); opacity: 0; }\n"
-    "  18% { opacity: 0.9; }\n"
-    "  82% { opacity: 0.9; }\n"
-    "  100% { transform: translateX(46px); opacity: 0; }\n"
+    "  0% { transform: translateX(-70px); opacity: 0; }\n"
+    "  15% { opacity: 0.85; }\n"
+    "  80% { opacity: 0.85; }\n"
+    "  100% { transform: translateX(70px); opacity: 0; }\n"
     "}\n"
     ".gm-field { display: flex; gap: 18px; align-items: center; }\n"
     ".gm-field svg { display: block; }\n"
@@ -279,10 +279,16 @@ FIELD_CSS = (
     ".gm-field-info .gm-field-venue { color: #eaffb0; font-weight: 700;"
     " letter-spacing: 0.04em; }\n"
     ".gm-field-info .gm-field-muted { color: #7d8f84; font-style: italic; }\n"
-    ".gm-wind-flow circle { fill: #eaffb0; }\n"
-    ".gm-wind-flow { animation: gm-wind-drift 1.8s linear infinite; }\n"
-    ".gm-wind-flow.gm-wind-flow-2 { animation-delay: 0.6s; }\n"
-    ".gm-wind-flow.gm-wind-flow-3 { animation-delay: 1.2s; }\n"
+    ".gm-wind-streak { stroke: #eaffb0; stroke-width: 2; stroke-linecap: round;"
+    " fill: none; }\n"
+    ".gm-wind-streak-faint { stroke-width: 1.2; opacity: 0.55; }\n"
+    ".gm-wind-flow { animation: gm-wind-drift 2.1s linear infinite; }\n"
+    ".gm-wind-flow.gm-wind-lane-2 { animation-delay: 0.42s; }\n"
+    ".gm-wind-flow.gm-wind-lane-3 { animation-delay: 0.84s; }\n"
+    ".gm-wind-flow.gm-wind-lane-4 { animation-delay: 1.26s; }\n"
+    ".gm-wind-flow.gm-wind-lane-5 { animation-delay: 1.68s; }\n"
+    ".gm-wind-arrow { stroke: #f4ffd6; stroke-width: 2.4; }\n"
+    ".gm-wind-arrowhead { fill: #f4ffd6; }\n"
     "</style>"
 )
 """Style for the batter detail's drawn field panel (D-084)."""
@@ -308,25 +314,34 @@ _COMPASS_DEGREES = {
 
 
 def _wind_flow(angle_degrees: float) -> str:
-    """The animated wind: drifting particles and an arrowhead, rotated to
-    point the way the wind blows. Compass readings name where it blows
-    FROM, so the arrow bears the opposite; SVG rotation runs clockwise
-    from east while compass bearings run clockwise from north, a further
-    quarter-turn between the two conventions."""
+    """The animated wind: streaking lanes drifting across the field plus an
+    arrowhead, rotated to point the way the wind blows. Compass readings name
+    where it blows FROM, so the flow bears the opposite; SVG rotation runs
+    clockwise from east while compass bearings run clockwise from north, a
+    further quarter-turn between the two conventions."""
     toward = (angle_degrees + 180.0 - 90.0) % 360.0
-    particles = "".join(
-        f'<g class="gm-wind-flow gm-wind-flow-{lane}" transform="translate(100 {y})">'
-        f'<circle cx="0" cy="0" r="2.1" />'
-        f'<circle cx="-16" cy="0" r="1.4" opacity="0.6" />'
-        f"</g>"
-        for lane, y in (("", 92), ("2", 100), ("3", 108))
+    # The lane offset lives on an outer group: a CSS animation transform
+    # replaces the element's own transform attribute, so animating the same
+    # element that carries the lane's placement would drop the lane at the
+    # origin instead of across the field.
+    lanes = "".join(
+        f'<g transform="translate(120 {y})">'
+        f'<g class="gm-wind-flow gm-wind-lane-{lane}">'
+        '<line x1="-34" y1="0" x2="14" y2="0" class="gm-wind-streak" />'
+        '<line x1="22" y1="0" x2="34" y2="0" class="gm-wind-streak gm-wind-streak-faint" />'
+        "</g></g>"
+        for lane, y in enumerate((52, 76, 100, 124, 148), start=1)
     )
     return (
-        f'<g transform="rotate({toward:.1f} 100 100)">'
-        f"{particles}"
-        '<path d="M 138 96 L 150 100 L 138 104 Z" fill="#eaffb0" />'
-        '<line x1="100" y1="100" x2="140" y2="100" stroke="#eaffb0"'
-        ' stroke-width="1.6" opacity="0.85" />'
+        '<clipPath id="gm-field-clip">'
+        '<path d="M 24 62 Q 120 -8 216 62 L 120 172 Z" />'
+        "</clipPath>"
+        f'<g transform="rotate({toward:.1f} 120 100)">'
+        f'<g clip-path="url(#gm-field-clip)">{lanes}</g>'
+        '<g transform="translate(120 100)">'
+        '<line x1="-6" y1="0" x2="32" y2="0" class="gm-wind-arrow" />'
+        '<path d="M 30 -6 L 44 0 L 30 6 Z" class="gm-wind-arrowhead" />'
+        "</g>"
         "</g>"
     )
 
@@ -339,35 +354,49 @@ def field_wind_html(
     wind_direction: str | None,
     wind_absent_text: str | None = None,
 ) -> str:
-    """The drawn field panel: a diamond, the live wind as a rotated,
-    animated flow when a reading exists, or the plain reason it does not
-    (roofed venue, or the source absent). Original artwork, inline."""
+    """The drawn field panel: the diamond with its warning track, wall,
+    infield and mound; the live wind as a rotated, animated flow when a
+    reading exists, or the plain reason it does not (roofed venue, or the
+    source absent). Original artwork, inline. Per-park wall heights are not
+    drawn: no ratified source for them exists yet."""
     field = (
-        '<svg width="200" height="200" viewBox="0 0 200 200"'
+        '<svg width="240" height="200" viewBox="0 0 240 200"'
         ' xmlns="http://www.w3.org/2000/svg" role="img">'
-        '<rect x="0" y="0" width="200" height="200" rx="10"'
+        '<rect x="0" y="0" width="240" height="200" rx="10"'
         ' fill="rgba(9,38,8,0.55)" />'
-        # outfield wall: arc from the left-field corner over centre to right
-        '<path d="M 28 62 Q 100 -6 172 62 L 172 66 Q 100 2 28 66 Z"'
-        ' fill="rgba(155,240,11,0.28)" />'
+        # the wall: a solid band along the outfield arc, its top edge lit
+        '<path d="M 24 58 Q 120 -12 216 58 L 216 64 Q 120 -4 24 64 Z"'
+        ' fill="rgba(46,91,35,0.9)" />'
+        '<path d="M 24 58 Q 120 -12 216 58" fill="none"'
+        ' stroke="rgba(234,255,176,0.5)" stroke-width="1.4" />'
+        # warning track between the wall and the grass
+        '<path d="M 24 64 Q 120 -4 216 64 L 208 74 Q 120 10 32 74 Z"'
+        ' fill="rgba(122,92,20,0.4)" />'
         # grass
-        '<path d="M 28 66 Q 100 2 172 66 L 100 168 Z" fill="rgba(31,109,26,0.5)" />'
-        # infield dirt
-        '<path d="M 100 96 L 146 140 L 100 176 L 54 140 Z" fill="rgba(122,92,20,0.5)" />'
-        # foul lines
-        '<line x1="100" y1="168" x2="28" y2="64" stroke="rgba(234,255,176,0.5)"'
+        '<path d="M 32 74 Q 120 10 208 74 L 120 172 Z" fill="rgba(31,109,26,0.55)" />'
+        # infield dirt and the home-plate circle
+        '<circle cx="120" cy="168" r="13" fill="rgba(122,92,20,0.5)" />'
+        '<path d="M 120 100 L 160 136 L 120 168 L 80 136 Z"'
+        ' fill="rgba(122,92,20,0.55)" />'
+        '<path d="M 96 128 L 120 108 L 144 128 L 120 148 Z"'
+        ' fill="rgba(31,109,26,0.6)" />'
+        # mound
+        '<circle cx="120" cy="139" r="5.5" fill="rgba(122,92,20,0.85)" />'
+        '<rect x="116.5" y="137" width="7" height="2" fill="#eaffb0" opacity="0.8" />'
+        # foul lines to the corners
+        '<line x1="120" y1="170" x2="25" y2="62" stroke="rgba(234,255,176,0.55)"'
         ' stroke-width="1" />'
-        '<line x1="100" y1="168" x2="172" y2="64" stroke="rgba(234,255,176,0.5)"'
+        '<line x1="120" y1="170" x2="215" y2="62" stroke="rgba(234,255,176,0.55)"'
         ' stroke-width="1" />'
-        # bases
-        '<rect x="97" y="93" width="6" height="6" fill="#eaffb0"'
-        ' transform="rotate(45 100 96)" />'
-        '<rect x="143" y="137" width="6" height="6" fill="#eaffb0"'
-        ' transform="rotate(45 146 140)" />'
-        '<rect x="51" y="137" width="6" height="6" fill="#eaffb0"'
-        ' transform="rotate(45 54 140)" />'
-        '<rect x="97" y="165" width="6" height="6" fill="#f4ffd6"'
-        ' transform="rotate(45 100 168)" />'
+        # bases and home plate
+        '<rect x="117" y="97" width="6" height="6" fill="#eaffb0"'
+        ' transform="rotate(45 120 100)" />'
+        '<rect x="157" y="133" width="6" height="6" fill="#eaffb0"'
+        ' transform="rotate(45 160 136)" />'
+        '<rect x="77" y="133" width="6" height="6" fill="#eaffb0"'
+        ' transform="rotate(45 80 136)" />'
+        '<rect x="117" y="165" width="6" height="6" fill="#f4ffd6"'
+        ' transform="rotate(45 120 168)" />'
     )
     if wind_speed_mph is not None and wind_direction is not None:
         degrees = _COMPASS_DEGREES.get(wind_direction.upper())
@@ -377,15 +406,15 @@ def field_wind_html(
     else:
         wind_line = wind_absent_text or "wind reading unavailable"
         field += (
-            '<text x="100" y="104" text-anchor="middle" font-size="9"'
+            '<text x="120" y="104" text-anchor="middle" font-size="9"'
             ' fill="#7d8f84">no live wind</text>'
         )
     field += "</svg>"
     info = "".join(f"<div>{line}</div>" for line in detail_lines)
     return (
-        '<div class="gm-park">'
+        '<div class="gm-field">'
         f"{field}"
-        f'<div class="gm-park-info"><div class="gm-park-venue">{venue_name}</div>'
+        f'<div class="gm-field-info"><div class="gm-field-venue">{venue_name}</div>'
         f"{info}<div>{wind_line}</div></div>"
         "</div>"
     )

@@ -371,48 +371,75 @@ def test_shortlist_empty_when_nothing_grades_a_or_s() -> None:
     assert cards == []
 
 
-def test_exit_velo_sheet_threshold_toggle_filters_the_mix() -> None:
-    """D-084: the toggle is a view choice over the same rows — off lists the
-    whole pitch mix, on keeps only pitch types at or above the qualifying
-    usage share of that game's pitches."""
+def _pitch_event(**overrides: object) -> object:
+    from greenmachine.live.savant import PitchEvent
+
+    base = {
+        "game_pk": 777000,
+        "game_date": "2026-08-19",
+        "batter_id": 1,
+        "pitcher_id": 2,
+        "batter_side": "L",
+        "pitcher_throws": "R",
+        "pitch_type": "FF",
+        "event": "field_out",
+        "description": "",
+        "bb_type": "fly_ball",
+        "launch_speed": Decimal("91.2"),
+        "launch_angle": Decimal("24"),
+        "launch_speed_angle": 3,
+        "hc_x": None,
+        "hc_y": None,
+        "estimated_woba": None,
+        "woba_value": None,
+        "woba_denom": None,
+    }
+    base.update(overrides)
+    return PitchEvent(**base)  # type: ignore[arg-type]
+
+
+def test_exit_velo_log_lists_pa_ending_pitches_with_heat_and_hr_marks() -> None:
+    """D-086: one row per plate-appearance-ending pitch — mid-PA pitches are
+    not logged; a home run's event cell is lit; a hot EV carries the heat."""
     from types import SimpleNamespace
 
     import streamlit_app
 
-    from greenmachine.live.pipeline import ExitVeloGameRow
-
-    row = ExitVeloGameRow(
-        game_date="2026-08-19",
-        pitches_seen=10,
-        balls_in_play=3,
-        avg_exit_velocity=Decimal("91.2"),
-        max_exit_velocity=Decimal("104.1"),
-        pitch_mix=(("FF", 6), ("SL", 3), ("CH", 1)),
+    events = (
+        _pitch_event(),  # FF fly out at 91.2
+        _pitch_event(event="home_run", launch_speed=Decimal("104.1"), pitch_type="SL"),
+        _pitch_event(event="", launch_speed=None, launch_angle=None),  # taken pitch
+        _pitch_event(event="strikeout", launch_speed=None, launch_angle=None, pitch_type="CH"),
     )
-    card = SimpleNamespace(recent_games=(row,))
+    card = SimpleNamespace(recent_events=events)
+    texts, styles = streamlit_app._exit_velo_frames(card, False)
+    assert len(texts) == 3  # the taken pitch is not a row
+    assert list(texts.columns) == ["Date", "Pitch", "Event", "EV", "LA", "Type"]
+    assert texts.at[0, "EV"] == "91.2"
+    assert texts.at[0, "Type"] == "FB"
+    assert texts.at[1, "Event"] == "HR"
+    assert styles.at[1, "Event"] == streamlit_app._HR_CSS
+    assert styles.at[1, "EV"] == streamlit_app._EV_HEAT[0][1]  # 104.1 is the hottest band
+    # A strikeout is a logged outcome with no contact reading.
+    assert texts.at[2, "Event"] == "Strikeout"
+    assert texts.at[2, "EV"] == "—"
+
+
+def test_exit_velo_threshold_filters_the_log_to_the_qualifying_mix() -> None:
+    """D-086: the toggle filters the log's rows by pitch type — off keeps
+    every pitch; on keeps only the window's qualifying pitch mix (≥15%)."""
+    from types import SimpleNamespace
+
+    import streamlit_app
+
+    events = tuple(
+        [_pitch_event(pitch_type="FF") for _ in range(7)]
+        + [_pitch_event(pitch_type="SL") for _ in range(2)]
+        + [_pitch_event(pitch_type="CH")]
+    )
+    card = SimpleNamespace(recent_events=events)
     texts_off, _ = streamlit_app._exit_velo_frames(card, False)
     texts_on, _ = streamlit_app._exit_velo_frames(card, True)
-    assert texts_off.at[0, "Pitch mix"] == "FF 60% · SL 30% · CH 10%"
-    assert texts_on.at[0, "Pitch mix"] == "FF 60% · SL 30%"  # CH at 10% is below 15%
-    assert texts_off.at[0, "Avg EV"] == "91.2"
-    assert texts_off.at[0, "Max EV"] == "104.1"
-
-
-def test_exit_velo_sheet_names_a_game_without_balls_in_play() -> None:
-    from types import SimpleNamespace
-
-    import streamlit_app
-
-    from greenmachine.live.pipeline import ExitVeloGameRow
-
-    row = ExitVeloGameRow(
-        game_date="2026-08-18",
-        pitches_seen=8,
-        balls_in_play=0,
-        avg_exit_velocity=None,
-        max_exit_velocity=None,
-        pitch_mix=(("FF", 8),),
-    )
-    texts, styles = streamlit_app._exit_velo_frames(SimpleNamespace(recent_games=(row,)), False)
-    assert texts.at[0, "Avg EV"] == "no balls in play"
-    assert styles.at[0, "Avg EV"] == streamlit_app._REASON_CSS
+    assert set(texts_off["Pitch"]) == {"FF", "SL", "CH"}
+    # CH at 10% of the window is below the qualifying share: its rows leave.
+    assert set(texts_on["Pitch"]) == {"FF", "SL"}
