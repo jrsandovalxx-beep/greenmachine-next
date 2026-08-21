@@ -436,3 +436,146 @@ def test_recent_events_cap_drops_older_games() -> None:
     events = tuple(dataclasses.replace(base, game_date=day) for day in days)
     rows = _recent_window_events(events)
     assert {event.game_date for event in rows} == set(days[-7:])
+
+
+def _window_event(**overrides: object) -> PitchEvent:
+    import dataclasses
+
+    base = _recent_events()[0]
+    return dataclasses.replace(base, **overrides)  # type: ignore[arg-type]
+
+
+def test_pitch_lines_derive_every_rate_from_the_given_scope() -> None:
+    """§GMF-008: usage divides by the scope's pitches, AVG/SLG by its at-bats,
+    barrel and hard-hit by its batted balls, whiff by its swings, xwOBA by its
+    plate appearances — never by a denominator from outside the scope."""
+    from greenmachine.live.pipeline import _pitch_lines
+
+    events = (
+        _window_event(
+            pitch_type="FF",
+            event="home_run",
+            launch_speed=Decimal("110"),
+            launch_speed_angle=6,
+            estimated_woba=Decimal("2.0"),
+            description="hit_into_play",
+        ),
+        _window_event(
+            pitch_type="FF",
+            event="field_out",
+            launch_speed=Decimal("90"),
+            launch_speed_angle=3,
+            estimated_woba=Decimal("0.2"),
+            description="hit_into_play",
+        ),
+        _window_event(
+            pitch_type="FF",
+            event="strikeout",
+            launch_speed=None,
+            launch_angle=None,
+            launch_speed_angle=None,
+            bb_type="",
+            estimated_woba=None,
+            description="swinging_strike",
+        ),
+        _window_event(
+            pitch_type="SL",
+            event="",
+            launch_speed=None,
+            launch_angle=None,
+            launch_speed_angle=None,
+            bb_type="",
+            estimated_woba=None,
+            description="called_strike",
+        ),
+    )
+    lines = {line.pitch_type: line for line in _pitch_lines(events)}
+    fastball = lines["FF"]
+    assert fastball.pitch_name == "4-Seam Fastball"
+    assert fastball.pitches == 3
+    assert fastball.usage_share == Decimal(3) / Decimal(4)
+    assert fastball.plate_appearances == 3
+    assert fastball.batting_average == Decimal(1) / Decimal(3)
+    assert fastball.slugging == Decimal(4) / Decimal(3)
+    assert fastball.iso is not None
+    assert fastball.iso.quantize(Decimal("0.001")) == Decimal("1.000")
+    assert fastball.home_runs == 1
+    assert fastball.barrel_share == Decimal(1) / Decimal(2)
+    assert fastball.hard_hit_share == Decimal(1) / Decimal(2)
+    assert fastball.expected_woba == Decimal("2.2") / Decimal(2)
+    assert fastball.whiff_share == Decimal(1) / Decimal(3)
+    slider = lines["SL"]
+    assert slider.usage_share == Decimal(1) / Decimal(4)
+    # A pitch thrown but never put in play carries named absences, not zeros.
+    assert slider.plate_appearances == 0
+    assert slider.batting_average is None
+    assert slider.barrel_share is None
+    assert slider.whiff_share is None
+
+
+def test_pitch_lines_sort_by_usage_and_empty_scope_is_absent() -> None:
+    from greenmachine.live.pipeline import _pitch_lines
+
+    assert _pitch_lines(()) == ()
+    events = tuple(
+        _window_event(pitch_type="FF" if index else "CH", event="") for index in range(3)
+    )
+    assert [line.pitch_type for line in _pitch_lines(events)] == ["FF", "CH"]
+
+
+def test_pitcher_card_carries_all_and_side_scopes_from_one_window() -> None:
+    """D-066/§GMF-008: the same window feeds both mirror positions; only the
+    scope filter differs, so the toggle can never mix denominators."""
+    events = (
+        _window_event(pitch_type="FF", batter_side="L"),
+        _window_event(pitch_type="FF", batter_side="L"),
+        _window_event(pitch_type="FF", batter_side="L"),
+        _window_event(pitch_type="SL", batter_side="R", batter_id=909),
+    )
+    board = _build(_FakeApi(), _FakeSavant(), events=events)
+    assert not isinstance(board, FetchFailure)
+    pitcher = board.games[0].home_pitcher
+    assert pitcher is not None
+    all_lines = {line.pitch_type: line for line in pitcher.pitch_lines_all}
+    assert all_lines["FF"].usage_share == Decimal(3) / Decimal(4)
+    assert all_lines["SL"].usage_share == Decimal(1) / Decimal(4)
+    left = pitcher.pitch_lines_vs_left
+    assert [line.pitch_type for line in left] == ["FF"]
+    assert left[0].pitches == 3
+    assert left[0].usage_share == Decimal(1)
+    right = pitcher.pitch_lines_vs_right
+    assert [line.pitch_type for line in right] == ["SL"]
+    assert right[0].pitches == 1
+
+
+def test_batter_pitch_lines_merge_season_arsenal_with_window_damage() -> None:
+    """§GMF-008/D-080: rate columns are the arsenal's season figures; home-run
+    and barrel counts refresh from the recent window, with an empty window
+    sample surfacing as None rather than zero."""
+    from greenmachine.live.pipeline import _batter_pitch_lines
+
+    rows = (
+        _arsenal_row(BATTER_ID, "FF", "0.5", "0.400", "0.15", "0.15"),
+        _arsenal_row(BATTER_ID, "SL", "0.3", "0.350", "0.15", "0.15"),
+    )
+    window = (
+        _window_event(
+            pitch_type="FF",
+            event="home_run",
+            launch_speed=Decimal("108"),
+            launch_speed_angle=6,
+        ),
+        _window_event(pitch_type="FF", event="", launch_speed=None),
+    )
+    lines = {line.pitch_type: line for line in _batter_pitch_lines(rows, window)}
+    fastball = lines["FF"]
+    assert fastball.usage_share == Decimal("0.5")
+    assert fastball.batting_average == Decimal("0.250")
+    assert fastball.iso == Decimal("0.400") - Decimal("0.250")
+    assert fastball.home_runs == 1
+    assert fastball.barrel_share == Decimal(1)
+    assert fastball.hard_hit_share == Decimal("0.4")
+    slider = lines["SL"]
+    assert slider.home_runs == 0
+    assert slider.barrel_share is None
+    assert _batter_pitch_lines((), window) == ()
