@@ -148,21 +148,6 @@ _VENUE_BY_TEAM: dict[str, ParkVenue] = {venue.team: venue for venue in PARK_VENU
 
 
 @dataclass(frozen=True)
-class ExitVeloGameRow:
-    """One recent game's exit-velocity line for the batter detail sheet
-    (D-084): how many pitches seen, how many put in play, the average and
-    best exit velocity, and the full pitch mix seen. The mix is unfiltered —
-    the sheet's threshold toggle is a view choice, not a data choice."""
-
-    game_date: str
-    pitches_seen: int
-    balls_in_play: int
-    avg_exit_velocity: Decimal | None
-    max_exit_velocity: Decimal | None
-    pitch_mix: tuple[tuple[str, int], ...]
-
-
-@dataclass(frozen=True)
 class BatterCard:
     """One graded batter: display rows plus the full domain result."""
 
@@ -176,7 +161,7 @@ class BatterCard:
     season: SeasonHittingLine | None
     statcast: StatcastBatterRow | None
     form: FormSection | None
-    recent_games: tuple[ExitVeloGameRow, ...]
+    recent_events: tuple[PitchEvent, ...]
     result: EvaluatedGradeResult | NotEvaluableGradeResult
 
 
@@ -223,35 +208,20 @@ class SlateBoard:
     diagnostics: tuple[str, ...]
 
 
-def _exit_velo_games(events: tuple[PitchEvent, ...], cap: int = 7) -> tuple[ExitVeloGameRow, ...]:
-    """The batter's recent games as exit-velocity lines, newest first.
-
-    Source is the same form-window event feed the L7/L14 form section reads,
-    so the sheet never fetches anything the board didn't already retrieve.
+def _recent_window_events(
+    events: tuple[PitchEvent, ...], cap_games: int = 7
+) -> tuple[PitchEvent, ...]:
+    """The batter's events from the most recent games in the form window,
+    newest game first — the exit-velocity log's rows (D-086). Every pitch of
+    a kept game is carried: the pitch mix needs the full counts, and the
+    sheet's threshold toggle is a view filter over these rows, not a data
+    cut. Source is the same form-window feed the form section reads.
     """
-    by_game: dict[str, list[PitchEvent]] = {}
-    for event in events:
-        by_game.setdefault(event.game_date, []).append(event)
-    rows: list[ExitVeloGameRow] = []
-    for game_date in sorted(by_game, reverse=True)[:cap]:
-        game_events = by_game[game_date]
-        speeds = [e.launch_speed for e in game_events if e.launch_speed is not None]
-        mix: dict[str, int] = {}
-        for event in game_events:
-            if event.pitch_type:
-                mix[event.pitch_type] = mix.get(event.pitch_type, 0) + 1
-        average = sum(speeds, Decimal(0)) / len(speeds) if speeds else None
-        rows.append(
-            ExitVeloGameRow(
-                game_date=game_date,
-                pitches_seen=len(game_events),
-                balls_in_play=len(speeds),
-                avg_exit_velocity=average,
-                max_exit_velocity=max(speeds) if speeds else None,
-                pitch_mix=tuple(sorted(mix.items(), key=lambda item: (-item[1], item[0]))),
-            )
-        )
-    return tuple(rows)
+    dates = sorted({event.game_date for event in events}, reverse=True)[:cap_games]
+    keep = set(dates)
+    kept = [event for event in events if event.game_date in keep]
+    order = {day: index for index, day in enumerate(dates)}
+    return tuple(sorted(kept, key=lambda event: order[event.game_date]))
 
 
 def _chunked(ids: tuple[int, ...], size: int) -> list[tuple[int, ...]]:
@@ -658,7 +628,7 @@ def build_board(
                         season=line,
                         statcast=statcast.get(player_id),
                         form=form,
-                        recent_games=_exit_velo_games(player_events),
+                        recent_events=_recent_window_events(player_events),
                         result=result,
                     )
                 )
