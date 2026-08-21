@@ -734,10 +734,10 @@ def test_mix_falls_back_to_last_season_when_no_current_record() -> None:
     assert line.at_bats == 1
 
 
-def test_pull_air_350_counts_only_long_pulled_air_balls() -> None:
-    """D-079: the +350 ft pull-air share counts pulled air balls at or past
-    the distance floor over all batted balls — short pulls, opposite-field
-    air balls, and non-air contact never enter the numerator."""
+def test_distance_350_counts_long_balls_in_any_direction() -> None:
+    """D-090: the +350 ft share counts batted balls at or past the distance
+    floor in any direction — short balls and non-batted pitches never enter
+    the numerator."""
     pull_x, oppo_x = Decimal("100"), Decimal("150")  # L batter: spray < 0 pulls
     base = {
         "pitch_type": "FF",
@@ -763,7 +763,40 @@ def test_pull_air_350_counts_only_long_pulled_air_balls() -> None:
     line = board.games[0].away_batters[0].mix_line
     assert line is not None
     assert line.batted_balls == 4
-    assert line.pull_air_350_share == Decimal("0.25")
+    # 380 pull, 390 oppo, and the 400-ft grounder all count: distance only.
+    assert line.distance_350_share == Decimal("0.75")
+
+
+def test_pull_air_share_mirrors_the_form_section() -> None:
+    """D-090: Pull Air % is its own metric — pulled air balls over
+    measurable air balls, matching the form section's definition; distance
+    plays no part."""
+    pull_x, oppo_x = Decimal("100"), Decimal("150")  # L batter: spray < 0 pulls
+    base = {
+        "pitch_type": "FF",
+        "launch_speed": Decimal("100"),
+        "hc_y": Decimal("150"),
+        "event": "fly_out",
+    }
+    events = (
+        _window_event(bb_type="fly_ball", hc_x=pull_x, hit_distance=Decimal("290"), **base),
+        _window_event(bb_type="fly_ball", hc_x=pull_x, hit_distance=Decimal("310"), **base),
+        _window_event(bb_type="fly_ball", hc_x=oppo_x, hit_distance=Decimal("390"), **base),
+        _window_event(
+            **{**base, "bb_type": "fly_ball", "hc_x": None, "hc_y": None},
+            hit_distance=Decimal("380"),
+        ),  # unmeasurable: out of both pull-air counts
+        _window_event(bb_type="ground_ball", hc_x=pull_x, hit_distance=Decimal("60"), **base),
+    )
+    board = _build(_FakeApi(), _FakeSavant(), events=events)
+    assert not isinstance(board, FetchFailure)
+    line = board.games[0].away_batters[0].mix_line
+    assert line is not None
+    # 2 pulls over 3 measurable air balls (the hc-less fly ball is out of
+    # both counts); distance plays no part — the pulls are 290 and 310 ft.
+    assert line.pull_air_share is not None
+    assert line.pull_air_share.quantize(Decimal("0.001")) == Decimal("0.667")
+    assert line.distance_350_share == Decimal("0.4")  # 2 of 5 batted balls
 
 
 def test_season_grid_line_composes_the_season_sources() -> None:
@@ -809,4 +842,5 @@ def test_season_grid_line_composes_the_season_sources() -> None:
     assert line.hard_hit_share == Decimal("0.5")
     assert line.expected_woba == Decimal("0.35")
     assert line.whiff_share == Decimal("0.20")
-    assert line.pull_air_350_share is None
+    assert line.distance_350_share is None
+    assert line.pull_air_share is None

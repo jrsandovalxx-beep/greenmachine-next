@@ -1923,3 +1923,24 @@ source publishes a 350-foot pull-air read, so that cell states the absence
 per D-081. The grid's recent-form cell shows the form section's exit
 velocity with its window named. The grade is always the L30 computation in
 either view (D-079).
+
+## D-090 - +350 ft % and Pull Air % are two separate matchup-grid metrics
+**The matchup grid carries "+350 ft %" and "Pull Air %" as separate columns:
+the first is the share of batted balls hit that distance or farther, any
+direction; the second is the pulled-air share, mirroring the form section's
+definition — pulled air balls over measurable air balls (Product Owner,
+2026-08-21: "+350 ft and Pulled air % are two separate metrics. the first
+is balls hit that distance").** This splits D-079's single "+350 ft Pull
+Air %" column into its two parts; neither has a season source, so the
+season view names the absence in both cells (D-081). The same directive
+reaffirmed that recent form is an L7 surface — the grid's form cell keeps
+showing the form section's exit velocity with its window named, and the
+L14 fallback stays labelled per D-068.
+
+## D-091 - The recent exit-velocity log carries the hit's projected distance
+**The batter detail popup's recent exit-velocity event log gains a Dist
+column: the source's projected hit distance for each plate-appearance-ending
+pitch, in feet, with a dash where the pitch carries no reading (Product
+Owner, 2026-08-21: "lets include distance of the ball hit in the event log
+for recent exit velo").** Display-only: the log's rows, ordering, and
+threshold filter are unchanged.
