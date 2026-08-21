@@ -24,7 +24,9 @@ from streamlit.testing.v1 import AppTest
 
 from greenmachine.splits import METRIC_COLUMNS, PITCH_TYPE_COLUMN
 
-_APP_PATH = Path(__file__).resolve().parents[2] / "streamlit_app.py"
+# The demo surface runs standalone: the main screen is the shell plus
+# the live board (D-076), so the page test drives its own runner.
+_APP_PATH = Path(__file__).resolve().parent / "runners" / "run_metrics.py"
 _TIMEOUT = 15
 
 
@@ -122,10 +124,10 @@ def test_the_window_is_named_on_the_screen() -> None:
 
 
 def test_no_window_control_exists_on_the_metrics_screen() -> None:
-    """The window is fixed for this screen. The only window selector on the
-    page is the batter grid's, which belongs to that screen."""
+    """The window is fixed for this screen. On the standalone surface (D-076)
+    no window selector exists at all — the batter grid's stays with the grid."""
     at = _run_app()
-    assert [w.label for w in at.selectbox if w.label == "Window"] == ["Window"]
+    assert [w.label for w in at.selectbox if w.label == "Window"] == []
     assert at.selectbox(key="splits_batter").label == "Batter"
 
 

@@ -186,7 +186,7 @@ def forecast_value_text(park: ParkInputs) -> str:
         return ABSENCE_WORDS[park.forecast.absence]
     return (
         f"{forecast.temperature_f} °F · wind {forecast.wind_speed_mph} mph "
-        f"{forecast.wind_direction} · {forecast.short_forecast}"
+        f"from the {forecast.wind_direction} · {forecast.short_forecast}"
     )
 
 

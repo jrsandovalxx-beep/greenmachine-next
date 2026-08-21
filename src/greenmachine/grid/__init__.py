@@ -33,6 +33,7 @@ from greenmachine.grid.view import (
     state_frame,
     style_frame,
     style_frame_for,
+    styled_text_frame,
     text_frame,
     visible_columns,
 )
@@ -60,6 +61,7 @@ __all__ = [
     "state_frame",
     "style_frame",
     "style_frame_for",
+    "styled_text_frame",
     "text_frame",
     "visible_columns",
 ]

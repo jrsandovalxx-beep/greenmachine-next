@@ -48,7 +48,7 @@ import os
 import subprocess
 from collections.abc import Callable
 from datetime import UTC, date, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from importlib import metadata
 from pathlib import Path
 
@@ -58,7 +58,7 @@ import streamlit as st
 from greenmachine.common.clock import SystemClock
 from greenmachine.config.loader import load_config
 from greenmachine.config.schema import GreenMachineConfig
-from greenmachine.domain.enums import ComponentId, SampleStatus, WindowProfile
+from greenmachine.domain.enums import ComponentId, MissingReason, SampleStatus, WindowProfile
 from greenmachine.domain.grade_result import EvaluatedGradeResult
 from greenmachine.fixtures import FixtureWeatherAdapter, grid_demo_snapshot, parks_demo_snapshot
 from greenmachine.grid import (
@@ -73,10 +73,11 @@ from greenmachine.grid import (
     row_batter_ids,
     selected_batter_id,
     style_frame,
+    styled_text_frame,
     visible_columns,
 )
 from greenmachine.inputs import InputSnapshot, Window
-from greenmachine.inputs.contract import Handedness, ParkFactor, ParkVenue
+from greenmachine.inputs.contract import Handedness, ParkFactor, ParkVenue, VenueType
 from greenmachine.inputs.savant_park_factors import basis_statement, read_factors
 from greenmachine.live.mlb_api import FetchFailure, MlbStatsApi
 from greenmachine.live.pipeline import BatterCard, GameCard, SlateBoard, build_board
@@ -93,6 +94,7 @@ from greenmachine.parks import (
 from greenmachine.parks import (
     screen_frames as park_frames,
 )
+from greenmachine.shell import ORB_HTML, SHELL_CSS, TITLE_HTML
 from greenmachine.splits import ABSENCE_WORDS as SPLIT_ABSENCE_WORDS
 from greenmachine.splits import METRIC_COLUMNS as SPLIT_METRIC_COLUMNS
 from greenmachine.splits import (
@@ -262,13 +264,6 @@ def retrieval_statement(snapshot: InputSnapshot) -> str:
     if first == last:
         return f"Forecasts retrieved {first.isoformat()}."
     return f"Forecasts retrieved between {first.isoformat()} and {last.isoformat()}."
-
-
-def render_shell_fields() -> None:
-    """The GMR-004 deployment-verification fields, unchanged in substance."""
-    st.markdown(f"**Environment:** {resolve_environment()}")
-    st.markdown(f"**Version:** {resolve_version()}")
-    st.markdown(f"**Commit:** {resolve_commit()}")
 
 
 def render_grid() -> None:
@@ -557,34 +552,138 @@ def _top_bucket_lower(config: GreenMachineConfig, component_id: ComponentId) -> 
     return None
 
 
-_HIGHLIGHT = "background-color: #d4edda"
+_MISSING_TEXT: dict[MissingReason, str] = {
+    MissingReason.NO_EVENTS_IN_WINDOW: "no events in window",
+    MissingReason.SOURCE_UNAVAILABLE: "source unavailable",
+    MissingReason.TRACKING_UNAVAILABLE: "tracking unavailable",
+    MissingReason.PLAYER_NOT_COVERED: "not covered by source",
+    MissingReason.INVALID_SOURCE_VALUE: "invalid source value",
+    MissingReason.EXPECTED_PITCHER_UNKNOWN: "starter unknown",
+}
+
+_NOT_EVALUABLE = "not evaluable"
 
 
-def _highlight_columns(
-    frame: pd.DataFrame, edges: dict[str, Decimal | None]
-) -> pd.io.formats.style.Styler:
-    """Green-mark cells at or above their component's top bucket edge."""
-    styler = frame.style
-    for column, edge in edges.items():
-        if edge is None or column not in frame.columns:
-            continue
+# Console-palette highlight: a lime wash pre-blended onto the dark cell green.
+# It must be OPAQUE — the data grid composites an alpha background over white,
+# not over the themed cell, which read as a washed-out pale block; the old
+# light-theme #d4edda washed the cell text out entirely.
+_HIGHLIGHT = "background-color: #427010; color: #eaffcf"
 
-        def mark(value: object, *, _edge: Decimal = edge) -> str:
-            if value is None:
-                return ""
-            try:
-                numeric = Decimal(str(value))
-            except InvalidOperation:  # non-numeric cell content is never highlighted
-                return ""
-            if numeric.is_nan():
-                # pandas stores a missing numeric as NaN; a NaN comparison would
-                # raise InvalidOperation rather than answer, and a cell with no
-                # value is never highlighted.
-                return ""
-            return _HIGHLIGHT if numeric >= _edge else ""
+# Muted italic for a cell that carries a reason instead of a value.
+_REASON_CSS = "color: #7d8f84; font-style: italic"
 
-        styler = styler.map(mark, subset=[column])
-    return styler
+# Display precision per live-board metric column. Every cell on the live board
+# is display text — the value formatted here, or the absence's reason in
+# words — because the data grid prints a null as the literal "None" and never
+# consults the styler for it (D-076).
+_LIVE_METRIC_PRECISION = {
+    "Total": 1,
+    "EV": 1,
+    "Barrel%": 1,
+    "Hard-Hit%": 1,
+    "Sweet%": 1,
+    "Bat Speed": 1,
+    "Ideal AA%": 1,
+    "Pull-Air%": 1,
+    "Park": 0,
+}
+
+
+def _reason_text(component: ComponentId, reasons: dict[ComponentId, MissingReason]) -> str:
+    reason = reasons.get(component)
+    return _MISSING_TEXT[reason] if reason is not None else "not observed"
+
+
+def _slugger_frames(
+    board: SlateBoard, edges: dict[str, Decimal | None]
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(texts, styles) for ``styled_text_frame`` — every cell is display text.
+
+    A metric cell says the formatted value, or the plain-language reason it is
+    absent (D-023/D-025); highlighting is decided here against the edge, at
+    build time, where a missing cell is simply never compared. The frame is
+    uniformly textual on purpose: the data grid prints a numeric null as the
+    literal "None" regardless of the styler, so the text IS the data (D-076).
+    """
+    text_rows: list[dict[str, str]] = []
+    style_rows: list[dict[str, str]] = []
+    for game in board.games:
+        for batters, opposing in (
+            (game.away_batters, game.home_pitcher),
+            (game.home_batters, game.away_pitcher),
+        ):
+            for card in batters:
+                factor = _side_factor(game, card.batting_side)
+                insufficient, missing = _component_flags(card)
+                reasons = {
+                    obs.component_id: obs.missing_reason for obs in card.result.missing_observations
+                }
+                statcast = card.statcast
+                form = card.form
+                evaluated = isinstance(card.result, EvaluatedGradeResult)
+                values: dict[str, tuple[Decimal | None, ComponentId | None]] = {
+                    "Total": (card.result.total_score if evaluated else None, None),
+                    "EV": (
+                        statcast.exit_velocity_avg if statcast else None,
+                        ComponentId.EXIT_VELOCITY,
+                    ),
+                    "Barrel%": (
+                        statcast.barrel_share * 100 if statcast else None,
+                        ComponentId.BARREL_PCT,
+                    ),
+                    "Hard-Hit%": (
+                        statcast.hard_hit_share * 100 if statcast else None,
+                        ComponentId.HARD_HIT_PCT,
+                    ),
+                    "Sweet%": (
+                        form.sweet_spot_pct.value if form else None,
+                        ComponentId.SWEET_SPOT_PCT,
+                    ),
+                    "Bat Speed": (
+                        form.bat_speed_mph.value if form else None,
+                        ComponentId.BAT_SPEED,
+                    ),
+                    "Ideal AA%": (
+                        form.ideal_attack_angle_pct.value if form else None,
+                        ComponentId.ATTACK_ANGLE_QUALITY,
+                    ),
+                    "Pull-Air%": (
+                        form.pull_air_pct.value if form else None,
+                        ComponentId.PULL_PCT_AIR_BALLS,
+                    ),
+                    "Park": (
+                        factor.factor if factor is not None else None,
+                        ComponentId.PARK,
+                    ),
+                }
+                texts: dict[str, str] = {
+                    "Batter": card.full_name,
+                    "Team": card.team,
+                    "Vs": opposing.full_name if opposing else "TBD",
+                    "Grade": card.result.grade.value if evaluated else _NOT_EVALUABLE,
+                }
+                styles: dict[str, str] = {}
+                for column, (value, component) in values.items():
+                    if value is None:
+                        texts[column] = (
+                            _NOT_EVALUABLE
+                            if component is None
+                            else _reason_text(component, reasons)
+                        )
+                        styles[column] = _REASON_CSS
+                        continue
+                    numeric = float(value)
+                    texts[column] = f"{numeric:.{_LIVE_METRIC_PRECISION[column]}f}"
+                    edge = edges.get(column)
+                    if edge is not None and numeric >= float(edge):
+                        styles[column] = _HIGHLIGHT
+                texts["Low sample"] = insufficient
+                texts["Missing"] = missing
+                texts["Lineup"] = "est." if card.lineup_is_estimate else ""
+                text_rows.append(texts)
+                style_rows.append(styles)
+    return pd.DataFrame(text_rows), pd.DataFrame(style_rows)
 
 
 def _component_flags(card: BatterCard) -> tuple[str, str]:
@@ -609,67 +708,6 @@ def _side_factor(game: GameCard, side: str | None) -> ParkFactor | None:
     return None
 
 
-def _slugger_rows(board: SlateBoard) -> pd.DataFrame:
-    rows: list[dict[str, object]] = []
-    for game in board.games:
-        for batters, opposing in (
-            (game.away_batters, game.home_pitcher),
-            (game.home_batters, game.away_pitcher),
-        ):
-            for card in batters:
-                factor = _side_factor(game, card.batting_side)
-                insufficient, missing = _component_flags(card)
-                rows.append(
-                    {
-                        "Batter": card.full_name,
-                        "Team": card.team,
-                        "Vs": opposing.full_name if opposing else "TBD",
-                        "Grade": (
-                            card.result.grade.value
-                            if isinstance(card.result, EvaluatedGradeResult)
-                            else "N/E"
-                        ),
-                        "Total": (
-                            float(card.result.total_score)
-                            if isinstance(card.result, EvaluatedGradeResult)
-                            else None
-                        ),
-                        "EV": (float(card.statcast.exit_velocity_avg) if card.statcast else None),
-                        "Barrel%": (
-                            float(card.statcast.barrel_share * 100) if card.statcast else None
-                        ),
-                        "Hard-Hit%": (
-                            float(card.statcast.hard_hit_share * 100) if card.statcast else None
-                        ),
-                        "Sweet%": (
-                            float(card.form.sweet_spot_pct.value)
-                            if card.form and card.form.sweet_spot_pct.value is not None
-                            else None
-                        ),
-                        "Bat Speed": (
-                            float(card.form.bat_speed_mph.value)
-                            if card.form and card.form.bat_speed_mph.value is not None
-                            else None
-                        ),
-                        "Ideal AA%": (
-                            float(card.form.ideal_attack_angle_pct.value)
-                            if card.form and card.form.ideal_attack_angle_pct.value is not None
-                            else None
-                        ),
-                        "Pull-Air%": (
-                            float(card.form.pull_air_pct.value)
-                            if card.form and card.form.pull_air_pct.value is not None
-                            else None
-                        ),
-                        "Park": float(factor.factor) if factor is not None else None,
-                        "Low sample": insufficient,
-                        "Missing": missing,
-                        "Lineup": "est." if card.lineup_is_estimate else "",
-                    }
-                )
-    return pd.DataFrame(rows)
-
-
 def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> None:
     st.caption(
         "Every lineup batter on the slate, graded under the provisional v1 model "
@@ -678,7 +716,6 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> None:
         "floor — still scored, carrying the advisory. 'Missing' names absences "
         "with their reasons. Estimated lineups are marked 'est.' until orders post."
     )
-    frame = _slugger_rows(board)
     edges = {
         "EV": _top_bucket_lower(config, ComponentId.EXIT_VELOCITY),
         "Barrel%": _top_bucket_lower(config, ComponentId.BARREL_PCT),
@@ -689,10 +726,11 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> None:
         "Pull-Air%": _top_bucket_lower(config, ComponentId.PULL_PCT_AIR_BALLS),
         "Park": _top_bucket_lower(config, ComponentId.PARK),
     }
+    texts, styles = _slugger_frames(board, edges)
     st.dataframe(
-        _highlight_columns(frame, edges),
+        styled_text_frame(texts, styles),
         hide_index=True,
-        height=frame_height("Roomy", len(frame)),
+        height=frame_height("Roomy", len(texts)),
         key="live_sluggers",
     )
 
@@ -702,34 +740,54 @@ def _render_arms(board: SlateBoard) -> None:
         "Expected starters with their season line and the arsenal they actually "
         "throw (pitch types at or above the qualifying usage share)."
     )
-    rows: list[dict[str, object]] = []
+    text_rows: list[dict[str, str]] = []
+    style_rows: list[dict[str, str]] = []
     for game in board.games:
         for card, team in (
             (game.home_pitcher, game.home_team),
             (game.away_pitcher, game.away_team),
         ):
             if card is None:
-                rows.append({"Game": f"{game.away_team} at {game.home_team}", "Pitcher": "TBD"})
+                text_rows.append(
+                    {
+                        "Game": f"{game.away_team} at {game.home_team}",
+                        "Pitcher": "TBD",
+                        "Team": team,
+                        "Throws": "starter not announced",
+                        "ERA": "starter not announced",
+                        "WHIP": "starter not announced",
+                        "GS": "starter not announced",
+                        "K": "starter not announced",
+                        "Arsenal": "starter not announced",
+                    }
+                )
+                style_rows.append({"GS": _REASON_CSS, "K": _REASON_CSS})
                 continue
             arsenal = " · ".join(
                 f"{row.pitch_type} {float(row.usage_share * 100):.0f}%"
                 f" (whiff {float(row.whiff_share * 100):.0f}%)"
                 for row in card.arsenal
             )
-            rows.append(
+            observed = card.season is not None
+            text_rows.append(
                 {
                     "Game": f"{game.away_team} at {game.home_team}",
                     "Pitcher": card.full_name,
                     "Team": team,
-                    "Throws": card.throws,
-                    "ERA": card.season.era if card.season else "",
-                    "WHIP": card.season.whip if card.season else "",
-                    "GS": card.season.games_started if card.season else None,
-                    "K": card.season.strikeouts if card.season else None,
+                    "Throws": card.throws or "not yet observed",
+                    "ERA": card.season.era if card.season else "not yet observed",
+                    "WHIP": card.season.whip if card.season else "not yet observed",
+                    "GS": str(card.season.games_started) if observed else "not yet observed",
+                    "K": str(card.season.strikeouts) if observed else "not yet observed",
                     "Arsenal": arsenal,
                 }
             )
-    st.dataframe(pd.DataFrame(rows), hide_index=True, key="live_arms")
+            style_rows.append({} if observed else {"GS": _REASON_CSS, "K": _REASON_CSS})
+    st.dataframe(
+        styled_text_frame(pd.DataFrame(text_rows), pd.DataFrame(style_rows)),
+        hide_index=True,
+        key="live_arms",
+    )
 
 
 def _render_matchups(board: SlateBoard) -> None:
@@ -745,26 +803,31 @@ def _render_matchups(board: SlateBoard) -> None:
         with st.expander(f"{game.away_team} at {game.home_team} — {game.venue_name} · {pitchers}"):
             for label, batters in (("Away", game.away_batters), ("Home", game.home_batters)):
                 st.markdown(f"**{label} lineup**")
-                rows = [
-                    {
-                        "#": card.order_position,
-                        "Batter": card.full_name,
-                        "Bats": card.bats,
-                        "Grade": (
-                            card.result.grade.value
-                            if isinstance(card.result, EvaluatedGradeResult)
-                            else "N/E"
-                        ),
-                        "Total": (
-                            float(card.result.total_score)
-                            if isinstance(card.result, EvaluatedGradeResult)
-                            else None
-                        ),
-                        "Lineup": "est." if card.lineup_is_estimate else "",
-                    }
-                    for card in batters
-                ]
-                st.dataframe(pd.DataFrame(rows), hide_index=True)
+                text_rows: list[dict[str, str]] = []
+                style_rows: list[dict[str, str]] = []
+                for card in batters:
+                    evaluated = isinstance(card.result, EvaluatedGradeResult)
+                    text_rows.append(
+                        {
+                            "#": (
+                                str(card.order_position) if card.order_position is not None else "—"
+                            ),
+                            "Batter": card.full_name,
+                            "Bats": card.bats,
+                            "Grade": (card.result.grade.value if evaluated else _NOT_EVALUABLE),
+                            "Total": (
+                                f"{float(card.result.total_score):.1f}"
+                                if evaluated
+                                else _NOT_EVALUABLE
+                            ),
+                            "Lineup": "est." if card.lineup_is_estimate else "",
+                        }
+                    )
+                    style_rows.append({} if evaluated else {"Total": _REASON_CSS})
+                st.dataframe(
+                    styled_text_frame(pd.DataFrame(text_rows), pd.DataFrame(style_rows)),
+                    hide_index=True,
+                )
 
 
 def _render_conditions(board: SlateBoard) -> None:
@@ -773,27 +836,51 @@ def _render_conditions(board: SlateBoard) -> None:
         "indoor value — an assumption, labelled, not a measurement. A park "
         "factor carries its plate-appearance sample beside it (D-014)."
     )
-    rows: list[dict[str, object]] = []
+    text_rows: list[dict[str, str]] = []
+    style_rows: list[dict[str, str]] = []
+    numeric_columns = ("HR factor (LHB)", "n", "HR factor (RHB)", "n ", "Temp °F")
     for game in board.games:
         left = game.home_run_factor_left
         right = game.home_run_factor_right
-        rows.append(
-            {
-                "Game": f"{game.away_team} at {game.home_team}",
-                "Venue": game.venue_name,
-                "Type": game.venue_type.value,
-                "HR factor (LHB)": float(left.factor) if left else None,
-                "n": left.plate_appearances if left else None,
-                "HR factor (RHB)": float(right.factor) if right else None,
-                "n ": right.plate_appearances if right else None,
-                "Temp °F": (
+        temp_absent = (
+            "roofed — neutral value"
+            if game.venue_type is not VenueType.OPEN_AIR
+            else "source unavailable"
+        )
+        values: dict[str, tuple[float | int | None, str]] = {
+            "HR factor (LHB)": (float(left.factor) if left else None, "not covered"),
+            "n": (left.plate_appearances if left else None, "not covered"),
+            "HR factor (RHB)": (float(right.factor) if right else None, "not covered"),
+            "n ": (right.plate_appearances if right else None, "not covered"),
+            "Temp °F": (
+                (
                     float(game.temperature_fahrenheit)
                     if game.temperature_fahrenheit is not None
                     else None
                 ),
-            }
-        )
-    st.dataframe(pd.DataFrame(rows), hide_index=True, key="live_conditions")
+                temp_absent,
+            ),
+        }
+        texts: dict[str, str] = {
+            "Game": f"{game.away_team} at {game.home_team}",
+            "Venue": game.venue_name,
+            "Type": game.venue_type.value,
+        }
+        styles: dict[str, str] = {}
+        for column in numeric_columns:
+            value, absent_text = values[column]
+            if value is None:
+                texts[column] = absent_text
+                styles[column] = _REASON_CSS
+            else:
+                texts[column] = f"{float(value):.0f}"
+        text_rows.append(texts)
+        style_rows.append(styles)
+    st.dataframe(
+        styled_text_frame(pd.DataFrame(text_rows), pd.DataFrame(style_rows)),
+        hide_index=True,
+        key="live_conditions",
+    )
     if board.diagnostics:
         st.markdown("**Fetch diagnostics — what degraded, and why**")
         for line in board.diagnostics:
@@ -803,10 +890,12 @@ def _render_conditions(board: SlateBoard) -> None:
 def _render_tab(label: str, render: Callable[[], None]) -> None:
     """One tab's failure degrades to a named warning, never a blanked page.
 
-    An exception escaping a tab renderer ends the whole script run: the other
-    tabs, the grid, the metrics and the parks screens all vanish with it —
-    the failure mode behind the 2026-08-20 hotfix. Each view now stands or
-    falls on its own (D-075).
+    An exception escaping a tab renderer ends the whole Streamlit script run —
+    every other tab vanishes with it, the failure shape observed on the
+    deployed app when a NaN cell reached the highlight mapper (pandas stores a
+    missing numeric as NaN, and ``Decimal('NaN') >= edge`` raises
+    ``decimal.InvalidOperation``). Each view now stands or falls on its own
+    (D-075).
     """
     try:
         render()
@@ -896,10 +985,10 @@ def render_parks_screen() -> None:
         )
     else:
         st.caption(
-            f"**Roof state and forecast are both fixture-bound** in this "
-            f"`{environment}` environment: the weather seam is one adapter "
-            "interface, and the live NWS adapter binds only in a deployed "
-            "environment so that a local render never becomes a network call. "
+            "**Roof state and forecast are both fixture-bound** in this local "
+            "environment: the weather seam is one adapter interface (§GMF-004), "
+            "and the live NWS adapter (§GMF-005) binds only in a deployed "
+            "environment, so a local render never becomes a network call. "
             "Their values are deliberately non-baseball (OQ-4). Park factors "
             "above are the real pinned export; conditions here are not. "
             f"{retrieval_statement(snapshot)}"
@@ -962,28 +1051,30 @@ def render_parks_screen() -> None:
 def main() -> None:
     st.set_page_config(page_title="GreenMachine", layout="wide")
     bridge_secrets_into_environment()
-    st.title("GreenMachine")
-    live_weather = resolve_environment() != "local"
-    weather_clause = (
-        "weather is live from api.weather.gov and roof state is still fixture-bound"
-        if live_weather
-        else "weather and roof state are both fixture-bound in this local environment"
-    )
-    st.caption(
-        "Product surfaces per FEATURE_PHASE_PLAN §GMF-002, §GMF-003, §GMF-004 and "
-        f"§GMF-005 — batter data is synthetic fixture (OQ-4), park factors are the "
-        f"pinned Savant manual export, and {weather_clause}; "
-        "criteria tallies, never predictions (D-015/D-017)."
-    )
-    render_shell_fields()
-    st.divider()
+    st.markdown(SHELL_CSS, unsafe_allow_html=True)
+    orb, header = st.columns([1, 5])
+    with orb:
+        st.markdown(ORB_HTML, unsafe_allow_html=True)
+    with header:
+        st.markdown(TITLE_HTML, unsafe_allow_html=True)
+        st.markdown(
+            '<p class="gm-tagline">Home-run research board — criteria tallies, '
+            "never predictions (D-015/D-017).</p>",
+            unsafe_allow_html=True,
+        )
+        live_weather = resolve_environment() != "local"
+        weather_clause = (
+            "live NWS weather"
+            if live_weather
+            else "fixture weather (local runs never make network calls)"
+        )
+        st.markdown(
+            f'<p class="gm-status">ENVIRONMENT {resolve_environment()} · '
+            f"VERSION {resolve_version()} · COMMIT {resolve_commit()} · "
+            f"{weather_clause}</p>",
+            unsafe_allow_html=True,
+        )
     render_live_board()
-    st.divider()
-    render_grid()
-    st.divider()
-    render_metrics_screen(grid_demo_snapshot())
-    st.divider()
-    render_parks_screen()
 
 
 if __name__ == "__main__":

@@ -44,7 +44,9 @@ from greenmachine.grid import (
 # Absolute, so resolution cannot drift: inside the D-062 bound, streamlit
 # moved `from_file`'s relative-path anchor from the working directory to the
 # calling file — an absolute path is stable under both behaviours.
-_APP_PATH = Path(__file__).resolve().parents[2] / "streamlit_app.py"
+# The demo surface runs standalone: the main screen is the shell plus
+# the live board (D-076), so the page test drives its own runner.
+_APP_PATH = Path(__file__).resolve().parent / "runners" / "run_grid.py"
 
 _TIMEOUT = 15
 
@@ -217,15 +219,9 @@ def test_the_initial_order_is_neutral_and_no_ranking_widget_exists() -> None:
     names = list(frame[BATTER_COLUMN])
     assert names == sorted(names)
     labels = [w.label for w in [*at.selectbox, *at.multiselect, *at.radio]]
-    # "Batter" is §GMF-003's chooser for whose pitch-type splits to read: a
-    # filter the user composes, in the shape the plan's "filters are
-    # user-composed, scores are product-composed" line permits. The second
-    # "Columns" is §GMF-004's column chooser on the parks table — the same view
-    # choice as the grid's, on another screen. Every control on the page still
-    # names a view choice; none ranks, scores or picks.
-    # Grouped by widget type, not by page order: both selectboxes, then both
-    # multiselects, then the radio.
-    assert labels == ["Window", "Batter", "Columns", "Columns", "Density"]
+    # The grid surface standalone (D-076): its own three view-choice controls
+    # and nothing else. No control ranks, scores or picks.
+    assert labels == ["Window", "Columns", "Density"]
 
 
 def test_with_no_selection_the_page_invites_one_and_claims_nothing() -> None:
@@ -255,13 +251,3 @@ def test_with_no_selection_the_page_invites_one_and_claims_nothing() -> None:
     body = " | ".join(m.value for m in at.markdown)
     assert "**Selected:**" not in body
     assert "**Grid metrics —" not in body
-
-
-def test_the_shell_fields_survive_beside_the_grid() -> None:
-    """The deployment-verification fields (GMR-004) still render: the page
-    gained a product surface without losing its verification surface."""
-    at = _run_app()
-    body = " | ".join(m.value for m in at.markdown)
-    assert "**Environment:**" in body
-    assert "**Version:**" in body
-    assert "**Commit:**" in body
