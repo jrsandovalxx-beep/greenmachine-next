@@ -63,6 +63,9 @@ from greenmachine.live.savant import (
 
 FORM_REACH_DAYS = 14
 FORM_SHORT_DAYS = 7
+# The batter's matchup table reads his pitches seen against the
+# opposing starter's side over this many days (D-088).
+MATCHUP_WINDOW_DAYS = 30
 SEASON_WINDOW_MONTH = 3
 SEASON_WINDOW_DAY = 1
 SEASON_IDS_PER_REQUEST = 90
@@ -168,11 +171,13 @@ class PitchLine:
     batting_average: Decimal | None
     slugging: Decimal | None
     iso: Decimal | None
-    home_runs: int
+    home_runs: int | None  # None where the scope's source publishes no count
     barrel_share: Decimal | None
     hard_hit_share: Decimal | None
     expected_woba: Decimal | None
     whiff_share: Decimal | None
+    woba: Decimal | None = None  # the arsenal board's own wOBA (season scopes)
+    strikeout_share: Decimal | None = None  # the arsenal board's K% (season scopes)
 
 
 @dataclass(frozen=True)
@@ -197,16 +202,20 @@ class BatterCard:
 @dataclass(frozen=True)
 class PitcherCard:
     """The expected opposing pitcher: season line, qualifying arsenal, and the
-    form-window per-pitch lines in both usage scopes (D-066/D-080)."""
+    season-long per-pitch lines the Arsenal table shows (D-087). Pitcher
+    metrics are always season figures — never windowed — with last season
+    filling in when he has no current record; the only window read is the
+    per-side pitch-type set behind the table's side filter."""
 
     player_id: int
     full_name: str
     throws: str
     season: SeasonPitchingLine | None
     arsenal: tuple[PitchArsenalRow, ...]
-    pitch_lines_all: tuple[PitchLine, ...]
-    pitch_lines_vs_left: tuple[PitchLine, ...]
-    pitch_lines_vs_right: tuple[PitchLine, ...]
+    season_lines: tuple[PitchLine, ...]
+    season_lines_year: int
+    pitches_vs_left: frozenset[str]
+    pitches_vs_right: frozenset[str]
 
 
 @dataclass(frozen=True)
@@ -362,43 +371,34 @@ def _pitch_lines(events: Sequence[PitchEvent]) -> tuple[PitchLine, ...]:
     return tuple(lines)
 
 
-def _batter_pitch_lines(
-    arsenal_rows: Sequence[PitchArsenalRow],
-    window_events: Sequence[PitchEvent],
-) -> tuple[PitchLine, ...]:
-    """The batter's per-pitch lines for the expanded matchup view (§GMF-008/D-080).
-
-    Rate columns are the season arsenal's own figures — the same source the
-    matchup criterion reads — while home-run and barrel counts refresh from
-    the recent form window so the table answers "which pitches is he doing
-    damage on right now". Barrel share is None when the window saw no batted
-    balls of that pitch; the view renders the absence.
+def _season_pitch_lines(rows: Sequence[PitchArsenalRow]) -> tuple[PitchLine, ...]:
+    """Season-long per-pitch lines from the arsenal board — the pitcher's
+    whole year, never a window (D-087). The board publishes no home-run or
+    barrel counts, so those cells stay None: the surface names the absence
+    rather than inventing a zero. Lines come back sorted by usage, heaviest
+    first.
     """
-    by_pitch: dict[str, list[PitchEvent]] = {}
-    for event in window_events:
-        by_pitch.setdefault(event.pitch_type, []).append(event)
-    lines: list[PitchLine] = []
-    for row in arsenal_rows:
-        group = by_pitch.get(row.pitch_type, [])
-        batted = [event for event in group if event.launch_speed is not None]
-        barrels = sum(1 for event in batted if event.launch_speed_angle == BARREL_CLASSIFICATION)
-        lines.append(
-            PitchLine(
-                pitch_type=row.pitch_type,
-                pitch_name=row.pitch_name,
-                pitches=row.pitches,
-                usage_share=row.usage_share,
-                plate_appearances=row.plate_appearances,
-                batting_average=row.batting_average,
-                slugging=row.slugging,
-                iso=row.slugging - row.batting_average,
-                home_runs=sum(1 for event in group if event.event == "home_run"),
-                barrel_share=Decimal(barrels) / Decimal(len(batted)) if batted else None,
-                hard_hit_share=row.hard_hit_share,
-                expected_woba=row.expected_woba,
-                whiff_share=row.whiff_share,
-            )
+    lines = [
+        PitchLine(
+            pitch_type=row.pitch_type,
+            pitch_name=row.pitch_name,
+            pitches=row.pitches,
+            usage_share=row.usage_share,
+            plate_appearances=row.plate_appearances,
+            batting_average=row.batting_average,
+            slugging=row.slugging,
+            iso=row.slugging - row.batting_average,
+            home_runs=None,
+            barrel_share=None,
+            hard_hit_share=row.hard_hit_share,
+            expected_woba=row.expected_woba,
+            whiff_share=row.whiff_share,
+            woba=row.woba,
+            strikeout_share=row.strikeout_share,
         )
+        for row in rows
+    ]
+    lines.sort(key=lambda line: line.usage_share, reverse=True)
     return tuple(lines)
 
 
@@ -460,8 +460,14 @@ def fetch_window_events(
     fetch_day: Callable[[date], tuple[PitchEvent, ...] | FetchFailure],
     *,
     days: tuple[date, ...],
+    keep: Callable[[PitchEvent], bool] | None = None,
 ) -> tuple[tuple[PitchEvent, ...], tuple[str, ...]]:
-    """Aggregate per-day event fetches; a failed day is named, not fatal."""
+    """Aggregate per-day event fetches; a failed day is named, not fatal.
+
+    ``keep`` trims each day to the events the board can use — the slate's
+    batters and probables — so a long matchup window never swells memory with
+    pitches involving players no surface reads.
+    """
     events: list[PitchEvent] = []
     diagnostics: list[str] = []
     for day in days:
@@ -469,7 +475,10 @@ def fetch_window_events(
         if isinstance(fetched, FetchFailure):
             diagnostics.append(f"pitch events for {day.isoformat()}: {fetched.reason}")
             continue
-        events.extend(fetched)
+        if keep is None:
+            events.extend(fetched)
+        else:
+            events.extend(event for event in fetched if keep(event))
     return tuple(events), tuple(diagnostics)
 
 
@@ -478,25 +487,36 @@ def _pitcher_card(
     probable_name: str,
     season_pitching: dict[int, SeasonPitchingLine],
     pitcher_arsenal: dict[int, tuple[PitchArsenalRow, ...]],
+    fallback_arsenal: dict[int, tuple[PitchArsenalRow, ...]],
+    season_year: int,
     window_events: tuple[PitchEvent, ...],
 ) -> PitcherCard:
     season = season_pitching.get(probable_id)
+    current_rows = pitcher_arsenal.get(probable_id, ())
+    if current_rows:
+        season_rows = current_rows
+        lines_year = season_year
+    else:
+        # No current-season record: last season fills in, labelled (D-087).
+        season_rows = fallback_arsenal.get(probable_id, ())
+        lines_year = season_year - 1 if season_rows else season_year
     return PitcherCard(
         player_id=probable_id,
         full_name=probable_name or (season.full_name if season else f"Player {probable_id}"),
         throws=season.throws if season else "",
         season=season,
-        arsenal=tuple(
-            row
-            for row in pitcher_arsenal.get(probable_id, ())
-            if row.usage_share >= QUALIFYING_USAGE_SHARE
+        arsenal=tuple(row for row in current_rows if row.usage_share >= QUALIFYING_USAGE_SHARE),
+        season_lines=_season_pitch_lines(season_rows),
+        season_lines_year=lines_year,
+        pitches_vs_left=frozenset(
+            event.pitch_type
+            for event in window_events
+            if event.batter_side == "L" and event.pitch_type
         ),
-        pitch_lines_all=_pitch_lines(window_events),
-        pitch_lines_vs_left=_pitch_lines(
-            tuple(event for event in window_events if event.batter_side == "L")
-        ),
-        pitch_lines_vs_right=_pitch_lines(
-            tuple(event for event in window_events if event.batter_side == "R")
+        pitches_vs_right=frozenset(
+            event.pitch_type
+            for event in window_events
+            if event.batter_side == "R" and event.pitch_type
         ),
     )
 
@@ -583,6 +603,11 @@ def build_board(
         player_id: tuple(rows) for player_id, rows in arsenal_lists_by_batter.items()
     }
 
+    # Pitcher metrics are season figures with a last-season fallback (D-087):
+    # a probable with no current-season arsenal row reads his prior-year board
+    # instead, fetched once and only when someone needs it.
+    fallback_arsenal_by_pitcher: dict[int, tuple[PitchArsenalRow, ...]] = {}
+
     # Lineups: the posted order, else the estimated one, flagged.
     lineup_ids: dict[tuple[int, str], tuple[int, ...]] = {}
     lineup_estimated: set[tuple[int, str]] = set()
@@ -612,6 +637,20 @@ def build_board(
             if probable is not None
         }
     )
+
+    missing_current = {pid for pid in probable_ids if not arsenal_by_pitcher.get(pid)}
+    if missing_current and pitcher_arsenal_available:
+        fallback_result = savant.fetch_pitch_arsenal(kind="pitcher", year=year - 1)
+        if isinstance(fallback_result, FetchFailure):
+            diagnostics.append(f"pitcher arsenal fallback ({year - 1}): {fallback_result.reason}")
+        else:
+            fallback_lists: dict[int, list[PitchArsenalRow]] = {}
+            for row in fallback_result:
+                if row.player_id in missing_current:
+                    fallback_lists.setdefault(row.player_id, []).append(row)
+            fallback_arsenal_by_pitcher = {
+                player_id: tuple(rows) for player_id, rows in fallback_lists.items()
+            }
 
     season_hitting: dict[int, SeasonHittingLine] = {}
     for chunk in _chunked(all_batter_ids, SEASON_IDS_PER_REQUEST):
@@ -660,8 +699,17 @@ def build_board(
     else:
         tracking_reach = tracking_reach_result
 
-    days = tuple(reach_start + timedelta(days=offset) for offset in range(FORM_REACH_DAYS + 1))
-    events, event_diagnostics = fetch_window_events(fetch_day_events, days=days)
+    # The fetch window spans the matchup window (D-088), the longest read on
+    # the board; form still slices its own L7/L14 reaches out of it.
+    window_start = (as_of - timedelta(days=MATCHUP_WINDOW_DAYS)).date()
+    days = tuple(window_start + timedelta(days=offset) for offset in range(MATCHUP_WINDOW_DAYS + 1))
+    slate_batters = set(all_batter_ids)
+    slate_pitchers = set(probable_ids)
+    events, event_diagnostics = fetch_window_events(
+        fetch_day_events,
+        days=days,
+        keep=lambda event: event.batter_id in slate_batters or event.pitcher_id in slate_pitchers,
+    )
     diagnostics.extend(event_diagnostics)
     form_source_available = len(event_diagnostics) < len(days)
     events_by_batter: dict[int, list[PitchEvent]] = {}
@@ -670,6 +718,7 @@ def build_board(
         events_by_batter.setdefault(event.batter_id, []).append(event)
         events_by_pitcher.setdefault(event.pitcher_id, []).append(event)
     short_cutoff = short_start.isoformat()
+    reach_cutoff = reach_start.isoformat()
 
     capture = SourceCaptureId(f"gmf-006-board-{slate.official_date}-{as_of.isoformat()}")
     season_start = _season_window_start(slate_date)
@@ -706,7 +755,9 @@ def build_board(
                     probable.full_name,
                     season_pitching,
                     arsenal_by_pitcher,
-                    _recent_window_events(tuple(events_by_pitcher.get(probable.player_id, ()))),
+                    fallback_arsenal_by_pitcher,
+                    year,
+                    tuple(events_by_pitcher.get(probable.player_id, ())),
                 )
                 probable_by_side[side_key] = (probable.player_id, probable.full_name)
 
@@ -729,6 +780,8 @@ def build_board(
                 )
                 matchup_pitcher_rows = arsenal_by_pitcher.get(pitcher_id, ())
 
+            matchup_cutoff = (as_of - timedelta(days=MATCHUP_WINDOW_DAYS)).date().isoformat()
+
             for position, player_id in enumerate(lineup_ids[(game.game_pk, team)], start=1):
                 line = season_hitting.get(player_id)
                 bats = line.bats if line else ""
@@ -740,13 +793,26 @@ def build_board(
                 side_reach = _side_resolved_tracking(player_reach, side)
 
                 player_events = tuple(events_by_batter.get(player_id, ()))
+                # The matchup table's scope: what he has seen from the
+                # opposing starter's side over the matchup window (D-088).
+                # No probable named → no scope → the table names the absence.
+                matchup_scope_events = tuple(
+                    event
+                    for event in player_events
+                    if pitcher_throws
+                    and event.pitcher_throws == pitcher_throws
+                    and event.game_date >= matchup_cutoff
+                )
                 recent_events = _recent_window_events(player_events)
                 short_events = tuple(
                     event for event in player_events if event.game_date >= short_cutoff
                 )
+                reach_events = tuple(
+                    event for event in player_events if event.game_date >= reach_cutoff
+                )
                 form = resolve_form_section(
                     aggregate_form(short_events),
-                    aggregate_form(player_events),
+                    aggregate_form(reach_events),
                     side_short,
                     side_reach,
                 )
@@ -819,9 +885,7 @@ def build_board(
                         statcast=statcast.get(player_id),
                         form=form,
                         recent_events=recent_events,
-                        pitch_lines=_batter_pitch_lines(
-                            arsenal_by_batter.get(player_id, ()), recent_events
-                        ),
+                        pitch_lines=_pitch_lines(matchup_scope_events),
                         result=result,
                     )
                 )

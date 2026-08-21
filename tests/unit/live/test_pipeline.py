@@ -523,12 +523,58 @@ def test_pitch_lines_sort_by_usage_and_empty_scope_is_absent() -> None:
     assert [line.pitch_type for line in _pitch_lines(events)] == ["FF", "CH"]
 
 
-def test_pitcher_card_carries_all_and_side_scopes_from_one_window() -> None:
-    """D-066/§GMF-008: the same window feeds both mirror positions; only the
-    scope filter differs, so the toggle can never mix denominators."""
+def test_pitcher_season_lines_read_the_season_board() -> None:
+    """D-087: the Arsenal table's figures are the season arsenal board's own,
+    ISO derived pipeline-side, sorted by usage; the board publishes no home-run
+    count, so that cell is None rather than an invented zero."""
+    savant = _FakeSavant(
+        pitcher_arsenal=(
+            _arsenal_row(PITCHER_ID, "SL", "0.25", "0.280", "0.22", "0.18"),
+            _arsenal_row(PITCHER_ID, "FF", "0.55", "0.300", "0.25", "0.20"),
+        ),
+    )
+    board = _build(_FakeApi(), savant)
+    assert not isinstance(board, FetchFailure)
+    pitcher = board.games[0].home_pitcher
+    assert pitcher is not None
+    assert pitcher.season_lines_year == SLATE_DATE.year
+    assert [line.pitch_type for line in pitcher.season_lines] == ["FF", "SL"]
+    fastball = pitcher.season_lines[0]
+    assert fastball.iso == Decimal("0.400") - Decimal("0.250")
+    assert fastball.woba == Decimal("0.300")
+    assert fastball.strikeout_share == Decimal("0.2")
+    assert fastball.expected_woba == Decimal("0.300")
+    assert fastball.home_runs is None
+    assert fastball.barrel_share is None
+
+
+def test_pitcher_without_a_current_record_falls_back_to_last_season() -> None:
+    """D-087: a probable with no current-season arsenal row reads his
+    prior-year board, labelled with that year; the fallback fetches once and
+    only for the pitchers who need it."""
+
+    class _FallbackSavant(_FakeSavant):
+        def fetch_pitch_arsenal(
+            self, *, kind: str, year: int
+        ) -> tuple[PitchArsenalRow, ...] | FetchFailure:
+            if kind == "pitcher" and year == SLATE_DATE.year:
+                return ()  # no current-season record at all
+            if kind == "pitcher":
+                return (_arsenal_row(PITCHER_ID, "FF", "0.55", "0.300", "0.25", "0.20"),)
+            return (_arsenal_row(BATTER_ID, "FF", "0.5", "0.400", "0.15", "0.15"),)
+
+    board = _build(_FakeApi(), _FallbackSavant())
+    assert not isinstance(board, FetchFailure)
+    pitcher = board.games[0].home_pitcher
+    assert pitcher is not None
+    assert [line.pitch_type for line in pitcher.season_lines] == ["FF"]
+    assert pitcher.season_lines_year == SLATE_DATE.year - 1
+
+
+def test_pitcher_side_sets_read_the_window() -> None:
+    """D-087: the side filter's pitch-type sets come from the recent pitch
+    record — the only per-side read on the board — one set per batter side."""
     events = (
-        _window_event(pitch_type="FF", batter_side="L"),
-        _window_event(pitch_type="FF", batter_side="L"),
         _window_event(pitch_type="FF", batter_side="L"),
         _window_event(pitch_type="SL", batter_side="R", batter_id=909),
     )
@@ -536,46 +582,30 @@ def test_pitcher_card_carries_all_and_side_scopes_from_one_window() -> None:
     assert not isinstance(board, FetchFailure)
     pitcher = board.games[0].home_pitcher
     assert pitcher is not None
-    all_lines = {line.pitch_type: line for line in pitcher.pitch_lines_all}
-    assert all_lines["FF"].usage_share == Decimal(3) / Decimal(4)
-    assert all_lines["SL"].usage_share == Decimal(1) / Decimal(4)
-    left = pitcher.pitch_lines_vs_left
-    assert [line.pitch_type for line in left] == ["FF"]
-    assert left[0].pitches == 3
-    assert left[0].usage_share == Decimal(1)
-    right = pitcher.pitch_lines_vs_right
-    assert [line.pitch_type for line in right] == ["SL"]
-    assert right[0].pitches == 1
+    assert pitcher.pitches_vs_left == frozenset({"FF"})
+    assert pitcher.pitches_vs_right == frozenset({"SL"})
 
 
-def test_batter_pitch_lines_merge_season_arsenal_with_window_damage() -> None:
-    """§GMF-008/D-080: rate columns are the arsenal's season figures; home-run
-    and barrel counts refresh from the recent window, with an empty window
-    sample surfacing as None rather than zero."""
-    from greenmachine.live.pipeline import _batter_pitch_lines
-
-    rows = (
-        _arsenal_row(BATTER_ID, "FF", "0.5", "0.400", "0.15", "0.15"),
-        _arsenal_row(BATTER_ID, "SL", "0.3", "0.350", "0.15", "0.15"),
-    )
-    window = (
+def test_batter_matchup_lines_are_side_scoped_over_the_window() -> None:
+    """D-088: the matchup table counts only pitches from the opposing
+    starter's side inside the matchup window — same-side pitching and older
+    pitches never enter a denominator. With no probable named there is no
+    scope and the card carries no lines."""
+    events = (
+        _window_event(pitch_type="FF", pitcher_throws="R"),
+        _window_event(pitch_type="FF", pitcher_throws="R"),
+        _window_event(pitch_type="SL", pitcher_throws="L"),  # wrong side
         _window_event(
-            pitch_type="FF",
-            event="home_run",
-            launch_speed=Decimal("108"),
-            launch_speed_angle=6,
-        ),
-        _window_event(pitch_type="FF", event="", launch_speed=None),
+            pitch_type="CU", pitcher_throws="R", game_date="2026-07-10"
+        ),  # outside the window
     )
-    lines = {line.pitch_type: line for line in _batter_pitch_lines(rows, window)}
-    fastball = lines["FF"]
-    assert fastball.usage_share == Decimal("0.5")
-    assert fastball.batting_average == Decimal("0.250")
-    assert fastball.iso == Decimal("0.400") - Decimal("0.250")
-    assert fastball.home_runs == 1
-    assert fastball.barrel_share == Decimal(1)
-    assert fastball.hard_hit_share == Decimal("0.4")
-    slider = lines["SL"]
-    assert slider.home_runs == 0
-    assert slider.barrel_share is None
-    assert _batter_pitch_lines((), window) == ()
+    board = _build(_FakeApi(), _FakeSavant(), events=events)
+    assert not isinstance(board, FetchFailure)
+    game = board.games[0]
+    # The away lineup faces the home probable, a right-hander.
+    away = game.away_batters[0]
+    assert [line.pitch_type for line in away.pitch_lines] == ["FF"]
+    assert away.pitch_lines[0].pitches == 2
+    assert away.pitch_lines[0].usage_share == Decimal(1)
+    # The home lineup has no named opposing starter: no scope, no lines.
+    assert game.home_batters[0].pitch_lines == ()
