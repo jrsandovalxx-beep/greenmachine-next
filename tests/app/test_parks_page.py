@@ -28,7 +28,9 @@ from greenmachine.parks import (
 )
 from greenmachine.weather.nws import FORECAST_FRESHNESS, NwsWeatherAdapter
 
-_APP_PATH = Path(__file__).resolve().parents[2] / "streamlit_app.py"
+# The demo surface runs standalone: the main screen is the shell plus
+# the live board (D-076), so the page test drives its own runner.
+_APP_PATH = Path(__file__).resolve().parent / "runners" / "run_parks.py"
 
 _TIMEOUT = 30
 

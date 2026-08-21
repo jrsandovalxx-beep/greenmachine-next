@@ -14,3 +14,14 @@ headless = true
 # Focused user-facing errors only: unexpected exceptions surface as a type,
 # never an internal traceback. Developer diagnostics belong in logs/tests.
 showErrorDetails = "type"
+
+[theme]
+# D-003's visual language, first coat: the original-Xbox dark-green mood with
+# neon-lime accents, applied through Streamlit's built-in theming. The full
+# console shell (glowing orb, geometric grid, console navigation) is its own
+# deferred ticket — this is the palette, not the artwork.
+base = "dark"
+primaryColor = "#9bf00b"
+backgroundColor = "#0d1f0d"
+secondaryBackgroundColor = "#132b13"
+textColor = "#e8f5e0"

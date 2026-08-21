@@ -1740,3 +1740,25 @@ helper that converts a failure into a named in-tab warning; the highlight mapper
 non-numeric cells (None, NaN, text) as never-highlighted. Regression coverage drives the
 full page through AppTest against a real `build_board` product mixing covered and uncovered
 batters — the mixed float64/NaN columns that triggered the crash.
+
+## D-076 - The main screen is the shell and the live board, nothing else
+**The app's entry point renders the D-003 console shell (orb, title, environment status
+line) above the four-tab live board — and nothing else.** The demo surfaces (batter grid,
+metrics, parks) leave the main screen at the PO's direction; their machinery stays as
+library code, and each keeps a standalone runner under `tests/app/runners/` so its
+criteria stay testable end-to-end without occupying the page. Three rendering rules come
+with the move:
+(a) *A live-board column that can be absent is display text, not a number with a null.*
+Streamlit's data grid renders a null cell as the literal "None" and never consults the
+styler's display value for it (probed on 1.62.0, the deployed bound and the latest 1.x),
+so the §GMF-002 numeric-plus-na_rep pattern cannot speak on this surface. Live frames
+therefore carry uniformly string cells — Arrow-homogeneous, so no `ArrowInvalid` either —
+with values formatted and absences worded at build time (`styled_text_frame`). What the
+column gives up is numeric header-click sorting; the boards arrive pre-sorted by grade,
+which is the intended read.
+(b) *Absence is displayed, not hidden.* Every absent cell names its reason in words
+(D-023/D-025), muted; a present value at its edge is highlighted at build time with float
+comparisons, so no NaN ever reaches a comparison (the first deployed crash class).
+(c) *The shell is original artwork and makes no remote request.* No console maker's
+marks, no CDN font, image, stylesheet, or script — the theme is CSS plus an inline SVG
+background, enforced by test.

@@ -21,6 +21,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 
+import pandas as pd
 import pytest
 from streamlit.testing.v1 import AppTest
 
@@ -195,14 +196,65 @@ def _staged_app(monkeypatch: pytest.MonkeyPatch) -> SlateBoard:
 
 
 def test_all_four_tabs_render_with_every_metric_missing(_staged_app: SlateBoard) -> None:
-    """The deployed crash: NaN cells reached the highlight mapper. The whole
-    page must render — tabs, grid, metrics, parks — with zero exceptions."""
+    """The deployed crash: NaN cells reached the highlight styling. The main
+    screen — shell plus the board's four tabs — renders with zero exceptions."""
     at = AppTest.from_file(str(_APP_PATH), default_timeout=_TIMEOUT)
     at.run()
     assert not at.exception, [str(e.value) for e in at.exception]
     labels = [tab.label for tab in at.tabs]
     assert labels == ["Sluggers", "Arms", "Matchups", "Conditions"]
     assert len(at.dataframe) >= 3  # sluggers, arms, conditions at minimum
+
+
+def _display_values(element: object) -> pd.DataFrame:
+    """A Styler-backed dataframe's shown text, from the Arrow display payload.
+
+    The proto forked inside the Streamlit version bound (see the grid tests'
+    `_arrow_surface`): resolve the Arrow message first, then read its styler.
+    """
+    import io
+
+    import pyarrow as pa
+
+    proto = element.proto  # type: ignore[attr-defined]
+    if "arrow_data" in {f.name for f in proto.DESCRIPTOR.fields}:
+        proto = proto.arrow_data
+    return pa.ipc.open_stream(io.BytesIO(proto.styler.display_values)).read_all().to_pandas()
+
+
+def test_missing_cells_name_their_reason(_staged_app: SlateBoard) -> None:
+    """D-023/D-025 on the live surface: a missing metric is its reason in
+    words — never a blank, a zero, or the literal string 'None'."""
+    at = AppTest.from_file(str(_APP_PATH), default_timeout=_TIMEOUT)
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    display = _display_values(at.dataframe[0]).astype(str)
+    assert not display.isin(["None", "nan"]).any().any()
+    # The uncovered batter's cells carry the board's plain-language reasons.
+    cells = set(display.to_numpy().ravel())
+    assert "not covered by source" in cells
+
+
+def test_main_screen_is_the_shell_plus_the_live_board(_staged_app: SlateBoard) -> None:
+    """D-076: the main screen is the Xbox shell and the live board — the demo
+    surfaces (batter grid, metrics, parks) are not on it — and the GMR-004
+    deployment-verification fields survive in the header's status line."""
+    at = AppTest.from_file(str(_APP_PATH), default_timeout=_TIMEOUT)
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    subheaders = [element.value for element in at.subheader]
+    assert "Batter grid" not in subheaders
+    assert "Parks" not in subheaders
+    # No demo choosers, and no ranking control anywhere (D-015/D-017).
+    assert not at.selectbox
+    assert not at.multiselect
+    assert not at.radio
+    markup = "\n".join(element.value for element in at.markdown)
+    assert "gm-orb" in markup
+    assert "ENVIRONMENT staging" in markup
+    assert "VERSION" in markup
+    assert "COMMIT" in markup
+    assert [tab.label for tab in at.tabs] == ["Sluggers", "Arms", "Matchups", "Conditions"]
 
 
 def test_one_tabs_failure_cannot_blank_the_rest(tmp_path: Path) -> None:
@@ -252,17 +304,19 @@ def test_parks_snapshot_declares_a_live_weather_source() -> None:
     assert SOURCE in snapshot.sources
 
 
-def test_highlight_mapper_treats_non_numeric_cells_as_unhighlighted() -> None:
-    """NaN, None, pd.NA and text all map to 'no highlight'; a genuine value at
-    the edge still turns green. Forcing the Styler to compute is the test."""
-    import pandas as pd
+def test_slugger_frames_carry_value_reason_and_highlight() -> None:
+    """The live board's frame is uniformly textual: the data grid prints a
+    numeric null as the literal "None" whatever the styler says (D-076), so
+    the value or its reason IS the cell's text, and the style frame carries
+    the green highlight decided at build time — no NaN is ever compared."""
     import streamlit_app
 
-    frame = pd.DataFrame(
-        {"Batter": ["a", "b", "c", "d", "e"], "EV": [float("nan"), None, "n/a", 96.2, 90.0]}
-    )
-    styler = streamlit_app._highlight_columns(frame, {"EV": Decimal("95")})
-    computed = styler._compute()
-    styles = computed.ctx  # {(row, col): [("background-color", ...)]}
-    assert styles.get((3, 1)) == [("background-color", "#d4edda")]
-    assert all(styles.get((row, 1)) is None for row in (0, 1, 2, 4))
+    board = _outage_board()
+    texts, styles = streamlit_app._slugger_frames(board, {"EV": Decimal("90")})
+    # Row 0 is the covered batter (EV 91.5 ≥ 90): the formatted value, green.
+    assert texts.at[0, "EV"] == "91.5"
+    assert styles.at[0, "EV"] == streamlit_app._HIGHLIGHT
+    # Row 1 is the batter every feed missed: the reason as the cell's text,
+    # muted styling.
+    assert texts.at[1, "EV"] == "not covered by source"
+    assert styles.at[1, "EV"] == streamlit_app._REASON_CSS

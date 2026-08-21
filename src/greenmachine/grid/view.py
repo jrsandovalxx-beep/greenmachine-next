@@ -353,6 +353,36 @@ def graded_styler(
     return styler
 
 
+def styled_text_frame(texts: pd.DataFrame, styles: pd.DataFrame) -> Styler:
+    """A ``Styler`` whose data IS the display text, plus per-cell CSS.
+
+    ``graded_styler`` keeps its columns numeric and lets ``na_rep`` speak for
+    an absent cell — but Streamlit's data grid renders a null cell as the
+    literal "None" and never consults the styler's display value for it
+    (probed on 1.62, the deployed bound; the grid's own pages predate that
+    runtime). A table that must show absences in words on the live board
+    therefore carries its text directly: uniformly string columns are
+    Arrow-homogeneous, and every cell — value or reason — reaches the glass
+    exactly as written. What the column gives up is numeric header-click
+    sorting; the live boards arrive pre-sorted by grade, so the trade is
+    accepted and recorded (D-076).
+    """
+    styler = texts.style
+    # The styles frame may carry only the columns that ever take CSS; a lookup
+    # against the text frame's wider columns would KeyError without this.
+    aligned = styles.reindex(index=texts.index, columns=texts.columns)
+    for row in range(len(texts)):
+        for column in texts.columns:
+            css = aligned.at[row, column]
+            if not isinstance(css, str) or not css:
+                continue
+            # The runtime accepts a (rows, columns) subset tuple; the stubs
+            # model a narrower union, so the slice is typed Any deliberately.
+            cell: Any = pd.IndexSlice[[row], [column]]
+            styler = styler.map(lambda _v, c=css: c, subset=cell)
+    return styler
+
+
 def visible_columns(
     chosen_metrics: tuple[str, ...],
     identity_column: str = BATTER_COLUMN,

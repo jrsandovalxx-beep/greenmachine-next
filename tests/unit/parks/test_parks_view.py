@@ -215,6 +215,14 @@ def test_an_open_roof_and_open_air_do_print_the_forecast() -> None:
         assert str(_FORECAST.temperature_f) in forecast_text(park)
 
 
+def test_a_printed_forecast_says_where_the_wind_comes_from() -> None:
+    """A bare compass pair reads as a target ("8 mph SW" looks like wind
+    blowing toward the southwest). The source reports where wind blows
+    *from*, and the screen says so in words."""
+    park = _park(_venue("d", "Delta Park", VenueType.OPEN_AIR))
+    assert f"from the {_FORECAST.wind_direction}" in forecast_text(park)
+
+
 def test_the_disposition_is_total_over_every_constructible_park() -> None:
     """No default branch: every venue type crossed with every roof state the
     contract allows for it resolves to one of the three dispositions."""
