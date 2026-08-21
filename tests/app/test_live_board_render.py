@@ -369,3 +369,50 @@ def test_shortlist_empty_when_nothing_grades_a_or_s() -> None:
     texts, _styles, cards = streamlit_app._slugger_frames(_outage_board())
     assert texts.empty
     assert cards == []
+
+
+def test_exit_velo_sheet_threshold_toggle_filters_the_mix() -> None:
+    """D-084: the toggle is a view choice over the same rows — off lists the
+    whole pitch mix, on keeps only pitch types at or above the qualifying
+    usage share of that game's pitches."""
+    from types import SimpleNamespace
+
+    import streamlit_app
+
+    from greenmachine.live.pipeline import ExitVeloGameRow
+
+    row = ExitVeloGameRow(
+        game_date="2026-08-19",
+        pitches_seen=10,
+        balls_in_play=3,
+        avg_exit_velocity=Decimal("91.2"),
+        max_exit_velocity=Decimal("104.1"),
+        pitch_mix=(("FF", 6), ("SL", 3), ("CH", 1)),
+    )
+    card = SimpleNamespace(recent_games=(row,))
+    texts_off, _ = streamlit_app._exit_velo_frames(card, False)
+    texts_on, _ = streamlit_app._exit_velo_frames(card, True)
+    assert texts_off.at[0, "Pitch mix"] == "FF 60% · SL 30% · CH 10%"
+    assert texts_on.at[0, "Pitch mix"] == "FF 60% · SL 30%"  # CH at 10% is below 15%
+    assert texts_off.at[0, "Avg EV"] == "91.2"
+    assert texts_off.at[0, "Max EV"] == "104.1"
+
+
+def test_exit_velo_sheet_names_a_game_without_balls_in_play() -> None:
+    from types import SimpleNamespace
+
+    import streamlit_app
+
+    from greenmachine.live.pipeline import ExitVeloGameRow
+
+    row = ExitVeloGameRow(
+        game_date="2026-08-18",
+        pitches_seen=8,
+        balls_in_play=0,
+        avg_exit_velocity=None,
+        max_exit_velocity=None,
+        pitch_mix=(("FF", 8),),
+    )
+    texts, styles = streamlit_app._exit_velo_frames(SimpleNamespace(recent_games=(row,)), False)
+    assert texts.at[0, "Avg EV"] == "no balls in play"
+    assert styles.at[0, "Avg EV"] == streamlit_app._REASON_CSS

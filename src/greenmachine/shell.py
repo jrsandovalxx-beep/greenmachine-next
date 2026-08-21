@@ -263,3 +263,129 @@ DIAL_CSS = (
     f"{_dial_slot_rules()}"
     "</style>"
 )
+
+
+FIELD_CSS = (
+    "<style>\n"
+    "@keyframes gm-wind-drift {\n"
+    "  0% { transform: translateX(-46px); opacity: 0; }\n"
+    "  18% { opacity: 0.9; }\n"
+    "  82% { opacity: 0.9; }\n"
+    "  100% { transform: translateX(46px); opacity: 0; }\n"
+    "}\n"
+    ".gm-field { display: flex; gap: 18px; align-items: center; }\n"
+    ".gm-field svg { display: block; }\n"
+    ".gm-field-info { color: #b8e986; font-size: 0.92rem; line-height: 1.6; }\n"
+    ".gm-field-info .gm-field-venue { color: #eaffb0; font-weight: 700;"
+    " letter-spacing: 0.04em; }\n"
+    ".gm-field-info .gm-field-muted { color: #7d8f84; font-style: italic; }\n"
+    ".gm-wind-flow circle { fill: #eaffb0; }\n"
+    ".gm-wind-flow { animation: gm-wind-drift 1.8s linear infinite; }\n"
+    ".gm-wind-flow.gm-wind-flow-2 { animation-delay: 0.6s; }\n"
+    ".gm-wind-flow.gm-wind-flow-3 { animation-delay: 1.2s; }\n"
+    "</style>"
+)
+"""Style for the batter detail's drawn field panel (D-084)."""
+
+_COMPASS_DEGREES = {
+    "N": 0.0,
+    "NNE": 22.5,
+    "NE": 45.0,
+    "ENE": 67.5,
+    "E": 90.0,
+    "ESE": 112.5,
+    "SE": 135.0,
+    "SSE": 157.5,
+    "S": 180.0,
+    "SSW": 202.5,
+    "SW": 225.0,
+    "WSW": 247.5,
+    "W": 270.0,
+    "WNW": 292.5,
+    "NW": 315.0,
+    "NNW": 337.5,
+}
+
+
+def _wind_flow(angle_degrees: float) -> str:
+    """The animated wind: drifting particles and an arrowhead, rotated to
+    point the way the wind blows. Compass readings name where it blows
+    FROM, so the arrow bears the opposite; SVG rotation runs clockwise
+    from east while compass bearings run clockwise from north, a further
+    quarter-turn between the two conventions."""
+    toward = (angle_degrees + 180.0 - 90.0) % 360.0
+    particles = "".join(
+        f'<g class="gm-wind-flow gm-wind-flow-{lane}" transform="translate(100 {y})">'
+        f'<circle cx="0" cy="0" r="2.1" />'
+        f'<circle cx="-16" cy="0" r="1.4" opacity="0.6" />'
+        f"</g>"
+        for lane, y in (("", 92), ("2", 100), ("3", 108))
+    )
+    return (
+        f'<g transform="rotate({toward:.1f} 100 100)">'
+        f"{particles}"
+        '<path d="M 138 96 L 150 100 L 138 104 Z" fill="#eaffb0" />'
+        '<line x1="100" y1="100" x2="140" y2="100" stroke="#eaffb0"'
+        ' stroke-width="1.6" opacity="0.85" />'
+        "</g>"
+    )
+
+
+def field_wind_html(
+    *,
+    venue_name: str,
+    detail_lines: tuple[str, ...],
+    wind_speed_mph: float | None,
+    wind_direction: str | None,
+    wind_absent_text: str | None = None,
+) -> str:
+    """The drawn field panel: a diamond, the live wind as a rotated,
+    animated flow when a reading exists, or the plain reason it does not
+    (roofed venue, or the source absent). Original artwork, inline."""
+    field = (
+        '<svg width="200" height="200" viewBox="0 0 200 200"'
+        ' xmlns="http://www.w3.org/2000/svg" role="img">'
+        '<rect x="0" y="0" width="200" height="200" rx="10"'
+        ' fill="rgba(9,38,8,0.55)" />'
+        # outfield wall: arc from the left-field corner over centre to right
+        '<path d="M 28 62 Q 100 -6 172 62 L 172 66 Q 100 2 28 66 Z"'
+        ' fill="rgba(155,240,11,0.28)" />'
+        # grass
+        '<path d="M 28 66 Q 100 2 172 66 L 100 168 Z" fill="rgba(31,109,26,0.5)" />'
+        # infield dirt
+        '<path d="M 100 96 L 146 140 L 100 176 L 54 140 Z" fill="rgba(122,92,20,0.5)" />'
+        # foul lines
+        '<line x1="100" y1="168" x2="28" y2="64" stroke="rgba(234,255,176,0.5)"'
+        ' stroke-width="1" />'
+        '<line x1="100" y1="168" x2="172" y2="64" stroke="rgba(234,255,176,0.5)"'
+        ' stroke-width="1" />'
+        # bases
+        '<rect x="97" y="93" width="6" height="6" fill="#eaffb0"'
+        ' transform="rotate(45 100 96)" />'
+        '<rect x="143" y="137" width="6" height="6" fill="#eaffb0"'
+        ' transform="rotate(45 146 140)" />'
+        '<rect x="51" y="137" width="6" height="6" fill="#eaffb0"'
+        ' transform="rotate(45 54 140)" />'
+        '<rect x="97" y="165" width="6" height="6" fill="#f4ffd6"'
+        ' transform="rotate(45 100 168)" />'
+    )
+    if wind_speed_mph is not None and wind_direction is not None:
+        degrees = _COMPASS_DEGREES.get(wind_direction.upper())
+        flow = _wind_flow(degrees if degrees is not None else 0.0)
+        wind_line = f"wind {wind_speed_mph:.0f} mph from the {wind_direction.upper()}"
+        field += flow
+    else:
+        wind_line = wind_absent_text or "wind reading unavailable"
+        field += (
+            '<text x="100" y="104" text-anchor="middle" font-size="9"'
+            ' fill="#7d8f84">no live wind</text>'
+        )
+    field += "</svg>"
+    info = "".join(f"<div>{line}</div>" for line in detail_lines)
+    return (
+        '<div class="gm-park">'
+        f"{field}"
+        f'<div class="gm-park-info"><div class="gm-park-venue">{venue_name}</div>'
+        f"{info}<div>{wind_line}</div></div>"
+        "</div>"
+    )

@@ -1839,3 +1839,15 @@ per-pitch tables and the pitcher mirror remain the Matchups popup's content
 (D-079/D-080), not the Sluggers expand. The D-083 dial motion stands as
 ratified: items ride a rotary ring and the selection slides into place,
 original CSS artwork only.
+
+## D-085 - Wind speed and direction join the game card; the expand draws them
+**The slate board's game card carries the NWS forecast's wind speed and
+direction alongside temperature — open-air venues only; a roofed game carries
+no wind reading rather than a number that never reached the field (the D-073
+rule extended).** The batter detail's drawn field panel renders the wind as
+an animated flow rotated to the live compass bearing, and the shortlist's
+weather column keeps naming temperature (Product Owner, 2026-08-21: "sluggers
+is still missing wind direction"). Wind in baseball terms — blowing out to
+centre, in from right — stays parked until the park-orientation table lands
+(the D-082 memo); the panel claims only the compass reading, never a
+field-relative direction it cannot yet derive.
