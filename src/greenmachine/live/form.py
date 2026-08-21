@@ -60,6 +60,24 @@ class FormMetrics:
     xwoba: Decimal | None
 
 
+def is_pull_air(event: PitchEvent) -> bool:
+    """Whether one batted ball is a pulled air ball (D-071's signed spray
+    convention): air-ball contact whose spray angle points to the batter's
+    pull side. Unmeasurable coordinates or an unknown side read as not-pull
+    rather than inventing a direction."""
+    if event.hc_x is None or event.hc_y is None or event.batter_side not in ("L", "R"):
+        return False
+    if event.bb_type not in AIR_BALL_TYPES:
+        return False
+    spray = math.degrees(
+        math.atan2(
+            float(event.hc_x - _HOME_PLATE_X),
+            float(_HOME_PLATE_DEPTH_Y - event.hc_y),
+        )
+    )
+    return (event.batter_side == "R" and spray > 0) or (event.batter_side == "L" and spray < 0)
+
+
 def _pct(numerator: int, denominator: int) -> Decimal | None:
     if denominator <= 0:
         return None
@@ -80,18 +98,7 @@ def aggregate_form(events: tuple[PitchEvent, ...]) -> FormMetrics:
     hard_hits = sum(1 for speed in speeds if speed >= HARD_HIT_THRESHOLD_MPH)
     sweet_spots = sum(1 for angle in angles if _SWEET_SPOT_LOW <= angle <= _SWEET_SPOT_HIGH)
     air_events = [event for event in bbe if event.bb_type in AIR_BALL_TYPES]
-    pulls = 0
-    for event in air_events:
-        if event.hc_x is None or event.hc_y is None or event.batter_side not in ("L", "R"):
-            continue  # unmeasurable pulls leave both numerator and denominator
-        spray = math.degrees(
-            math.atan2(
-                float(event.hc_x - _HOME_PLATE_X),
-                float(_HOME_PLATE_DEPTH_Y - event.hc_y),
-            )
-        )
-        if (event.batter_side == "R" and spray > 0) or (event.batter_side == "L" and spray < 0):
-            pulls += 1
+    pulls = sum(1 for event in air_events if is_pull_air(event))
     measurable_air = [
         event
         for event in air_events

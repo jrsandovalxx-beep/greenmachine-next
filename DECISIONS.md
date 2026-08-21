@@ -1903,3 +1903,23 @@ starter named there is no scope, and the table names the absence rather than
 drawing an unscoped one. This supersedes D-080's season-arsenal batter table
 and the D-066 windowed scope toggle, both absorbed into the popup's final
 shape.
+
+## D-089 - GMF-009 derivation definitions: L45 trigger, grid aggregation, season-view sources
+**The Matchups-grid rework fixes its derivation definitions as follows
+(builder record, 2026-08-21).** D-081's "too small at L30" trigger reads as
+zero pitches in the window — a builder may not invent a sample floor, so the
+reach to L45 fires exactly when the window holds none of the starter's
+pitches, and the extra days are fetched only when some probable needs them.
+The grid's batter line aggregates his last-30-days events against the
+starter's qualifying (14%, D-079) mix pitches from the starter's side —
+the same side scope as the popup's matchup table (D-088). A mix pitch's
+put-away rate always reads the season board (pitch events carry no put-away
+counts); a pitch type absent from the board is skipped by the put-away
+derivation rather than scored on an invented zero. The season view composes
+from the season sources only: the hitting line (AVG/SLG/ISO via total
+bases), the statcast board (exit velocity, barrels, hard-hit), and the
+arsenal board (PA-weighted xwOBA, pitch-weighted Swing-Str %); no season
+source publishes a 350-foot pull-air read, so that cell states the absence
+per D-081. The grid's recent-form cell shows the form section's exit
+velocity with its window named. The grade is always the L30 computation in
+either view (D-079).

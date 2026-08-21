@@ -101,6 +101,7 @@ class SeasonHittingLine:
     hits: int
     home_runs: int
     strikeouts: int
+    total_bases: int = 0
 
 
 @dataclass(frozen=True)
@@ -333,6 +334,7 @@ class MlbStatsApi:
                     hits=_optional_int(stat, "hits", context) or 0,
                     home_runs=_optional_int(stat, "homeRuns", context) or 0,
                     strikeouts=_optional_int(stat, "strikeOuts", context) or 0,
+                    total_bases=_optional_int(stat, "totalBases", context) or 0,
                 )
         except PayloadMalformedError as exc:
             return FetchFailure(str(exc))

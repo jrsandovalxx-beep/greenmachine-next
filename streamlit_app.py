@@ -84,6 +84,7 @@ from greenmachine.live.grading import QUALIFYING_USAGE_SHARE
 from greenmachine.live.mlb_api import FetchFailure, MlbStatsApi
 from greenmachine.live.pipeline import (
     BatterCard,
+    BatterGridLine,
     GameCard,
     PitcherCard,
     PitchLine,
@@ -1258,12 +1259,80 @@ def _render_arms(board: SlateBoard) -> None:
     )
 
 
+def _grid_line_cells(line: BatterGridLine | None) -> tuple[dict[str, str], dict[str, str]]:
+    """One batter's metric cells for the matchups grid (D-079). A None
+    scope or a None rate renders as a named absence, never an invented
+    zero; a scope missing at every reach states 'no data available'
+    (D-081)."""
+    if line is None:
+        texts = {
+            "AB": "no data available",
+            "H": "—",
+            "BIP": "—",
+            "Barrels": "—",
+            "HR": "—",
+            "EV": "—",
+            "Barrel/PA %": "—",
+            "Hard-Hit %": "—",
+            "AVG": "—",
+            "SLG": "—",
+            "ISO": "—",
+            "+350 Pull Air %": "—",
+            "xwOBA": "—",
+            "Swing-Str %": "—",
+        }
+        styles = {column: _REASON_CSS for column in texts}
+        return texts, styles
+    rate_texts: dict[str, str | None] = {
+        "EV": (f"{float(line.exit_velocity):.1f}" if line.exit_velocity is not None else None),
+        "Barrel/PA %": (_pct_text(line.barrel_per_pa) if line.barrel_per_pa is not None else None),
+        "Hard-Hit %": (_pct_text(line.hard_hit_share) if line.hard_hit_share is not None else None),
+        "AVG": (_avg_text(line.batting_average) if line.batting_average is not None else None),
+        "SLG": _avg_text(line.slugging) if line.slugging is not None else None,
+        "ISO": _avg_text(line.iso) if line.iso is not None else None,
+        "+350 Pull Air %": (
+            _pct_text(line.pull_air_350_share) if line.pull_air_350_share is not None else None
+        ),
+        "xwOBA": _avg_text(line.expected_woba) if line.expected_woba is not None else None,
+        "Swing-Str %": _pct_text(line.whiff_share) if line.whiff_share is not None else None,
+    }
+    texts = {
+        "AB": str(line.at_bats),
+        "H": str(line.hits),
+        "BIP": str(line.batted_balls) if line.batted_balls is not None else "—",
+        "Barrels": str(line.barrels) if line.barrels is not None else "—",
+        "HR": str(line.home_runs),
+    }
+    styles: dict[str, str] = {}
+    if line.batted_balls is None:
+        styles["BIP"] = _REASON_CSS
+    if line.barrels is None:
+        styles["Barrels"] = _REASON_CSS
+    for column, text in rate_texts.items():
+        if text is None:
+            texts[column] = "—"
+            styles[column] = _REASON_CSS
+        else:
+            texts[column] = text
+    return texts, styles
+
+
 def _render_matchups(board: SlateBoard) -> BatterCard | None:
     st.caption(
-        "Per game: the venue, the expected starters, and both lineups with "
-        "grades. Lineups marked estimated are the club's highest-usage bats "
-        "until the posted order arrives. Select a batter row to open their "
-        "recent-form detail."
+        "One row per batter against the expected starter's mix — pitches at "
+        "or above a 14% usage share over the named window (D-079). Every "
+        "column is computed over that scope; the grade is always the L30 "
+        "computation, whichever view is showing. Select a batter row to "
+        "open their recent-form detail."
+    )
+    season_view = st.toggle(
+        "Season view — every column reads the season sources; the grade stays L30",
+        value=False,
+        key="matchups_season_view",
+        help=(
+            "D-079's toggle. Season +350 ft Pull Air % has no published "
+            "source, so that cell names the absence."
+        ),
     )
     selected: BatterCard | None = None
     for game in board.games:
@@ -1271,29 +1340,60 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
             card.full_name if card else "TBD" for card in (game.away_pitcher, game.home_pitcher)
         )
         with st.expander(f"{game.away_team} at {game.home_team} — {game.venue_name} · {pitchers}"):
-            for label, batters in (("Away", game.away_batters), ("Home", game.home_batters)):
+            for label, batters, opposing_card in (
+                ("Away", game.away_batters, game.home_pitcher),
+                ("Home", game.home_batters, game.away_pitcher),
+            ):
                 st.markdown(f"**{label} lineup**")
+                if batters:
+                    if opposing_card is None:
+                        scope_text = "no expected starter named — no mix to line up against"
+                    elif batters[0].mix_label:
+                        scope_text = f"vs {opposing_card.full_name}'s mix — {batters[0].mix_label}"
+                    else:
+                        scope_text = f"vs {opposing_card.full_name} — no mix record at any reach"
+                    st.caption(
+                        f"Scope: {scope_text}. "
+                        + (
+                            "Columns read the batter's season sources."
+                            if season_view
+                            else (
+                                "Columns read the batter's last 30 days "
+                                "against that mix's qualifying pitches."
+                            )
+                        )
+                    )
                 text_rows: list[dict[str, str]] = []
                 style_rows: list[dict[str, str]] = []
                 for card in batters:
                     evaluated = isinstance(card.result, EvaluatedGradeResult)
-                    text_rows.append(
-                        {
-                            "#": (
-                                str(card.order_position) if card.order_position is not None else "—"
-                            ),
-                            "Batter": card.full_name,
-                            "Bats": card.bats,
-                            "Grade": (card.result.grade.value if evaluated else _NOT_EVALUABLE),
-                            "Total": (
-                                f"{float(card.result.total_score):.1f}"
-                                if evaluated
-                                else _NOT_EVALUABLE
-                            ),
-                            "Lineup": "est." if card.lineup_is_estimate else "",
-                        }
+                    line = card.season_line if season_view else card.mix_line
+                    metric_texts, metric_styles = _grid_line_cells(line)
+                    form_value = card.form.exit_velocity if card.form else None
+                    form_text = (
+                        f"{float(form_value.value):.1f} (L{form_value.window_days})"
+                        if form_value is not None and form_value.value is not None
+                        else "—"
                     )
-                    style_rows.append({} if evaluated else {"Total": _REASON_CSS})
+                    texts = {
+                        "#": (str(card.order_position) if card.order_position is not None else "—"),
+                        "Batter": card.full_name,
+                        "Bats": card.bats,
+                    }
+                    texts.update(metric_texts)
+                    texts["Form (EV)"] = form_text
+                    texts["Grade"] = card.result.grade.value if evaluated else _NOT_EVALUABLE
+                    texts["Total"] = (
+                        f"{float(card.result.total_score):.1f}" if evaluated else _NOT_EVALUABLE
+                    )
+                    texts["Lineup"] = "est." if card.lineup_is_estimate else ""
+                    text_rows.append(texts)
+                    styles = dict(metric_styles)
+                    if form_value is None or form_value.value is None:
+                        styles["Form (EV)"] = _REASON_CSS
+                    if not evaluated:
+                        styles["Total"] = _REASON_CSS
+                    style_rows.append(styles)
                 event = st.dataframe(
                     styled_text_frame(pd.DataFrame(text_rows), pd.DataFrame(style_rows)),
                     hide_index=True,
