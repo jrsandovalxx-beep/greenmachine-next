@@ -167,6 +167,8 @@ class NwsWeatherAdapter:
     proves this class without a socket and GM-008 stays armed with no carve-out.
     """
 
+    source = SOURCE
+
     def __init__(
         self,
         transport: Transport,

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from greenmachine.inputs import ParkVenue, SnapshotField, WeatherForecast
+from greenmachine.inputs import ParkVenue, SnapshotField, SourceRecord, WeatherForecast
 
 
 class WeatherAdapter(Protocol):
@@ -30,8 +30,13 @@ class WeatherAdapter(Protocol):
 
     An implementation names its own source in the field it returns
     (``SnapshotField.source_id``), so a snapshot built from several adapters
-    keeps each observation's provenance separable.
+    keeps each observation's provenance separable. The ``source`` record is
+    the same naming, hoisted to the seam: a snapshot builder must *declare*
+    every source its fields name (the contract rejects an undeclared id), so
+    the record cannot live only inside individual fields.
     """
+
+    source: SourceRecord
 
     def forecast_for(self, venue: ParkVenue) -> SnapshotField[WeatherForecast]:
         """The forecast observed for ``venue`` — present, or absent with a reason."""
