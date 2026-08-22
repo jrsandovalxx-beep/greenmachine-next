@@ -606,8 +606,9 @@ def test_arsenal_table_lists_the_whole_season_with_threshold_dimming() -> None:
 
 
 def test_arsenal_side_filter_keeps_metrics_season_long() -> None:
-    """D-087: the side toggle filters WHICH pitches list — never the numbers:
-    a filtered row keeps its full-season figures."""
+    """D-087: the side toggle filters WHICH pitches list — and only Usage%
+    changes basis (D-102). Every other number on a filtered row keeps its
+    full-season figures."""
     from types import SimpleNamespace
 
     import streamlit_app
@@ -624,9 +625,50 @@ def test_arsenal_side_filter_keeps_metrics_season_long() -> None:
         pitcher, threshold=0.15, side_filter=pitcher.pitches_vs_right
     )
     assert list(texts["Pitch"]) == ["4-Seam Fastball"]
-    # Season figures, untouched by the filter.
+    # Season figures, untouched by the filter — usage included, since no
+    # per-side basis was supplied (the toggle's empty-record fallback).
     assert texts.at[0, "PA"] == "100"
     assert texts.at[0, "Usage%"] == "45.0%"
+
+
+def test_arsenal_side_toggle_switches_usage_to_the_hitter_hand_basis() -> None:
+    """D-102: with the side toggle on, Usage% is his share of pitches to
+    that hitter hand over the recent window — the arsenal board's all-batters
+    usage never claimed a per-side split. Rows order by the shown basis and
+    dim against it; every other column stays season-long."""
+    from types import SimpleNamespace
+
+    import streamlit_app
+
+    pitcher = SimpleNamespace(
+        season_lines=(
+            _season_line(),  # FF, 45% season usage
+            _season_line(pitch_type="CH", pitch_name="Changeup", usage_share=Decimal("0.20")),
+        ),
+        pitches_vs_left=frozenset({"FF", "CH"}),
+        pitches_vs_right=frozenset({"FF", "CH"}),
+    )
+    side_usage = {"FF": Decimal("0.30"), "CH": Decimal("0.70")}
+    texts, styles = streamlit_app._arsenal_frames(
+        pitcher,
+        threshold=0.15,
+        side_filter=pitcher.pitches_vs_right,
+        side_usage=side_usage,
+    )
+    # The changeup leads vs this hand, so it sorts first and shows 70%.
+    assert list(texts["Pitch"]) == ["Changeup", "4-Seam Fastball"]
+    assert texts.at[0, "Usage%"] == "70.0%"
+    assert texts.at[1, "Usage%"] == "30.0%"
+    # Other numbers stay the season board's.
+    assert texts.at[0, "PA"] == "100"
+    assert texts.at[0, "wOBA"] == ".310"
+    # The threshold dims on the shown basis: raising it past 30% dims the
+    # fastball even though its season usage is 45%.
+    assert "Usage%" not in styles.columns
+    _, styles_high = streamlit_app._arsenal_frames(
+        pitcher, threshold=0.45, side_filter=pitcher.pitches_vs_right, side_usage=side_usage
+    )
+    assert styles_high.at[1, "Usage%"] == streamlit_app._BELOW_MIX_CSS
 
 
 def test_arsenal_side_note_names_a_no_op_filter() -> None:

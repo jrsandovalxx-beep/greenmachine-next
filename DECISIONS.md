@@ -2074,3 +2074,24 @@ form windows stay anchored to now, as under D-092. The bound is honesty,
 not aesthetics: beyond a month back the pitch record thins and beyond a
 week ahead there is no slate to answer for.
 
+## D-102 - xwOBA leaves the popups, and the arsenal side toggle switches usage to the hitter hand
+**xwOBA is removed from the recent-form grid in the batter detail popup —
+it stays on the Matchups main tables — and the Arsenal side toggle now
+rebases Usage% to the hitter hand: with the filter on, usage is the
+pitcher's share of pitches to that side over the recent 31-day record,
+named on screen, while every other arsenal number stays season-long
+(Product Owner, 2026-08-22: "Let's remove xWOBA from recent form in all
+pop ups. Leave it on match ups main tables. In arsenal, is the usage
+based off HITTER HAND or is it just their usage in general? If it's in
+general, the toggle should change usage to being based on hitter hand.").**
+The owner's question diagnosed the gap precisely: the arsenal leaderboard
+publishes one usage figure per pitch spanning all batters — verified
+against the source, which honors no handedness parameter — so the toggle
+used to filter rows while leaving an all-batters number on them. The only
+per-side split on the board is the pitch window that already powers the
+filter, so that record now carries the per-side shares; a side with no
+pitches maps to nothing rather than inventing one. Rows sort and dim on
+whichever basis the column shows. xwOBA's removal is from the form model
+itself, not just the grid: the Matchups tables read their own grid-line
+path, so nothing they show changed.
+

@@ -709,7 +709,7 @@ def _side_factor(game: GameCard, side: str | None) -> ParkFactor | None:
 # --------------------------------------------------------------------------
 
 # Display precision per form metric: the rates and angles at one decimal,
-# matching the live board; xwOBA at the three-decimal convention.
+# matching the live board.
 _FORM_PRECISION = {
     "Barrel%": 1,
     "EV": 1,
@@ -717,7 +717,6 @@ _FORM_PRECISION = {
     "IdealAtkAng%": 1,
     "Pull Air %": 1,
     "Hard%": 1,
-    "xwOBA": 3,
 }
 
 # D-078's wording for a metric with no observations at either window reach.
@@ -727,7 +726,8 @@ _FORM_ABSENT_TEXT = "not enough data available"
 def _form_section_frames(form: FormSection) -> tuple[pd.DataFrame, pd.DataFrame]:
     """(texts, styles) for ``styled_text_frame`` — D-068's one-row section.
 
-    The columns are exactly D-068's seven, in its order. A metric present and
+    The columns are D-068's set minus xwOBA, which left the popup under
+    D-102 (it stays on the Matchups main tables). A metric present and
     sufficient shows its value; one resolved on the L14 fallback names the
     window ("· L14"); one below its sample floor keeps its value with its
     exact sample and an INSUFFICIENT marker on amber — present, never absent
@@ -742,7 +742,6 @@ def _form_section_frames(form: FormSection) -> tuple[pd.DataFrame, pd.DataFrame]
         ("IdealAtkAng%", form.ideal_attack_angle_pct),
         ("Pull Air %", form.pull_air_pct),
         ("Hard%", form.hard_hit_pct),
-        ("xwOBA", form.xwoba),
     )
     texts: dict[str, str] = {}
     styles: dict[str, str] = {}
@@ -936,24 +935,35 @@ def _arsenal_frames(
     *,
     threshold: float,
     side_filter: frozenset[str] | None,
+    side_usage: dict[str, Decimal] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """The Arsenal table (D-087): every pitch he throws, season-long figures
     from the arsenal board — never a window. ``side_filter`` trims the rows
-    to the pitch types he used against the batter's side (its source is named
-    in the surrounding prose); the numbers themselves stay season-long.
+    to the pitch types he used against the batter's side, and with
+    ``side_usage`` set the Usage% column switches to that side's basis — his
+    share of pitches to this hitter hand over the recent window (D-102), the
+    only per-side split the sources publish. Every other number stays
+    season-long, and the surrounding prose names the switch.
 
-    Rows below the usage threshold are dimmed; the board publishes no
-    home-run or barrel counts, so those columns simply do not exist here
-    rather than showing invented zeros.
+    Rows below the usage threshold — on whichever basis the column shows —
+    are dimmed; the board publishes no home-run or barrel counts, so those
+    columns simply do not exist here rather than showing invented zeros.
     """
+    lines = [
+        line
+        for line in pitcher.season_lines
+        if side_filter is None or line.pitch_type in side_filter
+    ]
+    if side_usage is not None:
+        lines.sort(key=lambda line: side_usage.get(line.pitch_type, Decimal(0)), reverse=True)
     text_rows: list[dict[str, str]] = []
     style_rows: list[dict[str, str]] = []
-    for line in pitcher.season_lines:
-        if side_filter is not None and line.pitch_type not in side_filter:
-            continue
+    for line in lines:
+        usage = side_usage.get(line.pitch_type) if side_usage is not None else None
+        shown_usage = line.usage_share if usage is None else usage
         texts = {
             "Pitch": line.pitch_name or line.pitch_type or "— (untagged)",
-            "Usage%": f"{float(line.usage_share):.1%}",
+            "Usage%": f"{float(shown_usage):.1%}",
             "PA": str(line.plate_appearances),
             "AVG": _avg_text(line.batting_average),
             "SLG": _avg_text(line.slugging),
@@ -964,7 +974,7 @@ def _arsenal_frames(
             "K%": _pct_text(line.strikeout_share),
             "Hard-Hit%": _pct_text(line.hard_hit_share),
         }
-        if float(line.usage_share) < threshold:
+        if float(shown_usage) < threshold:
             styles = {column: _BELOW_MIX_CSS for column in texts}
         else:
             rates: tuple[tuple[str, Decimal | None], ...] = (
@@ -1149,6 +1159,7 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
     else:
         side_known = card.batting_side in ("L", "R")
         side_filter: frozenset[str] | None = None
+        side_usage: dict[str, Decimal] | None = None
         side_note = ""
         if side_known:
             side_text = "left" if card.batting_side == "L" else "right"
@@ -1157,8 +1168,9 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
                 value=False,
                 key=f"arsenal_side_{card.player_id}",
                 help="Filters the rows to the pitch types he has thrown to "
-                "this side in the recent pitch record; the numbers stay "
-                "season-long either way.",
+                "this side in the recent pitch record, and Usage% becomes his "
+                "share of pitches to this side over that record (D-102); "
+                "every other number stays season-long either way.",
             )
             if side_on:
                 side_set = (
@@ -1168,11 +1180,23 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
                 )
                 if side_set:
                     side_filter = side_set
+                    side_usage = (
+                        pitcher.usage_vs_left
+                        if card.batting_side == "L"
+                        else pitcher.usage_vs_right
+                    )
                 side_note = _arsenal_side_note(pitcher, side_set, side_text)
         arsenal_texts, arsenal_styles = _arsenal_frames(
-            pitcher, threshold=threshold, side_filter=side_filter
+            pitcher, threshold=threshold, side_filter=side_filter, side_usage=side_usage
         )
         st.dataframe(styled_text_frame(arsenal_texts, arsenal_styles), hide_index=True)
+        if side_usage is not None:
+            st.caption(
+                f"Usage% is his share of pitches to {side_text}-handed "
+                "batters over the recent 31-day record — the arsenal board "
+                "publishes usage across all batters only, so the per-hand "
+                "basis comes from the pitch window (D-102)."
+            )
         if side_note:
             st.caption(side_note)
         season_note = f" Season board: {pitcher.season_lines_year}" + (
@@ -1183,8 +1207,10 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
         st.caption(
             "Every pitch he throws, season-long figures from the arsenal "
             "board — never a window (D-087). The side filter reads the recent "
-            "31-day pitch record, the only per-side split on the board; the "
-            "numbers stay season-long. Rows dimmed sit below the threshold." + season_note
+            "31-day pitch record, the only per-side split on the board; with "
+            "it on, Usage% switches to that side's window share (D-102) and "
+            "every other number stays season-long. Rows dimmed sit below the "
+            "threshold." + season_note
         )
 
     st.markdown("**Recent exit velocity — event log**")

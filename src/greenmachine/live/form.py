@@ -34,7 +34,6 @@ _HOME_PLATE_DEPTH_Y = Decimal("198.27")
 
 MIN_BBE_FORM = 15
 MIN_AIR_BALLS_FORM = 15
-MIN_PA_FORM = 15
 MIN_COMPETITIVE_SWINGS_FORM = 25
 
 # Tracking-board column names, lifted so no call site mixes a tracked-metric
@@ -56,8 +55,6 @@ class FormMetrics:
     air_balls: int
     pull_air_balls: int
     pull_air_pct: Decimal | None  # per air ball, percent scale
-    plate_appearance_events: int
-    xwoba: Decimal | None
 
 
 def is_pull_air(event: PitchEvent) -> bool:
@@ -104,19 +101,6 @@ def aggregate_form(events: tuple[PitchEvent, ...]) -> FormMetrics:
         for event in air_events
         if event.hc_x is not None and event.hc_y is not None and event.batter_side in ("L", "R")
     ]
-    pa_events = [event for event in events if event.event]
-    woba_pairs = [
-        (event.woba_value, event.estimated_woba)
-        for event in pa_events
-        if event.woba_denom is not None and event.woba_denom > 0
-    ]
-    xwoba: Decimal | None = None
-    if woba_pairs:
-        total = sum(
-            (value if value is not None else (estimate if estimate is not None else Decimal(0)))
-            for value, estimate in woba_pairs
-        )
-        xwoba = total / Decimal(len(woba_pairs))
     ev_avg: Decimal | None = None
     if speeds:
         ev_avg = sum(speeds) / Decimal(len(speeds))
@@ -130,8 +114,6 @@ def aggregate_form(events: tuple[PitchEvent, ...]) -> FormMetrics:
         air_balls=len(measurable_air),
         pull_air_balls=pulls,
         pull_air_pct=_pct(pulls, len(measurable_air)),
-        plate_appearance_events=len(pa_events),
-        xwoba=xwoba,
     )
 
 
@@ -147,14 +129,16 @@ class FormValue:
 
 @dataclass(frozen=True)
 class FormSection:
-    """The nine form metrics after L7/L14 resolution, all nullable."""
+    """The eight form metrics after L7/L14 resolution, all nullable.
+
+    xwOBA left the popup under D-102 — it stays on the Matchups main
+    tables, whose grid lines carry it."""
 
     barrel_pct: FormValue
     exit_velocity: FormValue
     hard_hit_pct: FormValue
     sweet_spot_pct: FormValue
     pull_air_pct: FormValue
-    xwoba: FormValue
     attack_angle_degrees: FormValue
     ideal_attack_angle_pct: FormValue
     bat_speed_mph: FormValue
@@ -209,7 +193,7 @@ def resolve_form_section(
     recent_tracking: tuple[BatTrackingRow, ...],
     extended_tracking: tuple[BatTrackingRow, ...],
 ) -> FormSection:
-    """Resolve the nine form metrics with per-metric L7 to L14 fallback."""
+    """Resolve the eight form metrics with per-metric L7 to L14 fallback."""
     aa_value_recent, aa_sample_recent, aa_value_extended, aa_sample_extended = _tracking_value(
         recent_tracking, extended_tracking, "attack_angle"
     )
@@ -261,13 +245,6 @@ def resolve_form_section(
             extended.pull_air_pct,
             extended.air_balls,
             MIN_AIR_BALLS_FORM,
-        ),
-        xwoba=_pick(
-            recent.xwoba,
-            recent.plate_appearance_events,
-            extended.xwoba,
-            extended.plate_appearance_events,
-            MIN_PA_FORM,
         ),
         attack_angle_degrees=_pick(
             aa_value_recent,
