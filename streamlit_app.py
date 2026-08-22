@@ -1541,22 +1541,32 @@ def render_live_board() -> None:
             "NWS adapter, then grades every batter under the v1 config (D-071)."
         )
         return
-    # D-092: the slate day is the viewer's choice — yesterday, today, or
-    # tomorrow — not a fixed "today". Only the slate changes; the knowledge
-    # cutoff (lineup estimates, form windows) stays anchored to now.
+    # D-101: the slate day is any date on the calendar the viewer picks —
+    # a date selector, not a three-way toggle. Only the slate changes; the
+    # knowledge cutoff (lineup estimates, form windows) stays anchored to
+    # now. The picker is bounded to a month back and a week ahead: beyond
+    # that the sources cannot answer the slate's questions honestly.
+    today = date.today()
     title_col, nav_col = st.columns([3, 2])
     with nav_col:
-        day_choice = st.segmented_control(
-            "Slate day",
-            ["Yesterday", "Today", "Tomorrow"],
-            default="Today",
-            key="slate_day_choice",
+        chosen = st.date_input(
+            "Slate date",
+            value=today,
+            min_value=today - timedelta(days=30),
+            max_value=today + timedelta(days=7),
+            key="slate_date_choice",
         )
-    today = date.today()
-    offset = {"Yesterday": -1, "Today": 0, "Tomorrow": 1}[(day_choice or "Today")]
-    slate_date = today + timedelta(days=offset)
+    slate_date = chosen if isinstance(chosen, date) else today
+    relative = {
+        today - timedelta(days=1): "yesterday",
+        today: "today",
+        today + timedelta(days=1): "tomorrow",
+    }.get(slate_date)
+    heading = f"Slate — {slate_date.isoformat()}"
+    if relative is not None:
+        heading += f" ({relative})"
     with title_col:
-        st.subheader(f"Slate — {slate_date.isoformat()} ({(day_choice or 'Today').lower()})")
+        st.subheader(heading)
     blot = st.empty()
     blot.markdown(BLOT_HTML, unsafe_allow_html=True)
     board = live_board(slate_date.isoformat())

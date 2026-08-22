@@ -2061,3 +2061,16 @@ grants it exactly one more attempt; a second truncation answers as source
 unavailable. What remains source-limited: the bat-tracking leaderboards
 enforce their own sample floors, so a hitter short of a floor still shows a
 named "not enough data" absence — that is the discipline, not breakage.
+
+## D-101 - The slate day is a calendar date picker
+**The Yesterday/Today/Tomorrow toggle becomes a date selector: the viewer
+picks any slate date off a calendar, bounded to a month back and a week
+ahead (Product Owner, 2026-08-22: "Instead of a today yesterday and
+tomorrow let's have a date selector please.").** The relative words
+survive where they are true — the heading still says "(today)",
+"(yesterday)" or "(tomorrow)" on those dates — and any other date stands
+on its own. Only the slate changes with the pick; lineup estimates and
+form windows stay anchored to now, as under D-092. The bound is honesty,
+not aesthetics: beyond a month back the pitch record thins and beyond a
+week ahead there is no slate to answer for.
+
