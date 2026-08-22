@@ -1944,3 +1944,90 @@ pitch, in feet, with a dash where the pitch carries no reading (Product
 Owner, 2026-08-21: "lets include distance of the ball hit in the event log
 for recent exit velo").** Display-only: the log's rows, ordering, and
 threshold filter are unchanged.
+
+## D-092 - The slate day is the viewer's choice: yesterday, today, or tomorrow
+**The live board header gains a Yesterday / Today / Tomorrow control that
+picks which slate date the board builds (Product Owner, 2026-08-22: "I want
+the ability to back to the previous slate... I should have the ability to go
+between yesterday todsay and tomorrow").** Only the slate changes; the
+knowledge cutoff (lineup estimates, form windows, the 31-day pitch record)
+stays anchored to now, so yesterday's board is yesterday's matchups read with
+today's knowledge — named as such. Every selectable grid key carries the
+slate date so a day switch remounts the grids with empty selections, and the
+per-date board cache keeps the three days independently warm.
+
+## D-093 - Park geometry binds to the Seamheads Ballparks Database
+**The park-diagram feature (next phase) draws its outfield distances and wall
+heights from the Seamheads Ballparks Database year pages, ratified by the
+Product Owner (2026-08-22: "yes you can use seamheads").** The year page
+publishes the twelve outfield distances (LF through RF with the gaps and
+power alleys) plus wall heights per segment; the values were verified against
+the Product Owner's example diagram (Coors Field: 347/390/415/375/350 with
+the 13'/8'/17' wall profile) before ratification. Clem's Baseball
+(andrewclem.com) supplies what Seamheads lacks — the home-plate-to-center
+compass orientation the parked wind work needs. This decision ratifies
+sources only; the diagram feature itself is next-phase scope.
+
+## D-094 - A neon money tag marks batters who homered, on the Sluggers tab
+**The Sluggers shortlist gains an HR column: a neon-green "$" beside any
+batter who homered in his most recent game day on or before the slate,
+blank otherwise (Product Owner, 2026-08-22: "a small icon or tag (money
+sign in neon green) next to playerws who hit homeruns on the sluggers tab.
+So somthing shouyld be checking for homeruns hit").** The pipeline computes
+`homered_on_last_game_day` per batter: the batter's latest played day on or
+before the slate is found, and the tag shows only when that day holds a
+`home_run` event — a homer earlier in the record with a quieter game after
+it does not tag. No record, no tag: the column never guesses. Viewed on a
+past slate (D-092), the tag marks who homered on that slate day.
+
+## D-095 - The backtest view tallies grade hit rates and ROI on entered odds
+**A Backtest button in the header's top-right corner swaps the board for a
+backtest view (Product Owner, 2026-08-22: "i also want a backtest tab that
+tracks ROI or hit rates for the grades. we can add it as a button in top
+right corner instead of adding it to the wheel").** Each past slate (last 7
+or 14 days) is regraded with an as-of of 20:00 UTC the prior evening, so no
+event from the measured day can leak into the grade; outcomes are that day's
+`home_run` events. Hit rates pool per grade letter (S/A/B/C/D);
+not-evaluable batters carry no grade and are excluded. ROI prices every
+graded batter as a 1-unit stake at American odds the viewer enters — the
+product holds no odds source. Two named approximations ride on screen:
+season boards (hitting, arsenals, statcast) are current snapshots when
+regrading a past date, and weather is not reconstructed (temperature and
+wind bind as absent). The backtest is a view behind a button, not a dial
+tab — the dial is for reading a slate, this is for auditing the grades.
+
+## D-096 - BIP leaves the board; counting stats stand alone
+**The BIP column is removed from every surface (Product Owner, 2026-08-22:
+"I would like to move away from BIP as well and remove them where ever they
+are, I prefer, ABs and Hits. alone.").** The matchups grid's counting
+columns are now AB, H, Barrels, HR, and the +350 ft count. The batted-ball
+count stays inside the pipeline as the hard-hit and pull-air denominators'
+scope record, but it is never displayed.
+
+## D-097 - +350 ft is a count of balls, not a share
+**The +350 ft column shows the number of batted balls hit 350 feet or
+farther in the scope — a counting number beside AB and H, not a percentage
+(Product Owner, 2026-08-22: "also 350+ is number of balls hit 30ft+", read
+with the metric's own name as 350 ft: a 30-foot filter would tally nearly
+every batted ball and mean nothing on a home-run board).** D-090's
+definition stands — distance only, any direction, off the source's
+projected distance — only the display shape changes. The season view still
+has no source for it and names the absence.
+
+## D-098 - The matchups grid drops its Form column
+**The Form (EV) column leaves the matchups grid (Product Owner, 2026-08-22:
+"lets also remove 'form' column in matchups tab, since we can expand and
+see the full form metrifcs").** The full form section remains one tap away
+in the batter detail popup, so the grid stays lean; nothing about the form
+computation itself changes.
+
+## D-099 - A no-op arsenal side filter says so in words
+**When the batter detail's "only pitches he uses vs this side" toggle removes
+no rows — because the starter threw his entire arsenal to that side over the
+recent 31-day record — a caption names it: "nothing to filter" (Product
+Owner, 2026-08-22: "toggle doesnt seem to be wokring nothing changes, please
+check it").** Investigation on the live board confirmed the toggle itself
+was correct: Ryan Weathers threw all five of his pitch types to right-handed
+batters in the window, so the filter legitimately changed nothing — the bug
+was the silence, not the mechanics. The empty-record fallback caption
+("showing the full arsenal") is unchanged.

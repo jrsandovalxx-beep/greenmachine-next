@@ -47,7 +47,7 @@ from __future__ import annotations
 import os
 import subprocess
 from collections.abc import Callable
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from importlib import metadata
 from pathlib import Path
@@ -79,6 +79,13 @@ from greenmachine.grid import (
 from greenmachine.inputs import InputSnapshot, Window
 from greenmachine.inputs.contract import Handedness, ParkFactor, ParkVenue, VenueType
 from greenmachine.inputs.savant_park_factors import basis_statement, read_factors
+from greenmachine.live.backtest import (
+    BacktestRow,
+    outcomes_for_day,
+    roi_per_unit,
+    slate_as_of,
+    tally_grades,
+)
 from greenmachine.live.form import FormSection, FormValue
 from greenmachine.live.grading import QUALIFYING_USAGE_SHARE
 from greenmachine.live.mlb_api import FetchFailure, MlbStatsApi
@@ -594,6 +601,11 @@ _REASON_CSS = "color: #7d8f84; font-style: italic"
 # reason as the highlight — an alpha background reads as a washed-out block.
 _INSUFFICIENT_CSS = "background-color: #7a5c14; color: #ffe9a8"
 
+# Neon-green money tag (D-094): a "$" beside a shortlist batter who homered
+# in his most recent game day on or before this slate. Text shadow gives the
+# neon glow; no background, so the cell keeps its theme fill.
+_MONEY_CSS = "color: #39ff14; text-shadow: 0 0 8px #39ff14; font-weight: 700"
+
 
 def _weather_text(game: GameCard) -> tuple[str, bool]:
     """(text, is-absent) for the shortlist's weather column: the temperature
@@ -645,6 +657,7 @@ def _slugger_frames(board: SlateBoard) -> tuple[pd.DataFrame, pd.DataFrame, list
                 weather, weather_absent = _weather_text(game)
                 texts = {
                     "Batter": card.full_name,
+                    "HR": "$" if card.homered_on_last_game_day else "",
                     "Team": card.team,
                     "Versus": opposing.full_name if opposing else "TBD",
                     "Grade": card.result.grade.value,
@@ -655,6 +668,8 @@ def _slugger_frames(board: SlateBoard) -> tuple[pd.DataFrame, pd.DataFrame, list
                     "Tags": _card_tags(card),
                 }
                 styles = {"Grade": _HIGHLIGHT}
+                if card.homered_on_last_game_day:
+                    styles["HR"] = _MONEY_CSS
                 if factor is None:
                     styles["Park factor"] = _REASON_CSS
                 if weather_absent:
@@ -967,6 +982,24 @@ def _arsenal_frames(
     return pd.DataFrame(text_rows), pd.DataFrame(style_rows)
 
 
+def _arsenal_side_note(pitcher: PitcherCard, side_set: frozenset[str], side_text: str) -> str:
+    """What the side toggle did, in words (D-099). An empty record falls back
+    to the full arsenal, and a record covering every shown pitch removes
+    nothing — both are named, or a no-op toggle reads as broken."""
+    if not side_set:
+        return (
+            f"He threw nothing to {side_text}-handed batters in the recent "
+            "pitch record — showing the full arsenal."
+        )
+    shown = {line.pitch_type for line in pitcher.season_lines}
+    if shown <= side_set:
+        return (
+            f"He threw every pitch in his arsenal to {side_text}-handed "
+            "batters over the recent 31-day record — nothing to filter."
+        )
+    return ""
+
+
 def _opposing_pitcher(game: GameCard, card: BatterCard) -> PitcherCard | None:
     """The starter this batter grades against — the other club's probable."""
     return game.away_pitcher if card.team == game.home_team else game.home_pitcher
@@ -1134,11 +1167,7 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
                 )
                 if side_set:
                     side_filter = side_set
-                else:
-                    side_note = (
-                        f"He threw nothing to {side_text}-handed batters in the "
-                        "recent pitch record — showing the full arsenal."
-                    )
+                side_note = _arsenal_side_note(pitcher, side_set, side_text)
         arsenal_texts, arsenal_styles = _arsenal_frames(
             pitcher, threshold=threshold, side_filter=side_filter
         )
@@ -1185,12 +1214,13 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "The shortlist (D-084): only batters graded A or S under the provisional "
         "v1 model (D-071). Park factor is the batter-side home-run factor; "
         "weather is the venue reading; the tags box carries advisories — low "
-        "samples, missing components, estimated lineups. Select a row to open "
-        "the batter's detail."
+        "samples, missing components, estimated lineups. A neon **$** marks a "
+        "batter who homered in his most recent game day on or before this "
+        "slate (D-094). Select a row to open the batter's detail."
     )
     texts, styles, cards = _slugger_frames(board)
     if texts.empty:
-        st.info("No batter grades A or S on today's slate.")
+        st.info(f"No batter grades A or S on the {board.official_date} slate.")
         return None
     event = st.dataframe(
         styled_text_frame(texts, styles),
@@ -1198,7 +1228,7 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         height=frame_height("Roomy", len(texts)),
         on_select="rerun",
         selection_mode="single-row",
-        key=f"live_sluggers_{_selection_epoch()}",
+        key=f"live_sluggers_{board.official_date}_{_selection_epoch()}",
     )
     selected_rows = event.selection.rows
     if not selected_rows:
@@ -1271,7 +1301,6 @@ def _grid_line_cells(line: BatterGridLine | None) -> tuple[dict[str, str], dict[
         texts = {
             "AB": "no data available",
             "H": "—",
-            "BIP": "—",
             "Barrels": "—",
             "HR": "—",
             "EV": "—",
@@ -1280,7 +1309,7 @@ def _grid_line_cells(line: BatterGridLine | None) -> tuple[dict[str, str], dict[
             "AVG": "—",
             "SLG": "—",
             "ISO": "—",
-            "+350 ft %": "—",
+            "+350 ft": "—",
             "Pull Air %": "—",
             "xwOBA": "—",
             "Swing-Str %": "—",
@@ -1294,9 +1323,6 @@ def _grid_line_cells(line: BatterGridLine | None) -> tuple[dict[str, str], dict[
         "AVG": (_avg_text(line.batting_average) if line.batting_average is not None else None),
         "SLG": _avg_text(line.slugging) if line.slugging is not None else None,
         "ISO": _avg_text(line.iso) if line.iso is not None else None,
-        "+350 ft %": (
-            _pct_text(line.distance_350_share) if line.distance_350_share is not None else None
-        ),
         "Pull Air %": (_pct_text(line.pull_air_share) if line.pull_air_share is not None else None),
         "xwOBA": _avg_text(line.expected_woba) if line.expected_woba is not None else None,
         "Swing-Str %": _pct_text(line.whiff_share) if line.whiff_share is not None else None,
@@ -1304,15 +1330,17 @@ def _grid_line_cells(line: BatterGridLine | None) -> tuple[dict[str, str], dict[
     texts = {
         "AB": str(line.at_bats),
         "H": str(line.hits),
-        "BIP": str(line.batted_balls) if line.batted_balls is not None else "—",
         "Barrels": str(line.barrels) if line.barrels is not None else "—",
         "HR": str(line.home_runs),
+        # D-097: a count of balls hit 350+ feet, not a rate — the PO reads
+        # counting numbers (AB, H, barrels, HR, 350+ balls), not BIP shares.
+        "+350 ft": (str(line.distance_350_count) if line.distance_350_count is not None else "—"),
     }
     styles: dict[str, str] = {}
-    if line.batted_balls is None:
-        styles["BIP"] = _REASON_CSS
     if line.barrels is None:
         styles["Barrels"] = _REASON_CSS
+    if line.distance_350_count is None:
+        styles["+350 ft"] = _REASON_CSS
     for column, text in rate_texts.items():
         if text is None:
             texts[column] = "—"
@@ -1335,7 +1363,7 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
         value=False,
         key="matchups_season_view",
         help=(
-            "D-079's toggle. Season +350 ft % and Pull Air % have no "
+            "D-079's toggle. Season +350 ft and Pull Air % have no "
             "published source, so those cells name the absence."
         ),
     )
@@ -1371,22 +1399,17 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
                 text_rows: list[dict[str, str]] = []
                 style_rows: list[dict[str, str]] = []
                 for card in batters:
+                    # D-098: no Form column here — the full form section is one
+                    # tap away in the batter detail, so the grid stays lean.
                     evaluated = isinstance(card.result, EvaluatedGradeResult)
                     line = card.season_line if season_view else card.mix_line
                     metric_texts, metric_styles = _grid_line_cells(line)
-                    form_value = card.form.exit_velocity if card.form else None
-                    form_text = (
-                        f"{float(form_value.value):.1f} (L{form_value.window_days})"
-                        if form_value is not None and form_value.value is not None
-                        else "—"
-                    )
                     texts = {
                         "#": (str(card.order_position) if card.order_position is not None else "—"),
                         "Batter": card.full_name,
                         "Bats": card.bats,
                     }
                     texts.update(metric_texts)
-                    texts["Form (EV)"] = form_text
                     texts["Grade"] = card.result.grade.value if evaluated else _NOT_EVALUABLE
                     texts["Total"] = (
                         f"{float(card.result.total_score):.1f}" if evaluated else _NOT_EVALUABLE
@@ -1394,8 +1417,6 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
                     texts["Lineup"] = "est." if card.lineup_is_estimate else ""
                     text_rows.append(texts)
                     styles = dict(metric_styles)
-                    if form_value is None or form_value.value is None:
-                        styles["Form (EV)"] = _REASON_CSS
                     if not evaluated:
                         styles["Total"] = _REASON_CSS
                     style_rows.append(styles)
@@ -1404,7 +1425,10 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
                     hide_index=True,
                     on_select="rerun",
                     selection_mode="single-row",
-                    key=f"matchups_{game.game_pk}_{label.lower()}_{_selection_epoch()}",
+                    key=(
+                        f"matchups_{board.official_date}_{game.game_pk}_"
+                        f"{label.lower()}_{_selection_epoch()}"
+                    ),
                 )
                 rows = event.selection.rows
                 if rows and selected is None:
@@ -1506,8 +1530,8 @@ def _open_batter_detail(card: BatterCard, game: GameCard | None) -> None:
 def render_live_board() -> None:
     """The four live tabs (D-072). Live only in a deployed environment: a local
     render never becomes a network call, mirroring the weather seam."""
-    st.subheader("Today's slate")
     if resolve_environment() == "local":
+        st.subheader("Today's slate")
         st.caption(
             "The live board binds only in a deployed environment: locally it "
             "would be a network call, so it stays unbuilt here. Deployed, this "
@@ -1516,12 +1540,28 @@ def render_live_board() -> None:
             "NWS adapter, then grades every batter under the v1 config (D-071)."
         )
         return
+    # D-092: the slate day is the viewer's choice — yesterday, today, or
+    # tomorrow — not a fixed "today". Only the slate changes; the knowledge
+    # cutoff (lineup estimates, form windows) stays anchored to now.
+    title_col, nav_col = st.columns([3, 2])
+    with nav_col:
+        day_choice = st.segmented_control(
+            "Slate day",
+            ["Yesterday", "Today", "Tomorrow"],
+            default="Today",
+            key="slate_day_choice",
+        )
+    today = date.today()
+    offset = {"Yesterday": -1, "Today": 0, "Tomorrow": 1}[(day_choice or "Today")]
+    slate_date = today + timedelta(days=offset)
+    with title_col:
+        st.subheader(f"Slate — {slate_date.isoformat()} ({(day_choice or 'Today').lower()})")
     blot = st.empty()
     blot.markdown(BLOT_HTML, unsafe_allow_html=True)
-    board = live_board(date.today().isoformat())
+    board = live_board(slate_date.isoformat())
     blot.empty()
     if isinstance(board, FetchFailure):
-        st.warning(f"Today's schedule could not be fetched: {board.reason}")
+        st.warning(f"The {slate_date.isoformat()} schedule could not be fetched: {board.reason}")
         return
     st.caption(
         f"Slate of {board.official_date}, assembled {board.as_of:%H:%M UTC}. "
@@ -1656,6 +1696,162 @@ def render_parks_screen() -> None:
         )
 
 
+# --------------------------------------------------------------------------
+# D-095: the backtest view — past slates regraded vs. their outcomes
+# --------------------------------------------------------------------------
+
+_BACKTEST_RANGES = {"Last 7 days": 7, "Last 14 days": 14}
+
+
+@st.cache_data(ttl=DAY_EVENTS_TTL_SECONDS, show_spinner=False)
+def _backtest_board(slate_iso: str) -> SlateBoard | FetchFailure:
+    """Regrade a past slate as of the prior evening (D-095). Weather is not
+    reconstructed: temperature and wind bind as absent, and the affected
+    components name that absence like any other."""
+    api, savant = live_mlb_adapters()
+    slate_date = date.fromisoformat(slate_iso)
+    year = slate_date.year
+
+    def fetch_day(day: date) -> object:
+        return _day_events(day.isoformat(), year)
+
+    return build_board(
+        api=api,
+        savant=savant,
+        slate_date=slate_date,
+        as_of=slate_as_of(slate_date),
+        config=production_config(),
+        fetch_day_events=fetch_day,  # type: ignore[arg-type]
+        temperature_for=lambda venue: None,  # type: ignore[arg-type]
+        park_factors=park_factor_table(),
+        wind_for=lambda venue: None,  # type: ignore[arg-type]
+    )
+
+
+def _backtest_day_rows(rows: tuple[BacktestRow, ...]) -> pd.DataFrame:
+    """One backtested day's outcome rows as a display frame."""
+    return pd.DataFrame(
+        [
+            {
+                "Batter": row.full_name,
+                "Team": row.team,
+                "Grade": row.grade,
+                "Homered": "yes" if row.homered else "",
+            }
+            for row in rows
+        ]
+    )
+
+
+def _render_backtest() -> None:
+    """D-095's backtest: regrade past slates, pool hit rates per grade, and
+    price them at the viewer's own entered odds."""
+    st.subheader("Backtest — grade hit rates")
+    st.caption(
+        "Each past slate is regraded as of the prior evening, so no event from "
+        "the measured day leaks into the grade (D-095). Two named "
+        "approximations: season boards (hitting, pitch arsenals, statcast) are "
+        "today's snapshots — the regrade reads current season rows for a past "
+        "date — and weather is not reconstructed, so temperature and wind are "
+        "absent on these boards. ROI is arithmetic on the odds you enter; the "
+        "product holds no odds source. Not-evaluable batters carry no grade "
+        "and are excluded from the tallies."
+    )
+    if resolve_environment() == "local":
+        st.caption(
+            "The backtest binds only in a deployed environment, like the live "
+            "board: locally a regrade would be a network call, so this view "
+            "stays unbuilt here."
+        )
+        return
+    range_col, odds_col, _ = st.columns([2, 1, 2])
+    with range_col:
+        range_label = st.segmented_control(
+            "Window",
+            list(_BACKTEST_RANGES),
+            default="Last 7 days",
+            key="backtest_range",
+        )
+    with odds_col:
+        odds = st.number_input(
+            "American odds",
+            value=-110,
+            step=5,
+            key="backtest_odds",
+            help="Your own entry — +N pays N/100 per unit, -N pays 100/N, 0 is even.",
+        )
+    days = _BACKTEST_RANGES[range_label or "Last 7 days"]
+    dates = [date.today() - timedelta(days=d) for d in range(1, days + 1)]
+    blot = st.empty()
+    blot.markdown(BLOT_HTML, unsafe_allow_html=True)
+    per_day: dict[str, tuple[BacktestRow, ...]] = {}
+    failures: list[str] = []
+    for day in dates:
+        iso = day.isoformat()
+        board = _backtest_board(iso)
+        if isinstance(board, FetchFailure):
+            failures.append(f"{iso} board: {board.reason}")
+            continue
+        if not board.games:
+            continue  # an off-day has nothing to measure
+        events = _day_events(iso, day.year)
+        if isinstance(events, FetchFailure):
+            failures.append(f"{iso} outcomes: {events.reason}")
+            continue
+        if not events:
+            # The source can return an empty record for a day it has not
+            # indexed yet; tallying it would fabricate a row of zero homers,
+            # so the day is excluded and named (D-023/D-025).
+            failures.append(f"{iso} outcomes: source returned no pitches — not tallied")
+            continue
+        per_day[iso] = outcomes_for_day(board, events)  # type: ignore[arg-type]
+    blot.empty()
+    all_rows = tuple(row for rows in per_day.values() for row in rows)
+    summary_rows: list[dict[str, str]] = []
+    for tally in tally_grades(all_rows):
+        rate = tally.hit_rate
+        if rate is None:
+            summary_rows.append(
+                {
+                    "Grade": tally.grade,
+                    "Batters": "0",
+                    "Homered": "0",
+                    "Hit rate": "no batters graded",
+                    "ROI / 1u": "—",
+                }
+            )
+            continue
+        summary_rows.append(
+            {
+                "Grade": tally.grade,
+                "Batters": str(tally.batters),
+                "Homered": str(tally.homered),
+                "Hit rate": f"{float(rate) * 100:.1f}%",
+                "ROI / 1u": f"{float(roi_per_unit(rate, int(odds))) * 100:+.1f}%",
+            }
+        )
+    st.dataframe(
+        pd.DataFrame(summary_rows),
+        hide_index=True,
+        key=f"backtest_summary_{days}",
+    )
+    st.caption(
+        "ROI / 1u prices every graded batter as a 1-unit stake at the entered "
+        "odds: hit rate x profit - (1 - hit rate). It is arithmetic on your "
+        "entry, never a recommendation (D-015/D-017)."
+    )
+    for iso, rows in per_day.items():
+        homered = sum(1 for row in rows if row.homered)
+        with st.expander(f"{iso} — {len(rows)} graded batters, {homered} homered"):
+            st.dataframe(
+                _backtest_day_rows(rows),
+                hide_index=True,
+                key=f"backtest_day_{iso}",
+            )
+    if failures:
+        st.caption("Days not tallied: " + "; ".join(failures) + ".")
+
+
 def main() -> None:
     st.set_page_config(page_title="GreenMachine", layout="wide")
     bridge_secrets_into_environment()
@@ -1663,7 +1859,7 @@ def main() -> None:
     st.markdown(DIAL_CSS, unsafe_allow_html=True)
     st.markdown(BLOT_CSS, unsafe_allow_html=True)
     st.markdown(FIELD_CSS, unsafe_allow_html=True)
-    orb, header = st.columns([1, 5])
+    orb, header, action = st.columns([1, 5, 1])
     with orb:
         st.markdown(ORB_HTML, unsafe_allow_html=True)
     with header:
@@ -1685,7 +1881,25 @@ def main() -> None:
             f"{weather_clause}</p>",
             unsafe_allow_html=True,
         )
-    render_live_board()
+    # D-095: the backtest is a separate view behind a top-right button, not a
+    # tab on the dial — the dial is for reading a slate, this is for auditing
+    # the grades.
+    with action:
+        st.markdown('<div style="height: 3.2rem"></div>', unsafe_allow_html=True)
+        # st.rerun after the swap: the button itself is drawn from the view
+        # state, so without a rerun the header would show the stale button
+        # until the next interaction.
+        if st.session_state.get("view") == "backtest":
+            if st.button("← Board", key="view_board"):
+                st.session_state["view"] = "board"
+                st.rerun()
+        elif st.button("Backtest", key="view_backtest"):
+            st.session_state["view"] = "backtest"
+            st.rerun()
+    if st.session_state.get("view") == "backtest":
+        _render_backtest()
+    else:
+        render_live_board()
 
 
 if __name__ == "__main__":

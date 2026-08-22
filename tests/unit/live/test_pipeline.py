@@ -735,9 +735,9 @@ def test_mix_falls_back_to_last_season_when_no_current_record() -> None:
 
 
 def test_distance_350_counts_long_balls_in_any_direction() -> None:
-    """D-090: the +350 ft share counts batted balls at or past the distance
-    floor in any direction — short balls and non-batted pitches never enter
-    the numerator."""
+    """D-090/D-097: the +350 ft count tallies batted balls at or past the
+    distance floor in any direction — short balls and non-batted pitches
+    never enter the tally."""
     pull_x, oppo_x = Decimal("100"), Decimal("150")  # L batter: spray < 0 pulls
     base = {
         "pitch_type": "FF",
@@ -764,7 +764,7 @@ def test_distance_350_counts_long_balls_in_any_direction() -> None:
     assert line is not None
     assert line.batted_balls == 4
     # 380 pull, 390 oppo, and the 400-ft grounder all count: distance only.
-    assert line.distance_350_share == Decimal("0.75")
+    assert line.distance_350_count == 3
 
 
 def test_pull_air_share_mirrors_the_form_section() -> None:
@@ -796,7 +796,7 @@ def test_pull_air_share_mirrors_the_form_section() -> None:
     # both counts); distance plays no part — the pulls are 290 and 310 ft.
     assert line.pull_air_share is not None
     assert line.pull_air_share.quantize(Decimal("0.001")) == Decimal("0.667")
-    assert line.distance_350_share == Decimal("0.4")  # 2 of 5 batted balls
+    assert line.distance_350_count == 2  # the 390 and 380: distance only
 
 
 def test_season_grid_line_composes_the_season_sources() -> None:
@@ -842,5 +842,34 @@ def test_season_grid_line_composes_the_season_sources() -> None:
     assert line.hard_hit_share == Decimal("0.5")
     assert line.expected_woba == Decimal("0.35")
     assert line.whiff_share == Decimal("0.20")
-    assert line.distance_350_share is None
+    assert line.distance_350_count is None
     assert line.pull_air_share is None
+
+
+def test_money_tag_marks_a_homer_in_the_last_game_day() -> None:
+    """D-094: the tag follows the most recent game day on or before the
+    slate — homer that day, tag; homer earlier with a quieter game after,
+    no tag."""
+    events = (
+        _window_event(game_date="2026-08-12", event="home_run"),
+        _window_event(game_date="2026-08-18", event="home_run"),
+    )
+    board = _build(_FakeApi(), _FakeSavant(), events=events)
+    assert not isinstance(board, FetchFailure)
+    assert board.games[0].away_batters[0].homered_on_last_game_day is True
+
+    quieter_after = (
+        _window_event(game_date="2026-08-12", event="home_run"),
+        _window_event(game_date="2026-08-18", event="double"),
+        _window_event(game_date="2026-08-19", event="single"),
+    )
+    board = _build(_FakeApi(), _FakeSavant(), events=quieter_after)
+    assert not isinstance(board, FetchFailure)
+    assert board.games[0].away_batters[0].homered_on_last_game_day is False
+
+
+def test_money_tag_stays_off_without_a_homer_in_the_record() -> None:
+    """D-094: no home_run event in the fetched record, no tag — never a guess."""
+    board = _build(_FakeApi(), _FakeSavant())
+    assert not isinstance(board, FetchFailure)
+    assert board.games[0].away_batters[0].homered_on_last_game_day is False
