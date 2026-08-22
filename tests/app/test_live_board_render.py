@@ -847,8 +847,9 @@ def test_matchups_grid_has_the_d079_columns_and_a_named_window(
 
 
 def test_slate_nav_regrades_the_chosen_day(monkeypatch: pytest.MonkeyPatch) -> None:
-    """D-092: the Yesterday/Today/Tomorrow control picks the slate date the
-    board builds — nothing else about the grading changes."""
+    """D-101: the calendar date picker chooses the slate date the board
+    builds — nothing else about the grading changes. Today, yesterday and
+    tomorrow carry their relative word; any other date stands alone."""
     import streamlit as st
 
     import greenmachine.live.pipeline as pipeline
@@ -870,21 +871,31 @@ def test_slate_nav_regrades_the_chosen_day(monkeypatch: pytest.MonkeyPatch) -> N
     assert seen == [today.isoformat()]
     assert any("today" in h.value for h in at.subheader)
 
-    nav = [c for c in at.segmented_control if c.key == "slate_day_choice"]
-    assert nav, "the slate-day control rendered"
-    nav[0].set_value("Yesterday")
+    nav = [c for c in at.date_input if c.key == "slate_date_choice"]
+    assert nav, "the slate-date picker rendered"
+    nav[0].set_value(today - timedelta(days=1))
     at.run()
     assert not at.exception, [str(e.value) for e in at.exception]
     yesterday = (today - timedelta(days=1)).isoformat()
     assert yesterday in seen
     assert any(yesterday in h.value and "yesterday" in h.value for h in at.subheader)
 
-    nav = [c for c in at.segmented_control if c.key == "slate_day_choice"]
-    nav[0].set_value("Tomorrow")
+    nav = [c for c in at.date_input if c.key == "slate_date_choice"]
+    nav[0].set_value(today + timedelta(days=1))
     at.run()
     assert not at.exception, [str(e.value) for e in at.exception]
     tomorrow = (today + timedelta(days=1)).isoformat()
     assert tomorrow in seen
+    assert any(tomorrow in h.value and "tomorrow" in h.value for h in at.subheader)
+
+    nav = [c for c in at.date_input if c.key == "slate_date_choice"]
+    nav[0].set_value(today + timedelta(days=4))
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    later = (today + timedelta(days=4)).isoformat()
+    assert later in seen
+    heading = [h.value for h in at.subheader if later in h.value]
+    assert heading and all("(today" not in h for h in heading)
 
 
 def test_backtest_button_swaps_the_view(monkeypatch: pytest.MonkeyPatch) -> None:
