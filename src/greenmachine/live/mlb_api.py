@@ -28,6 +28,11 @@ _SCHEDULE_URL = (
     "https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={date}&hydrate=probablePitcher"
 )
 _BOXSCORE_URL = "https://statsapi.mlb.com/api/v1/game/{game_pk}/boxscore"
+_GAME_LOGS_URL = (
+    "https://statsapi.mlb.com/api/v1/people"
+    "?personIds={ids}&hydrate=stats(group=%5Bhitting%5D,type=%5BgameLog%5D,"
+    "startDate={start},endDate={end})"
+)
 _SEASON_STATS_URL = (
     "https://statsapi.mlb.com/api/v1/people"
     "?personIds={ids}&hydrate=stats(group=%5B{group}%5D,type=%5Bseason%5D)"
@@ -102,6 +107,20 @@ class SeasonHittingLine:
     home_runs: int
     strikeouts: int
     total_bases: int = 0
+
+
+@dataclass(frozen=True)
+class GameLogEntry:
+    """One completed-game line from a batter's hitting game log (D-100).
+
+    The game log lists only games already final, in date order — the
+    near-real-time record Savant's day-indexed search CSV cannot be.
+    """
+
+    date: str  # ISO YYYY-MM-DD
+    game_pk: int
+    home_runs: int
+    plate_appearances: int
 
 
 @dataclass(frozen=True)
@@ -339,6 +358,64 @@ class MlbStatsApi:
         except PayloadMalformedError as exc:
             return FetchFailure(str(exc))
         return lines
+
+    def fetch_recent_game_logs(
+        self, player_ids: tuple[int, ...], start_mmddyyyy: str, end_mmddyyyy: str
+    ) -> dict[int, tuple[GameLogEntry, ...]] | FetchFailure:
+        """Recent hitting game logs for the given players, keyed by player id.
+
+        Only completed games appear — an in-progress game is simply absent,
+        which is exactly the semantics the money tag wants (D-100). Players
+        with no appearances in the range are absent from the mapping.
+        """
+        context = "game-logs"
+        parsed = self._get_json(
+            _GAME_LOGS_URL.format(
+                ids=",".join(str(i) for i in player_ids),
+                start=start_mmddyyyy,
+                end=end_mmddyyyy,
+            ),
+            context,
+        )
+        if isinstance(parsed, FetchFailure):
+            return parsed
+        try:
+            root = _require_mapping(parsed, context)
+            people = _require_list(root.get("people"), f"{context}.people")
+            logs: dict[int, tuple[GameLogEntry, ...]] = {}
+            for index, raw_person in enumerate(people):
+                person_context = f"{context}.people[{index}]"
+                person = _require_mapping(raw_person, person_context)
+                player_id = _require_int(person.get("id"), f"{person_context}.id")
+                entries: list[GameLogEntry] = []
+                for raw_block in person.get("stats", []):
+                    block = _require_mapping(raw_block, f"{person_context}.stats")
+                    for raw_split in block.get("splits", []):
+                        split = _require_mapping(raw_split, f"{person_context}.splits")
+                        # Season-total splits carry no date; only dated,
+                        # gamed rows are game-log lines.
+                        if "date" not in split or "game" not in split:
+                            continue
+                        stat = _require_mapping(split.get("stat"), f"{person_context}.splits.stat")
+                        game = _require_mapping(split.get("game"), f"{person_context}.splits.game")
+                        entries.append(
+                            GameLogEntry(
+                                date=_require_str(split.get("date"), person_context),
+                                game_pk=_require_int(
+                                    game.get("gamePk"), f"{person_context}.gamePk"
+                                ),
+                                home_runs=_optional_int(stat, "homeRuns", context) or 0,
+                                plate_appearances=(
+                                    _optional_int(stat, "plateAppearances", context) or 0
+                                ),
+                            )
+                        )
+                if entries:
+                    entries.sort(key=lambda entry: (entry.date, entry.game_pk))
+                    logs[player_id] = tuple(entries)
+        except PayloadMalformedError as exc:
+            return FetchFailure(str(exc))
+        return logs
 
     def fetch_season_pitching(
         self, player_ids: tuple[int, ...]

@@ -54,6 +54,7 @@ from greenmachine.live.grading import (
 )
 from greenmachine.live.mlb_api import (
     FetchFailure,
+    GameLogEntry,
     MlbStatsApi,
     SeasonHittingLine,
     SeasonPitchingLine,
@@ -71,6 +72,7 @@ FORM_SHORT_DAYS = 7
 # The batter's matchup table reads his pitches seen against the
 # opposing starter's side over this many days (D-088).
 MATCHUP_WINDOW_DAYS = 30
+GAME_LOG_LOOKBACK_DAYS = 5
 # D-081's reach: a starter whose mix has no pitches in the matchup window
 # extends the read to L45 before falling back to the season board.
 MIX_REACH_DAYS = 45
@@ -238,9 +240,9 @@ class BatterCard:
     mix_line: BatterGridLine | None
     season_line: BatterGridLine | None
     mix_label: str
-    # D-094: whether the batter homered in his most recent game day on or
-    # before this slate — the Sluggers tab's neon "$" tag. Never a guess:
-    # no events in the record, no tag.
+    # D-094/D-100: whether the batter homered in his most recent completed
+    # game on or before this slate — the Sluggers tab's neon "$" tag, read
+    # from the near-real-time game log. Never a guess: no log, no tag.
     homered_on_last_game_day: bool
     result: EvaluatedGradeResult | NotEvaluableGradeResult
 
@@ -296,15 +298,20 @@ class SlateBoard:
     diagnostics: tuple[str, ...]
 
 
-def _homered_on_last_game_day(events: tuple[PitchEvent, ...], slate_date: str) -> bool:
-    """D-094: True when the batter homered in his most recent game day on or
-    before the slate — a homer earlier in the record with a quieter game
-    after it does not tag."""
-    played_days = [event.game_date for event in events if event.game_date <= slate_date]
+def _homered_on_last_game_day(entries: tuple[GameLogEntry, ...]) -> bool:
+    """D-094/D-100: True when the batter homered in his most recent completed
+    game — the game log carries only final games, so an in-progress one
+    neither tags nor clears. A homer earlier with a quieter game after it
+    does not tag. No entries, no tag."""
+    played_days = [entry.date for entry in entries if entry.plate_appearances > 0]
     if not played_days:
         return False
     last_day = max(played_days)
-    return any(event.event == "home_run" and event.game_date == last_day for event in events)
+    return any(
+        entry.date == last_day and entry.home_runs > 0
+        for entry in entries
+        if entry.plate_appearances > 0
+    )
 
 
 def _recent_window_events(
@@ -895,6 +902,20 @@ def build_board(
             continue
         season_hitting.update(fetched)
 
+    # D-100: the money tag reads the near-real-time game log (completed games
+    # only), not the day-indexed pitch record — Savant's search CSV can run a
+    # day behind, which both missed and mistimed tags. Five days of lookback
+    # covers off-days and rest days.
+    game_logs: dict[int, tuple[GameLogEntry, ...]] = {}
+    log_start = (slate_date - timedelta(days=GAME_LOG_LOOKBACK_DAYS)).strftime("%m/%d/%Y")
+    log_end = slate_date.strftime("%m/%d/%Y")
+    for chunk in _chunked(all_batter_ids, SEASON_IDS_PER_REQUEST):
+        fetched_logs = api.fetch_recent_game_logs(chunk, log_start, log_end)
+        if isinstance(fetched_logs, FetchFailure):
+            diagnostics.append(f"game logs: {fetched_logs.reason}")
+            continue
+        game_logs.update(fetched_logs)
+
     season_pitching: dict[int, SeasonPitchingLine] = {}
     if probable_ids:
         fetched_pitching = api.fetch_season_pitching(probable_ids)
@@ -1209,7 +1230,7 @@ def build_board(
                         ),
                         mix_label=mix_label,
                         homered_on_last_game_day=_homered_on_last_game_day(
-                            player_events, game.official_date
+                            game_logs.get(player_id, ())
                         ),
                         result=result,
                     )

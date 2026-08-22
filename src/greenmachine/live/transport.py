@@ -23,6 +23,7 @@ connection is the deployed application's composition root.
 
 from __future__ import annotations
 
+import http.client
 import time
 import urllib.error
 import urllib.request
@@ -60,6 +61,11 @@ class TransportTimeoutError(TransportError):
 
 class TransportUnreachableError(TransportError):
     """The host could not be reached: DNS, connection or protocol failure."""
+
+
+class TransportTruncatedError(TransportError):
+    """The response body was cut short mid-read — a transient break on a
+    multi-megabyte payload, not a statement about the source's availability."""
 
 
 class HostNotPermittedError(TransportError):
@@ -160,6 +166,9 @@ class UrllibTransport:
             if isinstance(exc.reason, TimeoutError):
                 raise TransportTimeoutError(f"request to {url!r} timed out") from exc
             raise TransportUnreachableError(f"request to {url!r} failed: {exc.reason}") from exc
+        except http.client.HTTPException as exc:
+            # IncompleteRead, RemoteDisconnected: the body died in flight.
+            raise TransportTruncatedError(f"request to {url!r} truncated: {exc}") from exc
         except OSError as exc:  # socket-level failures below URLError
             raise TransportUnreachableError(f"request to {url!r} failed: {exc}") from exc
 
@@ -180,12 +189,20 @@ def get_with_retry(
 ) -> HttpResponse:
     """One GET with the bounded retry posture applied to transient statuses.
 
-    The first answer stands unless its status is in ``RETRYABLE_STATUSES``, in
-    which case exactly one more attempt follows after ``RETRY_DELAY_SECONDS``.
-    Transport errors are not retried here — a timeout or unreachable host is
-    the adapter's *source unavailable*, and doubling its latency helps nobody.
+    The first answer stands unless its status is in ``RETRYABLE_STATUSES`` or
+    the body was truncated mid-read, in which case exactly one more attempt
+    follows after ``RETRY_DELAY_SECONDS``. Other transport errors are not
+    retried here — a timeout or unreachable host is the adapter's *source
+    unavailable*, and doubling its latency helps nobody (D-100).
     """
-    response = transport.get(url, headers)
+    try:
+        response = transport.get(url, headers)
+    except TransportTruncatedError:
+        # One more attempt: a severed body is transient by nature, and the
+        # alternative — dropping the whole day's pitch record — reads as
+        # choppy windows downstream (D-100).
+        sleep(RETRY_DELAY_SECONDS)
+        response = transport.get(url, headers)
     if response.status in RETRYABLE_STATUSES:
         sleep(RETRY_DELAY_SECONDS)
         response = transport.get(url, headers)

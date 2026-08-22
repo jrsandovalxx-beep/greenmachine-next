@@ -22,8 +22,8 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
 from greenmachine.domain.grade_result import EvaluatedGradeResult
+from greenmachine.live.mlb_api import GameLogEntry
 from greenmachine.live.pipeline import SlateBoard
-from greenmachine.live.savant import PitchEvent
 
 # Grading moment for a backtested slate: 20:00 UTC the prior evening — after
 # that day's games, before any slate-day game — so the measured day's events
@@ -53,18 +53,20 @@ class BacktestRow:
 
 
 def outcomes_for_day(
-    board: SlateBoard, day_events: tuple[PitchEvent, ...]
+    board: SlateBoard, game_logs: dict[int, tuple[GameLogEntry, ...]]
 ) -> tuple[BacktestRow, ...]:
     """Pair every evaluated batter on the board with his slate-day outcome.
 
-    A batter homered when any of his event rows on the slate date records
-    ``event == "home_run"``. Not-evaluable batters carry no grade, so there
-    is nothing to tally — they are excluded, and the view names that.
+    A batter homered when his game log records a home run on the slate
+    date (D-100): the log is near-real-time and covers completed games
+    only, so a past slate's outcomes are final and complete. Not-evaluable
+    batters carry no grade, so there is nothing to tally — they are
+    excluded, and the view names that.
     """
     homered_ids = {
-        event.batter_id
-        for event in day_events
-        if event.event == "home_run" and event.game_date == board.official_date
+        player_id
+        for player_id, entries in game_logs.items()
+        if any(entry.date == board.official_date and entry.home_runs > 0 for entry in entries)
     }
     rows: list[BacktestRow] = []
     for game in board.games:

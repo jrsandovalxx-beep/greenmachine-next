@@ -12,7 +12,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from synthetic_records import not_evaluable_grade_result
-from test_pipeline import BATTER_ID, _build, _FakeApi, _FakeSavant, _window_event
+from test_pipeline import BATTER_ID, _build, _FakeApi, _FakeSavant
 
 from greenmachine.live import backtest
 from greenmachine.live.backtest import (
@@ -23,7 +23,7 @@ from greenmachine.live.backtest import (
     slate_as_of,
     tally_grades,
 )
-from greenmachine.live.mlb_api import FetchFailure
+from greenmachine.live.mlb_api import FetchFailure, GameLogEntry
 
 
 def test_slate_as_of_is_the_prior_evening() -> None:
@@ -33,22 +33,33 @@ def test_slate_as_of_is_the_prior_evening() -> None:
     assert as_of == datetime(2026, 8, 20, backtest.BACKTEST_AS_OF_HOUR_UTC, tzinfo=UTC)
 
 
+def _log(date: str, home_runs: int) -> dict[int, tuple[GameLogEntry, ...]]:
+    return {
+        BATTER_ID: (
+            GameLogEntry(date=date, game_pk=777001, home_runs=home_runs, plate_appearances=4),
+        )
+    }
+
+
 def test_outcomes_pair_each_graded_batter_with_the_slates_home_runs() -> None:
-    """A batter homered when his event rows on the slate date record a home
-    run; a homer on any other day is not this slate's outcome."""
+    """A batter homered when his game log records a home run on the slate
+    date (D-100); a homer on any other day is not this slate's outcome."""
     board = _build(_FakeApi(), _FakeSavant())
     assert not isinstance(board, FetchFailure)
-    rows = outcomes_for_day(board, (_window_event(game_date="2026-08-20", event="home_run"),))
+    rows = outcomes_for_day(board, _log("2026-08-20", home_runs=1))
     # The fake slate fields the one batter on both lineups.
     assert len(rows) == 2
     assert all(row.homered for row in rows)
     assert all(row.slate_date == "2026-08-20" for row in rows)
 
-    other_day = outcomes_for_day(board, (_window_event(game_date="2026-08-19", event="home_run"),))
+    other_day = outcomes_for_day(board, _log("2026-08-19", home_runs=1))
     assert not any(row.homered for row in other_day)
 
-    single = outcomes_for_day(board, (_window_event(game_date="2026-08-20", event="single"),))
-    assert not any(row.homered for row in single)
+    no_homer = outcomes_for_day(board, _log("2026-08-20", home_runs=0))
+    assert not any(row.homered for row in no_homer)
+
+    no_log = outcomes_for_day(board, {})
+    assert not any(row.homered for row in no_log)
 
 
 def test_outcomes_exclude_not_evaluable_batters() -> None:
@@ -63,7 +74,7 @@ def test_outcomes_exclude_not_evaluable_batters() -> None:
         ),
     )
     board = dataclasses.replace(board, games=(game,))
-    rows = outcomes_for_day(board, (_window_event(game_date="2026-08-20", event="home_run"),))
+    rows = outcomes_for_day(board, _log("2026-08-20", home_runs=1))
     assert len(rows) == 1
     assert rows[0].homered
 
@@ -102,8 +113,3 @@ def test_roi_per_unit_prices_every_batter_as_a_unit_stake() -> None:
     assert roi_per_unit(Decimal("0.5"), 150) == Decimal("0.25")
     # -110 at 50%: 0.5 x 100/110 - 0.5 ≈ -0.0455.
     assert roi_per_unit(Decimal("0.5"), -110).quantize(Decimal("0.0001")) == Decimal("-0.0455")
-
-
-def test_window_event_factory_targets_the_fake_batter() -> None:
-    """Guard the shared factory: outcome rows key on batter_id."""
-    assert _window_event().batter_id == BATTER_ID

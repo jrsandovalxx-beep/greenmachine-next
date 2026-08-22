@@ -8,6 +8,7 @@ target is re-validated — proven here rather than asserted.
 from __future__ import annotations
 
 import email.message
+import http.client
 import urllib.request
 
 import pytest
@@ -17,6 +18,7 @@ from greenmachine.live.transport import (
     HostNotPermittedError,
     HttpResponse,
     PinnedRedirectHandler,
+    TransportTruncatedError,
     UrllibTransport,
     get_with_retry,
     require_permitted_host,
@@ -123,3 +125,62 @@ def test_a_non_retryable_status_answers_as_it_arrived() -> None:
     )
     assert response.status == 404
     assert transport.calls == 1
+
+
+class _IncompleteReadOpener:
+    """An opener whose body read dies mid-flight, as a multi-megabyte CSV
+    download can."""
+
+    def open(self, request: object, timeout: float) -> object:
+        raise http.client.IncompleteRead(b'{"partial": tru')
+
+
+def test_a_body_cut_short_mid_read_is_a_truncation_not_an_answer() -> None:
+    """D-100: IncompleteRead escapes every HTTP/timeout/OS clause; it must
+    surface as its own transport error, never crash a render untyped."""
+    transport = UrllibTransport()
+    transport._opener = _IncompleteReadOpener()  # type: ignore[assignment]
+    with pytest.raises(TransportTruncatedError):
+        transport.get("https://baseballsavant.mlb.com/csv", {"User-Agent": "test"})
+
+
+class _TruncatingTransport:
+    """Answers from a script of truncations and statuses; counts calls."""
+
+    def __init__(self, script: list[object]) -> None:
+        self._script = script
+        self.calls = 0
+
+    def get(self, url: str, headers: dict[str, str]) -> HttpResponse:
+        step = self._script[min(self.calls, len(self._script) - 1)]
+        self.calls += 1
+        if step == "truncate":
+            raise TransportTruncatedError("body died in flight")
+        return HttpResponse(status=int(step), body=b"{}")
+
+
+def test_a_truncated_body_is_retried_exactly_once() -> None:
+    transport = _TruncatingTransport(["truncate", 200])
+    response = get_with_retry(
+        transport, "https://baseballsavant.mlb.com/csv", {}, sleep=lambda _: None
+    )
+    assert response.status == 200
+    assert transport.calls == 2
+
+
+def test_a_second_truncation_answers_as_it_arrived() -> None:
+    """The retry is bounded: two severed bodies in a row propagate the
+    truncation — the adapter's *source unavailable*, not an infinite loop."""
+    transport = _TruncatingTransport(["truncate", "truncate"])
+    with pytest.raises(TransportTruncatedError):
+        get_with_retry(transport, "https://baseballsavant.mlb.com/csv", {}, sleep=lambda _: None)
+    assert transport.calls == 2
+
+
+def test_a_truncation_then_a_transient_status_retries_both_once() -> None:
+    transport = _TruncatingTransport(["truncate", 503, 200])
+    response = get_with_retry(
+        transport, "https://baseballsavant.mlb.com/csv", {}, sleep=lambda _: None
+    )
+    assert response.status == 200
+    assert transport.calls == 3
