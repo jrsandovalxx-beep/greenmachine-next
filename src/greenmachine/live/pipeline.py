@@ -213,7 +213,7 @@ class BatterGridLine:
     batting_average: Decimal | None
     slugging: Decimal | None
     iso: Decimal | None
-    distance_350_share: Decimal | None
+    distance_350_count: int | None
     pull_air_share: Decimal | None
     expected_woba: Decimal | None
     whiff_share: Decimal | None
@@ -238,6 +238,10 @@ class BatterCard:
     mix_line: BatterGridLine | None
     season_line: BatterGridLine | None
     mix_label: str
+    # D-094: whether the batter homered in his most recent game day on or
+    # before this slate — the Sluggers tab's neon "$" tag. Never a guess:
+    # no events in the record, no tag.
+    homered_on_last_game_day: bool
     result: EvaluatedGradeResult | NotEvaluableGradeResult
 
 
@@ -290,6 +294,17 @@ class SlateBoard:
     as_of: datetime
     games: tuple[GameCard, ...]
     diagnostics: tuple[str, ...]
+
+
+def _homered_on_last_game_day(events: tuple[PitchEvent, ...], slate_date: str) -> bool:
+    """D-094: True when the batter homered in his most recent game day on or
+    before the slate — a homer earlier in the record with a quieter game
+    after it does not tag."""
+    played_days = [event.game_date for event in events if event.game_date <= slate_date]
+    if not played_days:
+        return False
+    last_day = max(played_days)
+    return any(event.event == "home_run" and event.game_date == last_day for event in events)
 
 
 def _recent_window_events(
@@ -515,7 +530,7 @@ def _batter_grid_line(events: Sequence[PitchEvent]) -> BatterGridLine | None:
         batting_average=average,
         slugging=slugging,
         iso=(slugging - average if average is not None and slugging is not None else None),
-        distance_350_share=(Decimal(long_balls) / Decimal(len(batted))) if batted else None,
+        distance_350_count=long_balls,
         pull_air_share=(Decimal(pulls) / Decimal(len(measurable_air)) if measurable_air else None),
         expected_woba=(woba_total / woba_denominator) if woba_denominator else None,
         whiff_share=Decimal(whiffs) / Decimal(swings) if swings else None,
@@ -567,7 +582,7 @@ def _season_grid_line(
         batting_average=average,
         slugging=slugging,
         iso=(slugging - average if average is not None and slugging is not None else None),
-        distance_350_share=None,
+        distance_350_count=None,
         pull_air_share=None,
         expected_woba=(woba_total / Decimal(woba_pa)) if woba_pa else None,
         whiff_share=(whiff_total / Decimal(whiff_pitches)) if whiff_pitches else None,
@@ -1193,6 +1208,9 @@ def build_board(
                             arsenal_by_batter.get(player_id, ()),
                         ),
                         mix_label=mix_label,
+                        homered_on_last_game_day=_homered_on_last_game_day(
+                            player_events, game.official_date
+                        ),
                         result=result,
                     )
                 )

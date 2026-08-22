@@ -17,7 +17,7 @@ cell pattern the deployed slate produced.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -345,6 +345,7 @@ def test_shortlist_keeps_only_a_and_s_with_the_d084_columns() -> None:
     texts, styles, cards = streamlit_app._slugger_frames(_graded_board())
     assert list(texts.columns) == [
         "Batter",
+        "HR",
         "Team",
         "Versus",
         "Grade",
@@ -352,6 +353,9 @@ def test_shortlist_keeps_only_a_and_s_with_the_d084_columns() -> None:
         "Weather",
         "Tags",
     ]
+    # D-094: the outage board fetched no events, so no batter has a last
+    # game day at all and the money-tag column stays blank — never a guess.
+    assert texts["HR"].tolist() == ["", ""]
     assert list(texts["Grade"]) == ["S", "A"]
     assert styles["Grade"].tolist() == [streamlit_app._HIGHLIGHT] * 2
     # Park factor formatted as the whole-number factor for the batting side.
@@ -360,6 +364,25 @@ def test_shortlist_keeps_only_a_and_s_with_the_d084_columns() -> None:
     assert set(texts["Weather"]) == {"roofed — indoor neutral value"}
     # The third return is the card behind each row, in row order (GMF-007).
     assert [card.full_name for card in cards] == list(texts["Batter"])
+
+
+def test_money_tag_marks_a_batter_who_homered() -> None:
+    """D-094: a neon "$" sits beside a shortlist batter whose record holds a
+    home run on or before the slate; a batter without one stays blank."""
+    import dataclasses
+
+    import pandas as _pd
+    import streamlit_app
+
+    board = _graded_board()
+    game = board.games[0]
+    tagged = dataclasses.replace(game.home_batters[0], homered_on_last_game_day=True)
+    game = dataclasses.replace(game, home_batters=(tagged, *game.home_batters[1:]))
+    board = dataclasses.replace(board, games=(game, *board.games[1:]))
+    texts, styles, _cards = streamlit_app._slugger_frames(board)
+    assert texts["HR"].tolist() == ["$", ""]
+    assert styles["HR"].iloc[0] == streamlit_app._MONEY_CSS
+    assert _pd.isna(styles["HR"].iloc[1])
 
 
 def test_shortlist_empty_when_nothing_grades_a_or_s() -> None:
@@ -599,6 +622,26 @@ def test_arsenal_side_filter_keeps_metrics_season_long() -> None:
     assert texts.at[0, "Usage%"] == "45.0%"
 
 
+def test_arsenal_side_note_names_a_no_op_filter() -> None:
+    """D-099: when he threw every pitch to this side, the toggle says so —
+    a silent no-op reads as broken (the Weathers case); partial coverage
+    filters quietly; an empty record names the fallback."""
+    from types import SimpleNamespace
+
+    import streamlit_app
+
+    pitcher = SimpleNamespace(
+        season_lines=(
+            _season_line(),
+            _season_line(pitch_type="CH", pitch_name="Changeup", usage_share=Decimal("0.20")),
+        )
+    )
+    note = streamlit_app._arsenal_side_note(pitcher, frozenset({"FF", "CH"}), "right")
+    assert "nothing to filter" in note
+    assert streamlit_app._arsenal_side_note(pitcher, frozenset({"FF"}), "right") == ""
+    assert "full arsenal" in streamlit_app._arsenal_side_note(pitcher, frozenset(), "right")
+
+
 def test_a_dialog_failure_cannot_blank_the_board(tmp_path: Path) -> None:
     """D-075, extended to the detail dialog: if the dialog body raises, the
     run survives with a named warning and the board stays rendered. Drives
@@ -641,7 +684,7 @@ def _grid_line(**overrides: object) -> object:
         "batting_average": Decimal("0.4"),
         "slugging": Decimal("1.0"),
         "iso": Decimal("0.6"),
-        "distance_350_share": Decimal("0.25"),
+        "distance_350_count": 1,
         "pull_air_share": Decimal("0.4"),
         "expected_woba": Decimal("0.45"),
         "whiff_share": Decimal("0.12"),
@@ -661,7 +704,6 @@ def test_grid_line_cells_render_rates_and_named_absences() -> None:
     assert set(texts) == {
         "AB",
         "H",
-        "BIP",
         "Barrels",
         "HR",
         "EV",
@@ -670,7 +712,7 @@ def test_grid_line_cells_render_rates_and_named_absences() -> None:
         "AVG",
         "SLG",
         "ISO",
-        "+350 ft %",
+        "+350 ft",
         "Pull Air %",
         "xwOBA",
         "Swing-Str %",
@@ -681,18 +723,18 @@ def test_grid_line_cells_render_rates_and_named_absences() -> None:
     assert texts["AB"] == "5"
     assert texts["EV"] == "95.5"
     assert texts["AVG"] == ".400"
-    assert texts["+350 ft %"] == "25.0%"
+    # D-097: a count of 350+ ft balls, not a rate.
+    assert texts["+350 ft"] == "1"
     assert texts["Pull Air %"] == "40.0%"
     assert texts["xwOBA"] == ".450"
     assert styles == {}
 
     texts, styles = streamlit_app._grid_line_cells(
-        _grid_line(distance_350_share=None, pull_air_share=None, batted_balls=None)
+        _grid_line(distance_350_count=None, pull_air_share=None)
     )
-    assert texts["+350 ft %"] == "—"
+    assert texts["+350 ft"] == "—"
     assert texts["Pull Air %"] == "—"
-    assert texts["BIP"] == "—"
-    assert styles["+350 ft %"] == streamlit_app._REASON_CSS
+    assert styles["+350 ft"] == streamlit_app._REASON_CSS
     assert styles["Pull Air %"] == streamlit_app._REASON_CSS
 
 
@@ -712,7 +754,7 @@ def _board_with_grid_lines() -> SlateBoard:
         hits=121,
         home_runs=33,
         exit_velocity=Decimal("91.5"),
-        distance_350_share=None,
+        distance_350_count=None,
         pull_air_share=None,
     )
 
@@ -752,16 +794,16 @@ def test_matchups_grid_has_the_d079_columns_and_a_named_window(
         frames = []
         for element in at.dataframe:
             frame = _display_values(element).astype(str)
-            if "+350 ft %" in frame.columns:
+            if "+350 ft" in frame.columns:
                 frames.append(frame)
         return frames
 
     grids = grid_frames()
     assert grids, "the matchups grids rendered"
+    # D-096/D-097/D-098: no BIP, no Form column; +350 ft is a count.
     expected = {
         "AB",
         "H",
-        "BIP",
         "Barrels",
         "HR",
         "EV",
@@ -770,14 +812,15 @@ def test_matchups_grid_has_the_d079_columns_and_a_named_window(
         "AVG",
         "SLG",
         "ISO",
-        "+350 ft %",
+        "+350 ft",
         "Pull Air %",
         "xwOBA",
         "Swing-Str %",
-        "Form (EV)",
         "Grade",
     }
     assert expected <= set(grids[0].columns)
+    assert "BIP" not in grids[0].columns
+    assert "Form (EV)" not in grids[0].columns
     assert set(grids[0]["AB"]) == {"5"}  # the L30 scope
     away_grades = grids[0]["Grade"].tolist()
     captions = " ".join(element.value for element in at.caption)
@@ -791,6 +834,132 @@ def test_matchups_grid_has_the_d079_columns_and_a_named_window(
     assert not at.exception, [str(e.value) for e in at.exception]
     grids = grid_frames()
     assert set(grids[0]["AB"]) == {"440"}  # the season scope
-    assert set(grids[0]["+350 ft %"]) == {"—"}  # no season source (D-081/D-090)
+    assert set(grids[0]["+350 ft"]) == {"—"}  # no season source (D-081/D-090)
     assert set(grids[0]["Pull Air %"]) == {"—"}
     assert grids[0]["Grade"].tolist() == away_grades  # the grade stays L30
+
+
+def test_slate_nav_regrades_the_chosen_day(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-092: the Yesterday/Today/Tomorrow control picks the slate date the
+    board builds — nothing else about the grading changes."""
+    import streamlit as st
+
+    import greenmachine.live.pipeline as pipeline
+
+    seen: list[str] = []
+
+    def fake_build(**kwargs: object) -> SlateBoard:
+        seen.append(kwargs["slate_date"].isoformat())  # type: ignore[attr-defined]
+        return _board_with_grid_lines()
+
+    monkeypatch.setattr(pipeline, "build_board", fake_build)
+    monkeypatch.setenv("GM_ENVIRONMENT", "staging")
+    st.cache_data.clear()
+    at = AppTest.from_file(str(_APP_PATH), default_timeout=_TIMEOUT)
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+
+    today = date.today()
+    assert seen == [today.isoformat()]
+    assert any("today" in h.value for h in at.subheader)
+
+    nav = [c for c in at.segmented_control if c.key == "slate_day_choice"]
+    assert nav, "the slate-day control rendered"
+    nav[0].set_value("Yesterday")
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    yesterday = (today - timedelta(days=1)).isoformat()
+    assert yesterday in seen
+    assert any(yesterday in h.value and "yesterday" in h.value for h in at.subheader)
+
+    nav = [c for c in at.segmented_control if c.key == "slate_day_choice"]
+    nav[0].set_value("Tomorrow")
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    tomorrow = (today + timedelta(days=1)).isoformat()
+    assert tomorrow in seen
+
+
+def test_backtest_button_swaps_the_view(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-095: the top-right button opens the backtest view — pooled tallies
+    per grade over past regraded slates — and the board button returns."""
+    import streamlit as st
+
+    import greenmachine.live.pipeline as pipeline
+
+    monkeypatch.setattr(pipeline, "build_board", lambda **kwargs: _board_with_grid_lines())
+    # AppTest re-executes the script fresh, so same-module stubs do not
+    # reach it; cut the network at the adapter method instead. Every
+    # backtested day regrades to the staged board (official_date 2026-08-20),
+    # and the stub's homer belongs to batter 101 — the staged S (home) and
+    # B (away) cards.
+    from greenmachine.live.savant import BaseballSavant
+
+    homer = _pitch_event(game_date="2026-08-20", event="home_run", batter_id=BATTER_ID)
+    monkeypatch.setattr(BaseballSavant, "fetch_pitch_events", lambda self, *, year, day: (homer,))
+    monkeypatch.setenv("GM_ENVIRONMENT", "staging")
+    st.cache_data.clear()
+    at = AppTest.from_file(str(_APP_PATH), default_timeout=_TIMEOUT)
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert not any("Backtest — grade hit rates" in h.value for h in at.subheader)
+
+    openers = [b for b in at.button if b.key == "view_backtest"]
+    assert openers, "the backtest button rendered in the header"
+    openers[0].click()
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert any("Backtest — grade hit rates" in h.value for h in at.subheader)
+    captions = " ".join(element.value for element in at.caption)
+    assert "prior evening" in captions  # the no-leak method is named
+    assert "no odds source" in captions  # ROI arithmetic is the viewer's own
+
+    # Plain (unstyled) frames expose their DataFrame directly.
+    frames = [element.value.astype(str) for element in at.dataframe]
+    summary = [frame for frame in frames if "Hit rate" in frame.columns]
+    assert summary, "the per-grade summary rendered"
+    assert summary[0]["Grade"].tolist() == ["S", "A", "B", "C", "D"]
+    # Seven regraded days, one staged batter per S/A/B/D each day; the stub
+    # homer belongs to the S and B cards.
+    assert summary[0]["Batters"].tolist() == ["7", "7", "7", "0", "7"]
+    assert summary[0]["Homered"].tolist() == ["7", "0", "7", "0", "0"]
+    assert summary[0]["Hit rate"].tolist()[0] == "100.0%"
+    assert summary[0].loc[summary[0]["Grade"] == "C", "Hit rate"].iloc[0] == ("no batters graded")
+    # +90.9% at the default -110 (0.9091 profit on a sure thing); -100% at 0%.
+    assert summary[0].loc[summary[0]["Grade"] == "S", "ROI / 1u"].iloc[0] == "+90.9%"
+    assert summary[0].loc[summary[0]["Grade"] == "A", "ROI / 1u"].iloc[0] == "-100.0%"
+
+    closers = [b for b in at.button if b.key == "view_board"]
+    assert closers, "the board button rendered while the backtest shows"
+    closers[0].click()
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert not any("Backtest — grade hit rates" in h.value for h in at.subheader)
+
+
+def test_backtest_excludes_a_day_the_source_has_not_indexed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-095: an empty outcome record on a day with games is a named
+    exclusion — never tallied as a row of invented zero homers."""
+    import streamlit as st
+
+    import greenmachine.live.pipeline as pipeline
+    from greenmachine.live.savant import BaseballSavant
+
+    monkeypatch.setattr(pipeline, "build_board", lambda **kwargs: _board_with_grid_lines())
+    monkeypatch.setattr(BaseballSavant, "fetch_pitch_events", lambda self, *, year, day: ())
+    monkeypatch.setenv("GM_ENVIRONMENT", "staging")
+    st.cache_data.clear()
+    at = AppTest.from_file(str(_APP_PATH), default_timeout=_TIMEOUT)
+    at.run()
+    at.button(key="view_backtest").click()
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    captions = " ".join(element.value for element in at.caption)
+    assert "Days not tallied" in captions
+    assert "not tallied" in captions
+    frames = [element.value.astype(str) for element in at.dataframe]
+    summary = [frame for frame in frames if "Hit rate" in frame.columns]
+    assert summary, "the per-grade summary still renders"
+    assert summary[0]["Batters"].tolist() == ["0", "0", "0", "0", "0"]
