@@ -1,2 +1,2 @@
-Active: GMF-009 per FEATURE_PHASE_PLAN §GMF-009
+Active: NO ACTIVE TICKET — next phase pending planning
 Completed records: tickets/completed/ — order table in FEATURE_PHASE_PLAN (lifecycle, closeout rule c).
