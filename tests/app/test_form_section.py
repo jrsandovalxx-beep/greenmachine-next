@@ -34,14 +34,15 @@ def _form(**overrides: FormValue) -> FormSection:
         hard_hit_pct=overrides.get("hard_hit_pct", sufficient),
         sweet_spot_pct=overrides.get("sweet_spot_pct", sufficient),
         pull_air_pct=overrides.get("pull_air_pct", sufficient),
-        xwoba=overrides.get("xwoba", sufficient),
         attack_angle_degrees=overrides.get("attack_angle_degrees", sufficient),
         ideal_attack_angle_pct=overrides.get("ideal_attack_angle_pct", sufficient),
         bat_speed_mph=overrides.get("bat_speed_mph", sufficient),
     )
 
 
-def test_columns_are_exactly_the_d068_seven_in_order() -> None:
+def test_columns_are_the_d068_set_minus_xwoba_in_order() -> None:
+    """D-102: xwOBA left the popup form grid; it stays on the Matchups main
+    tables, so the section carries the remaining six in their order."""
     texts, _styles = streamlit_app._form_section_frames(_form())
     assert list(texts.columns) == [
         "Barrel%",
@@ -50,7 +51,6 @@ def test_columns_are_exactly_the_d068_seven_in_order() -> None:
         "IdealAtkAng%",
         "Pull Air %",
         "Hard%",
-        "xwOBA",
     ]
     assert len(texts) == 1
 
@@ -97,17 +97,10 @@ def test_below_floor_cell_keeps_value_sample_and_insufficient_marker() -> None:
 def test_absent_metric_reads_not_enough_data_available() -> None:
     """Nothing at either reach: D-078's wording, muted-reason styling."""
     texts, styles = streamlit_app._form_section_frames(
-        _form(xwoba=FormValue(value=None, sample=0, window_days=7, sufficient=False))
+        _form(hard_hit_pct=FormValue(value=None, sample=0, window_days=7, sufficient=False))
     )
-    assert texts.at[0, "xwOBA"] == "not enough data available"
-    assert styles.at[0, "xwOBA"] == streamlit_app._REASON_CSS
-
-
-def test_xwoba_uses_the_three_decimal_convention() -> None:
-    texts, _styles = streamlit_app._form_section_frames(
-        _form(xwoba=FormValue(value=Decimal("0.395"), sample=31, window_days=7, sufficient=True))
-    )
-    assert texts.at[0, "xwOBA"] == "0.395"
+    assert texts.at[0, "Hard%"] == "not enough data available"
+    assert styles.at[0, "Hard%"] == streamlit_app._REASON_CSS
 
 
 def test_board_renders_with_selectable_grids_and_invites_selection(

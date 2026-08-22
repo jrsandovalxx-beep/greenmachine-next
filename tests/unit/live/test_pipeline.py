@@ -598,6 +598,25 @@ def test_pitcher_side_sets_read_the_window() -> None:
     assert pitcher.pitches_vs_right == frozenset({"SL"})
 
 
+def test_pitcher_side_usage_is_each_sides_share_of_the_window() -> None:
+    """D-102: usage vs a hitter hand is each pitch type's share of his
+    pitches to that side in the window record — the per-side basis the
+    arsenal toggle switches to. A side with no pitches maps to nothing,
+    never an invented share."""
+    events = (
+        _window_event(pitch_type="FF", batter_side="L"),
+        _window_event(pitch_type="FF", batter_side="L"),
+        _window_event(pitch_type="SL", batter_side="L"),
+        _window_event(pitch_type="FF", batter_side="R", batter_id=909),
+    )
+    board = _build(_FakeApi(), _FakeSavant(), events=events)
+    assert not isinstance(board, FetchFailure)
+    pitcher = board.games[0].home_pitcher
+    assert pitcher is not None
+    assert pitcher.usage_vs_left == {"FF": Decimal(2) / Decimal(3), "SL": Decimal(1) / Decimal(3)}
+    assert pitcher.usage_vs_right == {"FF": Decimal(1)}
+
+
 def test_batter_matchup_lines_are_side_scoped_over_the_window() -> None:
     """D-088: the matchup table counts only pitches from the opposing
     starter's side inside the matchup window — same-side pitching and older

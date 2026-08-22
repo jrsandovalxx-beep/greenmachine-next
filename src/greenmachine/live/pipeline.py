@@ -252,8 +252,9 @@ class PitcherCard:
     """The expected opposing pitcher: season line, qualifying arsenal, and the
     season-long per-pitch lines the Arsenal table shows (D-087). Pitcher
     metrics are always season figures — never windowed — with last season
-    filling in when he has no current record; the only window read is the
-    per-side pitch-type set behind the table's side filter."""
+    filling in when he has no current record; the only window reads are the
+    per-side pitch-type set behind the table's side filter and, when that
+    filter is on, the per-side usage share it switches to (D-102)."""
 
     player_id: int
     full_name: str
@@ -264,6 +265,11 @@ class PitcherCard:
     season_lines_year: int
     pitches_vs_left: frozenset[str]
     pitches_vs_right: frozenset[str]
+    # D-102: each pitch type's share of his pitches to that side over the
+    # recent window — the only per-side usage split on the board, since the
+    # arsenal leaderboard publishes usage across all batters only.
+    usage_vs_left: dict[str, Decimal]
+    usage_vs_right: dict[str, Decimal]
 
 
 @dataclass(frozen=True)
@@ -724,6 +730,23 @@ def fetch_window_events(
     return tuple(events), tuple(diagnostics)
 
 
+def _side_usage(events: tuple[PitchEvent, ...], side: str) -> dict[str, Decimal]:
+    """Each pitch type's share of the pitches he threw to one batting side
+    in the window record (D-102). The arsenal leaderboard's usage spans all
+    batters; this is the per-hitter-hand basis the side toggle switches to.
+    An empty scope is an empty mapping — never an invented share."""
+    counts: dict[str, int] = {}
+    total = 0
+    for event in events:
+        if event.batter_side != side or not event.pitch_type:
+            continue
+        counts[event.pitch_type] = counts.get(event.pitch_type, 0) + 1
+        total += 1
+    if not total:
+        return {}
+    return {pitch: Decimal(count) / Decimal(total) for pitch, count in counts.items()}
+
+
 def _pitcher_card(
     probable_id: int,
     probable_name: str,
@@ -760,6 +783,8 @@ def _pitcher_card(
             for event in window_events
             if event.batter_side == "R" and event.pitch_type
         ),
+        usage_vs_left=_side_usage(window_events, "L"),
+        usage_vs_right=_side_usage(window_events, "R"),
     )
 
 

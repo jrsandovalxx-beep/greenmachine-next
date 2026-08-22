@@ -88,22 +88,10 @@ def test_pull_is_signed_by_batter_side_and_unmeasurable_contacts_drop_out() -> N
     assert metrics.pull_air_pct == Decimal("50")
 
 
-def test_xwoba_averages_pa_values() -> None:
-    metrics = aggregate_form(
-        (
-            _event(event="home_run", woba_value="2.0", woba_denom="1"),
-            _event(event="strikeout", woba_value="0.0", woba_denom="1"),
-        )
-    )
-    assert metrics.plate_appearance_events == 2
-    assert metrics.xwoba == Decimal("1.0")
-
-
 def test_empty_windows_aggregate_to_nothing_without_error() -> None:
     metrics = aggregate_form(())
     assert metrics.batted_ball_events == 0
     assert metrics.barrel_pct is None
-    assert metrics.xwoba is None
 
 
 def test_each_metric_prefers_the_short_window_independently() -> None:
