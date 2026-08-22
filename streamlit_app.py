@@ -88,8 +88,9 @@ from greenmachine.live.backtest import (
 )
 from greenmachine.live.form import FormSection, FormValue
 from greenmachine.live.grading import QUALIFYING_USAGE_SHARE
-from greenmachine.live.mlb_api import FetchFailure, MlbStatsApi
+from greenmachine.live.mlb_api import FetchFailure, GameLogEntry, MlbStatsApi
 from greenmachine.live.pipeline import (
+    SEASON_IDS_PER_REQUEST,
     BatterCard,
     BatterGridLine,
     GameCard,
@@ -1728,6 +1729,26 @@ def _backtest_board(slate_iso: str) -> SlateBoard | FetchFailure:
     )
 
 
+@st.cache_data(ttl=DAY_EVENTS_TTL_SECONDS, show_spinner=False)
+def _backtest_game_logs(
+    slate_iso: str, player_ids: tuple[int, ...]
+) -> dict[int, tuple[GameLogEntry, ...]] | FetchFailure:
+    """One past day's hitting game logs for the slate's batters, cached: a
+    completed day never changes. Outcomes read the near-real-time game log
+    (D-100), not the day-indexed pitch record."""
+    api, _ = live_mlb_adapters()
+    start = end = date.fromisoformat(slate_iso).strftime("%m/%d/%Y")
+    logs: dict[int, tuple[GameLogEntry, ...]] = {}
+    for i in range(0, len(player_ids), SEASON_IDS_PER_REQUEST):
+        fetched = api.fetch_recent_game_logs(
+            tuple(sorted(player_ids))[i : i + SEASON_IDS_PER_REQUEST], start, end
+        )
+        if isinstance(fetched, FetchFailure):
+            return fetched
+        logs.update(fetched)
+    return logs
+
+
 def _backtest_day_rows(rows: tuple[BacktestRow, ...]) -> pd.DataFrame:
     """One backtested day's outcome rows as a display frame."""
     return pd.DataFrame(
@@ -1794,17 +1815,23 @@ def _render_backtest() -> None:
             continue
         if not board.games:
             continue  # an off-day has nothing to measure
-        events = _day_events(iso, day.year)
-        if isinstance(events, FetchFailure):
-            failures.append(f"{iso} outcomes: {events.reason}")
+        batter_ids = tuple(
+            card.player_id
+            for game in board.games
+            for card in (*game.away_batters, *game.home_batters)
+        )
+        logs = _backtest_game_logs(iso, batter_ids)
+        if isinstance(logs, FetchFailure):
+            failures.append(f"{iso} outcomes: {logs.reason}")
             continue
-        if not events:
-            # The source can return an empty record for a day it has not
-            # indexed yet; tallying it would fabricate a row of zero homers,
-            # so the day is excluded and named (D-023/D-025).
-            failures.append(f"{iso} outcomes: source returned no pitches — not tallied")
+        if not logs:
+            # No game-log lines at all for the slate's batters means the
+            # outcome source did not answer; tallying it would fabricate a
+            # row of zero homers, so the day is excluded and named
+            # (D-023/D-025).
+            failures.append(f"{iso} outcomes: source returned no game logs — not tallied")
             continue
-        per_day[iso] = outcomes_for_day(board, events)  # type: ignore[arg-type]
+        per_day[iso] = outcomes_for_day(board, logs)
     blot.empty()
     all_rows = tuple(row for rows in per_day.values() for row in rows)
     summary_rows: list[dict[str, str]] = []

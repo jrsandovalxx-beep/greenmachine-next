@@ -202,3 +202,99 @@ def test_the_stats_host_is_the_only_host_the_adapter_asks_for() -> None:
     transport = _FakeTransport(_SLATE)
     MlbStatsApi(transport).fetch_slate("08/20/2026")
     assert all(url.startswith("https://statsapi.mlb.com/") for url in transport.requested_urls)
+
+
+_PEOPLE_GAME_LOG = {
+    "people": [
+        {
+            "id": 101,
+            "fullName": "Slugger One",
+            "stats": [
+                {
+                    "group": {"displayName": "hitting"},
+                    "type": {"displayName": "gameLog"},
+                    "splits": [
+                        {
+                            "date": "2026-08-18",
+                            "game": {"gamePk": 777000},
+                            "stat": {"plateAppearances": 4, "homeRuns": 1},
+                        },
+                        {
+                            "date": "2026-08-20",
+                            "game": {"gamePk": 777002},
+                            "stat": {"plateAppearances": 5, "homeRuns": 0},
+                        },
+                        {
+                            "date": "2026-08-20",
+                            "game": {"gamePk": 777003},
+                            "stat": {"plateAppearances": 4, "homeRuns": 1},
+                        },
+                    ],
+                },
+                {
+                    "group": {"displayName": "hitting"},
+                    "type": {"displayName": "season"},
+                    "splits": [{"stat": {"plateAppearances": 500, "homeRuns": 33}}],
+                },
+            ],
+        },
+        {"id": 102, "fullName": "No Games", "stats": []},
+    ]
+}
+
+
+def test_game_logs_parse_dated_rows_and_skip_season_totals() -> None:
+    """D-100: only dated, gamed splits are game-log lines; the season-total
+    split riding the same response is not one. Entries sort by date then
+    game, so a doubleheader keeps both games in order."""
+    logs = _api(_PEOPLE_GAME_LOG).fetch_recent_game_logs((101, 102), "08/15/2026", "08/22/2026")
+    assert not isinstance(logs, FetchFailure)
+    assert 102 not in logs  # no appearances in the range: absent, not empty
+    entries = logs[101]
+    assert [(entry.date, entry.game_pk) for entry in entries] == [
+        ("2026-08-18", 777000),
+        ("2026-08-20", 777002),
+        ("2026-08-20", 777003),
+    ]
+    first, _, third = entries
+    assert (first.home_runs, first.plate_appearances) == (1, 4)
+    assert (third.home_runs, third.plate_appearances) == (1, 4)
+
+
+def test_game_logs_missing_count_fields_read_as_zero() -> None:
+    payload = {
+        "people": [
+            {
+                "id": 101,
+                "stats": [
+                    {
+                        "splits": [
+                            {
+                                "date": "2026-08-20",
+                                "game": {"gamePk": 777001},
+                                "stat": {"plateAppearances": 2},
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    logs = _api(payload).fetch_recent_game_logs((101,), "08/20/2026", "08/20/2026")
+    assert not isinstance(logs, FetchFailure)
+    entry = logs[101][0]
+    assert entry.home_runs == 0
+    assert entry.plate_appearances == 2
+
+
+def test_game_logs_malformed_split_is_a_fetch_failure() -> None:
+    payload = {
+        "people": [
+            {
+                "id": 101,
+                "stats": [{"splits": [{"date": "2026-08-20", "game": {"gamePk": "oops"}}]}],
+            }
+        ]
+    }
+    failure = _api(payload).fetch_recent_game_logs((101,), "08/20/2026", "08/20/2026")
+    assert isinstance(failure, FetchFailure)

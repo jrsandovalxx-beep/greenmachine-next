@@ -19,6 +19,7 @@ from greenmachine.live.form import MIN_BBE_FORM
 from greenmachine.live.mlb_api import (
     BattingOrders,
     FetchFailure,
+    GameLogEntry,
     ProbablePitcher,
     ScheduledGame,
     SeasonHittingLine,
@@ -151,8 +152,10 @@ class _FakeApi:
         orders: BattingOrders | FetchFailure | None = None,
         hitting: dict[int, SeasonHittingLine] | None = None,
         pitching: dict[int, SeasonPitchingLine] | None = None,
+        game_logs: dict[int, tuple[GameLogEntry, ...]] | FetchFailure | None = None,
     ) -> None:
         self._orders = orders
+        self._game_logs = game_logs
         self._hitting = hitting if hitting is not None else {BATTER_ID: _season_hitting(BATTER_ID)}
         self._pitching = (
             pitching
@@ -185,6 +188,15 @@ class _FakeApi:
 
     def fetch_season_pitching(self, player_ids: tuple[int, ...]) -> dict[int, SeasonPitchingLine]:
         return {pid: line for pid, line in self._pitching.items() if pid in player_ids}
+
+    def fetch_recent_game_logs(
+        self, player_ids: tuple[int, ...], start_mmddyyyy: str, end_mmddyyyy: str
+    ) -> dict[int, tuple[GameLogEntry, ...]] | FetchFailure:
+        if self._game_logs is None:
+            return {}
+        if isinstance(self._game_logs, FetchFailure):
+            return self._game_logs
+        return {pid: log for pid, log in self._game_logs.items() if pid in player_ids}
 
 
 class _FakeSavant:
@@ -846,30 +858,71 @@ def test_season_grid_line_composes_the_season_sources() -> None:
     assert line.pull_air_share is None
 
 
-def test_money_tag_marks_a_homer_in_the_last_game_day() -> None:
-    """D-094: the tag follows the most recent game day on or before the
-    slate — homer that day, tag; homer earlier with a quieter game after,
-    no tag."""
-    events = (
-        _window_event(game_date="2026-08-12", event="home_run"),
-        _window_event(game_date="2026-08-18", event="home_run"),
+def _log_entry(date: str, home_runs: int, plate_appearances: int = 4) -> GameLogEntry:
+    return GameLogEntry(
+        date=date,
+        game_pk=777001,
+        home_runs=home_runs,
+        plate_appearances=plate_appearances,
     )
-    board = _build(_FakeApi(), _FakeSavant(), events=events)
+
+
+def test_money_tag_marks_a_homer_in_the_last_game_day() -> None:
+    """D-094/D-100: the tag follows the most recent completed game in the
+    log — homer that day, tag; homer earlier with a quieter game after,
+    no tag."""
+    logs = {
+        BATTER_ID: (
+            _log_entry("2026-08-12", home_runs=1),
+            _log_entry("2026-08-18", home_runs=1),
+        )
+    }
+    board = _build(_FakeApi(game_logs=logs), _FakeSavant())
     assert not isinstance(board, FetchFailure)
     assert board.games[0].away_batters[0].homered_on_last_game_day is True
 
-    quieter_after = (
-        _window_event(game_date="2026-08-12", event="home_run"),
-        _window_event(game_date="2026-08-18", event="double"),
-        _window_event(game_date="2026-08-19", event="single"),
-    )
-    board = _build(_FakeApi(), _FakeSavant(), events=quieter_after)
+    quieter_after = {
+        BATTER_ID: (
+            _log_entry("2026-08-12", home_runs=1),
+            _log_entry("2026-08-18", home_runs=0),
+            _log_entry("2026-08-19", home_runs=0),
+        )
+    }
+    board = _build(_FakeApi(game_logs=quieter_after), _FakeSavant())
     assert not isinstance(board, FetchFailure)
     assert board.games[0].away_batters[0].homered_on_last_game_day is False
 
 
 def test_money_tag_stays_off_without_a_homer_in_the_record() -> None:
-    """D-094: no home_run event in the fetched record, no tag — never a guess."""
+    """D-094/D-100: no home run in the game log, no tag — never a guess.
+    No log at all is also no tag."""
+    logs = {BATTER_ID: (_log_entry("2026-08-19", home_runs=0),)}
+    board = _build(_FakeApi(game_logs=logs), _FakeSavant())
+    assert not isinstance(board, FetchFailure)
+    assert board.games[0].away_batters[0].homered_on_last_game_day is False
+
     board = _build(_FakeApi(), _FakeSavant())
     assert not isinstance(board, FetchFailure)
     assert board.games[0].away_batters[0].homered_on_last_game_day is False
+
+
+def test_money_tag_stays_off_when_the_log_source_fails() -> None:
+    """D-100: a failed game-log fetch downgrades to absence — no tag, and
+    the build still completes."""
+    board = _build(_FakeApi(game_logs=FetchFailure("game-logs: HTTP 503")), _FakeSavant())
+    assert not isinstance(board, FetchFailure)
+    assert board.games[0].away_batters[0].homered_on_last_game_day is False
+
+
+def test_money_tag_ignores_zero_pa_entries() -> None:
+    """D-100: a log line without plate appearances is not a played game —
+    it neither tags nor clears."""
+    logs = {
+        BATTER_ID: (
+            _log_entry("2026-08-18", home_runs=1),
+            _log_entry("2026-08-19", home_runs=0, plate_appearances=0),
+        )
+    }
+    board = _build(_FakeApi(game_logs=logs), _FakeSavant())
+    assert not isinstance(board, FetchFailure)
+    assert board.games[0].away_batters[0].homered_on_last_game_day is True

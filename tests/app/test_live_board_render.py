@@ -30,6 +30,8 @@ from greenmachine.inputs.contract import Handedness, ParkFactor
 from greenmachine.live.mlb_api import (
     BattingOrders,
     FetchFailure,
+    GameLogEntry,
+    MlbStatsApi,
     ProbablePitcher,
     ScheduledGame,
     SeasonHittingLine,
@@ -106,6 +108,11 @@ class _OutageApi:
                 batters_faced=620,
             )
         }
+
+    def fetch_recent_game_logs(
+        self, player_ids: tuple[int, ...], start_mmddyyyy: str, end_mmddyyyy: str
+    ) -> FetchFailure:
+        return FetchFailure("game-logs: simulated outage")
 
 
 class _OutageSavant:
@@ -892,11 +899,15 @@ def test_backtest_button_swaps_the_view(monkeypatch: pytest.MonkeyPatch) -> None
     # reach it; cut the network at the adapter method instead. Every
     # backtested day regrades to the staged board (official_date 2026-08-20),
     # and the stub's homer belongs to batter 101 — the staged S (home) and
-    # B (away) cards.
-    from greenmachine.live.savant import BaseballSavant
-
-    homer = _pitch_event(game_date="2026-08-20", event="home_run", batter_id=BATTER_ID)
-    monkeypatch.setattr(BaseballSavant, "fetch_pitch_events", lambda self, *, year, day: (homer,))
+    # B (away) cards. Outcomes read the game log (D-100).
+    log = {
+        BATTER_ID: (
+            GameLogEntry(date="2026-08-20", game_pk=777001, home_runs=1, plate_appearances=4),
+        )
+    }
+    monkeypatch.setattr(
+        MlbStatsApi, "fetch_recent_game_logs", lambda self, ids, start, end: dict(log)
+    )
     monkeypatch.setenv("GM_ENVIRONMENT", "staging")
     st.cache_data.clear()
     at = AppTest.from_file(str(_APP_PATH), default_timeout=_TIMEOUT)
@@ -945,10 +956,9 @@ def test_backtest_excludes_a_day_the_source_has_not_indexed(
     import streamlit as st
 
     import greenmachine.live.pipeline as pipeline
-    from greenmachine.live.savant import BaseballSavant
 
     monkeypatch.setattr(pipeline, "build_board", lambda **kwargs: _board_with_grid_lines())
-    monkeypatch.setattr(BaseballSavant, "fetch_pitch_events", lambda self, *, year, day: ())
+    monkeypatch.setattr(MlbStatsApi, "fetch_recent_game_logs", lambda self, ids, start, end: {})
     monkeypatch.setenv("GM_ENVIRONMENT", "staging")
     st.cache_data.clear()
     at = AppTest.from_file(str(_APP_PATH), default_timeout=_TIMEOUT)

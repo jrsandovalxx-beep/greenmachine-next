@@ -2021,6 +2021,7 @@ see the full form metrifcs").** The full form section remains one tap away
 in the batter detail popup, so the grid stays lean; nothing about the form
 computation itself changes.
 
+
 ## D-099 - A no-op arsenal side filter says so in words
 **When the batter detail's "only pitches he uses vs this side" toggle removes
 no rows — because the starter threw his entire arsenal to that side over the
@@ -2031,3 +2032,32 @@ was correct: Ryan Weathers threw all five of his pitch types to right-handed
 batters in the window, so the filter legitimately changed nothing — the bug
 was the silence, not the mechanics. The empty-record fallback caption
 ("showing the full arsenal") is unchanged.
+## D-100 - Home-run outcomes read the real-time game log, and a truncated download gets one retry
+**The $ money tag and the backtest's daily outcomes read MLB Stats API
+hitting game logs — near-real-time, completed games only — instead of the
+Savant pitch record, whose search CSV runs a day behind; and a response body
+cut short mid-read is retried exactly once instead of crashing or silently
+dropping a day (Product Owner, 2026-08-22: "Some people who hit home runs
+are incorrect. Missing some $ as well. If it's because the game is still
+ongoing I understand. Also there's a lot of missing information for recent
+form data and the data for last 30 days seems choppy... it's readily
+available for players like Olson or Spencer jones yet it's missing.").**
+Three root causes, three fixes. First, Savant's statcast_search CSV is
+day-indexed: yesterday's and today's files are header-only shells for much
+of the day, so a homer hit last night never reached the tag and the last-30
+windows ran a day short. The Stats API gameLog hydrate answers completed
+games within minutes, five days of lookback covers off-days, and an
+in-progress game is simply absent — exactly the lag the owner already
+accepts. A log line with no plate appearances is not a played game: it
+neither tags nor clears. Second, the backtest's outcome column shared the
+lagged source and so mistimed or missed recent slates; it now reads the
+same game logs, and a day whose log feed returns nothing is still excluded
+and named, never tallied as invented zero-homer rows. Third, a truncated
+multi-megabyte CSV body (http.client.IncompleteRead) escaped every existing
+exception clause — it crashed renders outright, and because transport errors
+were never retried, one severed download silently removed a whole day from
+every 30-day window. The transport now names truncation its own error and
+grants it exactly one more attempt; a second truncation answers as source
+unavailable. What remains source-limited: the bat-tracking leaderboards
+enforce their own sample floors, so a hitter short of a floor still shows a
+named "not enough data" absence — that is the discipline, not breakage.
