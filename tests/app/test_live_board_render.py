@@ -597,7 +597,7 @@ def test_breakup_table_dashes_a_pitch_the_batter_has_not_seen() -> None:
     assert "Batter — last 2 weeks" in markup
     changeup_row = markup.split("Changeup", 1)[1].split("</tr>", 1)[0]
     assert '<td class="gm-half-boundary">0</td>' in changeup_row
-    assert changeup_row.count("<td>—</td>") == 8
+    assert changeup_row.count("<td>—</td>") == 10
 
 
 def test_breakup_side_toggle_switches_usage_to_the_hitter_hand_basis() -> None:
@@ -744,6 +744,7 @@ def _grid_line(**overrides: object) -> object:
         "iso": Decimal("0.6"),
         "distance_350_count": 1,
         "pull_air_share": Decimal("0.4"),
+        "oppo_air_share": Decimal("0.25"),
         "expected_woba": Decimal("0.45"),
         "whiff_share": Decimal("0.12"),
     }
@@ -772,6 +773,7 @@ def test_grid_line_cells_render_rates_and_named_absences() -> None:
         "ISO",
         "+350 ft",
         "Pull Air %",
+        "Oppo Air %",
         "xwOBA",
         "Swing-Str %",
     }
@@ -784,16 +786,19 @@ def test_grid_line_cells_render_rates_and_named_absences() -> None:
     # D-097: a count of 350+ ft balls, not a rate.
     assert texts["+350 ft"] == "1"
     assert texts["Pull Air %"] == "40.0%"
+    assert texts["Oppo Air %"] == "25.0%"
     assert texts["xwOBA"] == ".450"
     assert styles == {}
 
     texts, styles = streamlit_app._grid_line_cells(
-        _grid_line(distance_350_count=None, pull_air_share=None)
+        _grid_line(distance_350_count=None, pull_air_share=None, oppo_air_share=None)
     )
     assert texts["+350 ft"] == "—"
     assert texts["Pull Air %"] == "—"
+    assert texts["Oppo Air %"] == "—"
     assert styles["+350 ft"] == streamlit_app._REASON_CSS
     assert styles["Pull Air %"] == streamlit_app._REASON_CSS
+    assert styles["Oppo Air %"] == streamlit_app._REASON_CSS
 
 
 def _board_with_grid_lines() -> SlateBoard:
@@ -1035,6 +1040,111 @@ def test_backtest_excludes_a_day_the_source_has_not_indexed(
     summary = [frame for frame in frames if "Hit rate" in frame.columns]
     assert summary, "the per-grade summary still renders"
     assert summary[0]["Batters"].tolist() == ["0", "0", "0", "0", "0"]
+
+
+def test_breakup_batter_half_carries_contact_shape_with_the_pitch_type_floor() -> None:
+    """D-109: the batter half's EV and Air% read the window line — below
+    the ratified 10-BBE pitch-type floor the value keeps its exact sample
+    with an INSUFFICIENT marker; an empty denominator dashes."""
+    from types import SimpleNamespace
+
+    import streamlit_app
+
+    pitcher = SimpleNamespace(season_lines=(_season_line(),))
+    markup = streamlit_app._arsenal_breakup_html(
+        pitcher,
+        (
+            _pitch_line(
+                batted_balls=7,
+                mean_launch_speed=Decimal("91.23"),
+                air_ball_share=Decimal("0.5"),
+            ),
+        ),
+        threshold=0.15,
+        side_filter=None,
+        side_usage=None,
+        window_label="last month",
+        throws_text="right",
+    )
+    assert ">EV</th>" in markup
+    assert ">Air%</th>" in markup
+    assert "91.2 · n=7 · INSUFFICIENT" in markup
+    assert "50.0% · n=7 · INSUFFICIENT" in markup
+    # A full sample shows the plain values, no marker.
+    markup_full = streamlit_app._arsenal_breakup_html(
+        pitcher,
+        (
+            _pitch_line(
+                batted_balls=12,
+                mean_launch_speed=Decimal("91.23"),
+                air_ball_share=Decimal("0.5"),
+            ),
+        ),
+        threshold=0.15,
+        side_filter=None,
+        side_usage=None,
+        window_label="last month",
+        throws_text="right",
+    )
+    assert ">91.2</td>" in markup_full
+    assert ">50.0%</td>" in markup_full
+    assert "INSUFFICIENT" not in markup_full
+    # No classified contact at all: dashes, never an invented zero.
+    markup_empty = streamlit_app._arsenal_breakup_html(
+        pitcher,
+        (_pitch_line(batted_balls=0, mean_launch_speed=None, air_ball_share=None),),
+        threshold=0.15,
+        side_filter=None,
+        side_usage=None,
+        window_label="last month",
+        throws_text="right",
+    )
+    row = markup_empty.split("4-Seam Fastball", 1)[1].split("</tr>", 1)[0]
+    assert row.count("<td>—</td>") >= 2
+
+
+def test_card_tags_carry_the_slot_and_the_high_k_reads() -> None:
+    """D-109: the tags box gains the ordinal lineup slot (est.-marked),
+    the high-K profile tag at the ratified 27% line, and the interaction
+    tag when the opposing arm is also low-whiff — never both K tags."""
+    from types import SimpleNamespace
+
+    import streamlit_app
+
+    result = SimpleNamespace(present_observations=[], missing_observations=[])
+    card = SimpleNamespace(
+        result=result,
+        order_position=1,
+        lineup_is_estimate=True,
+        season_k_share=Decimal("0.28"),
+        season=SimpleNamespace(plate_appearances=402),
+    )
+    arm = SimpleNamespace(season_whiff_weighted=Decimal("0.20"))
+    tags = streamlit_app._card_tags(card, arm)
+    assert "est. lineup" in tags
+    assert "bats 1st (est.)" in tags
+    assert "high-K bat vs low-whiff arm: K% 28.0 (402 PA), arsenal whiff 20.0%" in tags
+    assert "high-K profile" not in tags  # the interaction tag supersedes it
+    # A normal-whiff arm leaves the descriptive profile tag.
+    tags = streamlit_app._card_tags(card, SimpleNamespace(season_whiff_weighted=Decimal("0.25")))
+    assert "high-K profile: K% 28.0 (402 PA)" in tags
+    # Below the ratified line, and no line at all: no K tag.
+    quiet = SimpleNamespace(**{**vars(card), "season_k_share": Decimal("0.20")})
+    assert "high-K" not in streamlit_app._card_tags(quiet, arm)
+    no_line = SimpleNamespace(**{**vars(card), "season_k_share": None, "season": None})
+    assert "high-K" not in streamlit_app._card_tags(no_line, arm)
+
+
+def test_ordinal_never_says_1th() -> None:
+    import streamlit_app
+
+    assert streamlit_app._ordinal(1) == "1st"
+    assert streamlit_app._ordinal(2) == "2nd"
+    assert streamlit_app._ordinal(3) == "3rd"
+    assert streamlit_app._ordinal(4) == "4th"
+    assert streamlit_app._ordinal(9) == "9th"
+    assert streamlit_app._ordinal(11) == "11th"
+    assert streamlit_app._ordinal(13) == "13th"
 
 
 def test_breakup_builder_escapes_pitch_names() -> None:

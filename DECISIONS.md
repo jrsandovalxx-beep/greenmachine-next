@@ -2201,3 +2201,55 @@ URI, so the shell's standing rule survives intact: no remote request of
 any kind. It rides the same circle clip and the same 4.5s pulse the
 hand-drawn orb had; the painted seam orb stays in the module as the
 fallback when the asset is absent.
+
+## D-108 - The signals program's O-batch resolves to the builder's recommendations
+**All eight owner-gated questions of the signals integration program were
+put to the Product Owner in one batch (2026-08-23) and answered "No
+preference" on every one — the recommendations proceed under standing
+authorization (the D-103 posture).** O1: the never-built BvP flag design
+from D-023 is RETIRED — the signals list's exclusion stands and no BvP
+surface will be built. O2: spray sectors for the dominant-air-field read
+are ±15° (echoing D-023's provisional pull cone). O3: projection systems
+for call-ups are skipped entirely (the host pin and D-063(b) stand). O4:
+SP-3's pitcher vulnerability reads join the Arms tab AS COLUMNS — wide
+and sortable, nothing hidden behind clicks. O5: humidity shows always
+beside temperature on the Conditions tab. O6: the builder captures the 30
+park orientation bearings from Clem's Baseball, with the capture
+provenance named in the pinned table's record. O7: the platoon-bench tag
+rule is the strict one — a bench hitter (not in today's lineup) at the
+SAME listed position who bats from the OPPOSITE side; switch-hitters
+qualify against either side; ties break by roster order. O8: the emphasis
+lines ratify as proposed — x-gap tag fires at |gap| ≥ .030; high-K at
+K% ≥ 27%; low-whiff arm at arsenal-wide whiff ≤ 22%; contact-first at
+squared-up ≥ 35% AND bat speed ≥ 72 mph; ground-ball profile at air
+allowed ≤ 50% (high ≥ 62%); the lineup-vs-hand caption needs ≥ 100 AB in
+L30. Each line is printed on the surface that uses it (the D-079
+pattern).
+
+## D-109 - SP-1: air spray both ways, SwSp% displayed, contact shape, context tags
+**(Same program; the ticket's displays ship under the O-8 lines ratified
+in D-108.)** Oppo Air % joins the form row and the Matchups grid — the
+exact mirror of the shipped pull test over the identical measurable-air
+denominator, spray exactly 0 counting as neither, with one shared spray
+helper so the mirrors cannot drift. This amends the D-068 metric set, as
+D-102's removal of xwOBA did. SwSp% (sweet-spot share, launch angle
+8–32°) joins the form row beside it — computed per window and graded
+(0.7 pts) from the start, displayed for the first time. The Matchups
+season view renders Oppo Air % as the same reason-styled dash Pull Air %
+shows, the season-toggle help naming the absence the same way ("no
+published source"). The arsenal breakup table's batter half gains
+per-pitch EV and Air% — computed pipeline-side onto PitchLine, carrying
+the ratified 10-BBE pitch-type floor with the INSUFFICIENT treatment
+below it and dashes on empty denominators; these are the standing
+nominations for the owner's final metric-columns answer, and his list
+supersedes when it arrives. The Sluggers tags box widens from advisories
+to advisory-plus-context on the already A/S-filtered shortlist: the
+ordinal lineup slot ("bats 1st", "bats 2nd (est.)" — never "1th"), the
+high-K profile tag at the ratified 27% line, and the high-K-bat vs
+low-whiff-arm interaction tag when the opposing starter's arsenal-wide
+whiff (pitch-weighted over his season lines) is ≤ 22% — the interaction
+tag supersedes the profile tag, never both. Batter K% is strikeouts over
+season plate appearances, computed pipeline-side (the strikeouts count
+was parsed and unread until now). The form caption names the Oppo Air %
+denominator verbatim from the spec, and the breakup caption prints the
+10-BBE floor.

@@ -88,6 +88,56 @@ def test_pull_is_signed_by_batter_side_and_unmeasurable_contacts_drop_out() -> N
     assert metrics.pull_air_pct == Decimal("50")
 
 
+def test_oppo_mirrors_pull_over_the_identical_denominator() -> None:
+    """D-109: Oppo Air % is the pull test mirrored over the same measurable
+    air balls — spray exactly 0 is neither pull nor oppo."""
+    pulled_righty = _event(
+        launch_speed_angle=4, bb_type="fly_ball", hc_x="160", hc_y="160", batter_side="R"
+    )
+    opposite_righty = _event(
+        launch_speed_angle=4, bb_type="fly_ball", hc_x="90", hc_y="160", batter_side="R"
+    )
+    dead_center = _event(
+        launch_speed_angle=4, bb_type="fly_ball", hc_x="125.42", hc_y="160", batter_side="R"
+    )
+    metrics = aggregate_form((pulled_righty, opposite_righty, dead_center))
+    assert metrics.air_balls == 3
+    assert metrics.pull_air_balls == 1
+    assert metrics.oppo_air_balls == 1
+    assert metrics.oppo_air_pct == Decimal(100) / Decimal(3)
+
+
+def test_oppo_is_signed_by_batter_side() -> None:
+    """The mirror flips with the side: a lefty's oppo direction is a
+    righty's pull direction."""
+    lefty_oppo = _event(
+        launch_speed_angle=4, bb_type="fly_ball", hc_x="160", hc_y="160", batter_side="L"
+    )
+    lefty_pull = _event(
+        launch_speed_angle=4, bb_type="fly_ball", hc_x="90", hc_y="160", batter_side="L"
+    )
+    metrics = aggregate_form((lefty_oppo, lefty_pull))
+    assert metrics.pull_air_balls == 1
+    assert metrics.oppo_air_balls == 1
+
+
+def test_oppo_air_resolves_with_the_same_window_rules_as_pull() -> None:
+    """Same L7→L14 resolution, same 15-air-ball floor, same INSUFFICIENT
+    treatment as Pull Air % — an empty L7 falls back to the L14 sample."""
+    recent = aggregate_form(())
+    extended = aggregate_form(
+        tuple(
+            _event(launch_speed_angle=4, bb_type="fly_ball", hc_x="90", hc_y="160", batter_side="R")
+            for _ in range(15)
+        )
+    )
+    section = resolve_form_section(recent, extended, (), ())
+    assert section.oppo_air_pct is not None
+    assert section.oppo_air_pct.window_days == 14
+    assert section.oppo_air_pct.value == Decimal("100")
+    assert section.oppo_air_pct.sufficient
+
+
 def test_empty_windows_aggregate_to_nothing_without_error() -> None:
     metrics = aggregate_form(())
     assert metrics.batted_ball_events == 0

@@ -55,6 +55,8 @@ class FormMetrics:
     air_balls: int
     pull_air_balls: int
     pull_air_pct: Decimal | None  # per air ball, percent scale
+    oppo_air_balls: int = 0
+    oppo_air_pct: Decimal | None = None  # per air ball, percent scale
 
 
 def is_measurable_air(event: PitchEvent) -> bool:
@@ -70,21 +72,42 @@ def is_measurable_air(event: PitchEvent) -> bool:
     )
 
 
-def is_pull_air(event: PitchEvent) -> bool:
-    """Whether one batted ball is a pulled air ball (D-071's signed spray
-    convention): air-ball contact whose spray angle points to the batter's
-    pull side. Unmeasurable coordinates or an unknown side read as not-pull
-    rather than inventing a direction."""
+def _spray_degrees(event: PitchEvent) -> float | None:
+    """The signed spray angle of one air ball (D-071's convention: positive
+    toward a right-hander's pull side), or None when the contact is not
+    measurable. The one geometry pull and oppo share, so the two mirrors
+    can never drift apart."""
     if not is_measurable_air(event):
-        return False
+        return None
     assert event.hc_x is not None and event.hc_y is not None  # the guard just checked both
-    spray = math.degrees(
+    return math.degrees(
         math.atan2(
             float(event.hc_x - _HOME_PLATE_X),
             float(_HOME_PLATE_DEPTH_Y - event.hc_y),
         )
     )
+
+
+def is_pull_air(event: PitchEvent) -> bool:
+    """Whether one batted ball is a pulled air ball (D-071's signed spray
+    convention): air-ball contact whose spray angle points to the batter's
+    pull side. Unmeasurable coordinates or an unknown side read as not-pull
+    rather than inventing a direction."""
+    spray = _spray_degrees(event)
+    if spray is None:
+        return False
     return (event.batter_side == "R" and spray > 0) or (event.batter_side == "L" and spray < 0)
+
+
+def is_oppo_air(event: PitchEvent) -> bool:
+    """Whether one batted ball is an opposite-field air ball (SP-1): the
+    exact mirror of the pull test over the identical measurable-air
+    denominator. Spray exactly 0 is neither pull nor oppo — a dead-center
+    ball claims no direction."""
+    spray = _spray_degrees(event)
+    if spray is None:
+        return False
+    return (event.batter_side == "R" and spray < 0) or (event.batter_side == "L" and spray > 0)
 
 
 def _pct(numerator: int, denominator: int) -> Decimal | None:
@@ -115,6 +138,7 @@ def aggregate_form(events: tuple[PitchEvent, ...]) -> FormMetrics:
     # denominator visibly drawn from one list.
     measurable_air = [event for event in bbe if is_measurable_air(event)]
     pulls = sum(1 for event in measurable_air if is_pull_air(event))
+    oppos = sum(1 for event in measurable_air if is_oppo_air(event))
     ev_avg: Decimal | None = None
     if speeds:
         ev_avg = sum(speeds) / Decimal(len(speeds))
@@ -128,6 +152,8 @@ def aggregate_form(events: tuple[PitchEvent, ...]) -> FormMetrics:
         air_balls=len(measurable_air),
         pull_air_balls=pulls,
         pull_air_pct=_pct(pulls, len(measurable_air)),
+        oppo_air_balls=oppos,
+        oppo_air_pct=_pct(oppos, len(measurable_air)),
     )
 
 
@@ -143,10 +169,12 @@ class FormValue:
 
 @dataclass(frozen=True)
 class FormSection:
-    """The eight form metrics after L7/L14 resolution, all nullable.
+    """The form metrics after L7/L14 resolution, all nullable.
 
     xwOBA left the popup under D-102 — it stays on the Matchups main
-    tables, whose grid lines carry it."""
+    tables, whose grid lines carry it. SP-1 (D-109) amended the D-068 set:
+    Oppo Air % mirrors Pull Air % over the identical denominator, and
+    SwSp% — computed and graded from the start — is displayed at last."""
 
     barrel_pct: FormValue
     exit_velocity: FormValue
@@ -156,6 +184,7 @@ class FormSection:
     attack_angle_degrees: FormValue
     ideal_attack_angle_pct: FormValue
     bat_speed_mph: FormValue
+    oppo_air_pct: FormValue | None = None
 
 
 def _pick(
@@ -257,6 +286,13 @@ def resolve_form_section(
             recent.pull_air_pct,
             recent.air_balls,
             extended.pull_air_pct,
+            extended.air_balls,
+            MIN_AIR_BALLS_FORM,
+        ),
+        oppo_air_pct=_pick(
+            recent.oppo_air_pct,
+            recent.air_balls,
+            extended.oppo_air_pct,
             extended.air_balls,
             MIN_AIR_BALLS_FORM,
         ),

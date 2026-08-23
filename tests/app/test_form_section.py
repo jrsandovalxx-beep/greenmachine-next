@@ -37,19 +37,23 @@ def _form(**overrides: FormValue) -> FormSection:
         attack_angle_degrees=overrides.get("attack_angle_degrees", sufficient),
         ideal_attack_angle_pct=overrides.get("ideal_attack_angle_pct", sufficient),
         bat_speed_mph=overrides.get("bat_speed_mph", sufficient),
+        oppo_air_pct=overrides.get("oppo_air_pct", sufficient),
     )
 
 
 def test_columns_are_the_d068_set_minus_xwoba_in_order() -> None:
     """D-102: xwOBA left the popup form grid; it stays on the Matchups main
-    tables, so the section carries the remaining six in their order."""
+    tables. D-109 amended the set: SwSp% — computed and graded from the
+    start — is displayed, and Oppo Air % mirrors Pull Air %."""
     texts, _styles = streamlit_app._form_section_frames(_form())
     assert list(texts.columns) == [
         "Barrel%",
         "EV",
         "AtkAng",
         "IdealAtkAng%",
+        "SwSp%",
         "Pull Air %",
+        "Oppo Air %",
         "Hard%",
     ]
     assert len(texts) == 1
