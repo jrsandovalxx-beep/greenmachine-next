@@ -1027,9 +1027,11 @@ def build_board(
         if not any(event.game_date >= matchup_cutoff for event in events_by_pitcher.get(pid, ()))
     }
     if starters_without_window:
-        reach_start = (as_of - timedelta(days=MIX_REACH_DAYS)).date()
+        # A distinct name: rebinding ``reach_start`` here would leak the L45
+        # mix reach into the form fallback's L14 cutoff below (D-103).
+        mix_reach_start = (as_of - timedelta(days=MIX_REACH_DAYS)).date()
         extra_days = tuple(
-            reach_start + timedelta(days=offset)
+            mix_reach_start + timedelta(days=offset)
             for offset in range(MIX_REACH_DAYS - MATCHUP_WINDOW_DAYS)
         )
         extra_events, extra_diagnostics = fetch_window_events(

@@ -886,6 +886,34 @@ def _log_entry(date: str, home_runs: int, plate_appearances: int = 4) -> GameLog
     )
 
 
+def test_the_mix_reach_never_stretches_the_form_fallback_window() -> None:
+    """D-103: when a starter's empty L30 forces the L45 mix reach, the form
+    section's L14 fallback must still read exactly 14 days — before the fix,
+    the rebound ``reach_start`` leaked 45 days into a window labelled L14."""
+    old_barrel = _window_event(
+        game_date="2026-07-31", pitcher_id=999
+    )  # 20 days out: past L14; from another pitcher so the starter's L30 stays empty
+    stale_starter_pitch = _window_event(
+        game_date="2026-07-15", batter_id=909
+    )  # the starter has nothing in L30, so the mix reach fires
+    board = _build(_FakeApi(), _FakeSavant(), events=(old_barrel, stale_starter_pitch))
+    assert not isinstance(board, FetchFailure)
+    form = board.games[0].away_batters[0].form
+    assert form is not None
+    assert form.barrel_pct.value is None
+    assert form.barrel_pct.sample == 0
+
+    # Anti-vacuity: the same barrel ten days out IS inside the honest L14.
+    in_reach = _window_event(game_date="2026-08-10", pitcher_id=999)
+    board = _build(_FakeApi(), _FakeSavant(), events=(in_reach, stale_starter_pitch))
+    assert not isinstance(board, FetchFailure)
+    form = board.games[0].away_batters[0].form
+    assert form is not None
+    assert form.barrel_pct.value == Decimal("100")
+    assert form.barrel_pct.window_days == 14
+    assert form.barrel_pct.sample == 1
+
+
 def test_money_tag_marks_a_homer_in_the_last_game_day() -> None:
     """D-094/D-100: the tag follows the most recent completed game in the
     log — homer that day, tag; homer earlier with a quieter game after,
