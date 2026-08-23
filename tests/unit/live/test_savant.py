@@ -13,7 +13,27 @@ _STATCAST_CSV = (
     "101,300,91.5,150,50.0,30,10.0,33.3\n"
 )
 
-_EXPECTED_CSV = "player_id,pa,bip,est_woba\n101,500,380,0.362\n"
+_EXPECTED_CSV = (
+    "player_id,pa,bip,ba,slg,woba,est_ba,est_slg,est_woba\n"
+    "101,500,380,0.251,0.465,0.340,0.270,0.501,0.362\n"
+)
+
+# D-110: a board missing one required column fails cleanly — a renamed or
+# dropped column must never smuggle in a wrong number.
+_EXPECTED_CSV_MISSING_COLUMN = (
+    "player_id,pa,bip,ba,slg,woba,est_ba,est_woba\n101,500,380,0.251,0.465,0.340,0.270,0.362\n"
+)
+
+_SPRINT_CSV = (
+    "player_id,team_id,team,position,age,competitive_runs,bolts,hp_to_1b,sprint_speed\n"
+    "101,147,NYY,CF,26,142,8,4.20,29.4\n"
+)
+
+_SQUARED_UP_CSV = (
+    "id,name,swings_competitive,percent_swings_competitive,contact,avg_bat_speed,"
+    "squared_up_per_bat_contact,squared_up_per_swing\n"
+    '101,"Slugger, One",620,0.90,480,73.4,0.41,0.36\n'
+)
 
 _TRACKING_CSV = (
     "id,side,avg_bat_speed,attack_angle,ideal_attack_angle_rate,competitive_swings\n"
@@ -60,11 +80,45 @@ def test_statcast_board_normalizes_percents_to_fractions() -> None:
     assert row.sweet_spot_share == Decimal("0.333")
 
 
-def test_expected_stats_board_parses() -> None:
+def test_expected_stats_board_parses_actual_and_expected_rates() -> None:
+    """D-110: the revived board carries actual and expected rates side by
+    side, so a regression gap's two sides share one denominator."""
     rows = BaseballSavant(_FakeTransport(_EXPECTED_CSV)).fetch_expected_stats(year=2026)
     assert not isinstance(rows, FetchFailure)
-    assert rows[101].xwoba == Decimal("0.362")
-    assert rows[101].plate_appearances == 500
+    row = rows[101]
+    assert row.xwoba == Decimal("0.362")
+    assert row.plate_appearances == 500
+    assert row.batting_average == Decimal("0.251")
+    assert row.slugging == Decimal("0.465")
+    assert row.woba == Decimal("0.340")
+    assert row.expected_batting_average == Decimal("0.270")
+    assert row.expected_slugging == Decimal("0.501")
+
+
+def test_expected_stats_board_fails_cleanly_on_an_unknown_column() -> None:
+    """D-110: a missing est_slg column fails every row's parse, and a board
+    with no parseable row is a FetchFailure — never a gap computed over a
+    wrong number."""
+    result = BaseballSavant(_FakeTransport(_EXPECTED_CSV_MISSING_COLUMN)).fetch_expected_stats(
+        year=2026
+    )
+    assert isinstance(result, FetchFailure)
+    assert "no row parsed" in result.reason
+
+
+def test_sprint_speed_board_parses() -> None:
+    rows = BaseballSavant(_FakeTransport(_SPRINT_CSV)).fetch_sprint_speed(year=2026)
+    assert not isinstance(rows, FetchFailure)
+    assert rows[101].sprint_speed == Decimal("29.4")
+
+
+def test_squared_up_board_parses_the_contact_profile() -> None:
+    rows = BaseballSavant(_FakeTransport(_SQUARED_UP_CSV)).fetch_squared_up(year=2026)
+    assert not isinstance(rows, FetchFailure)
+    row = rows[101]
+    assert row.competitive_swings == 620
+    assert row.squared_up_per_swing == Decimal("0.36")
+    assert row.avg_bat_speed == Decimal("73.4")
 
 
 def test_bat_tracking_keeps_both_sides_of_a_switch_hitter() -> None:

@@ -107,6 +107,9 @@ class SeasonHittingLine:
     home_runs: int
     strikeouts: int
     total_bases: int = 0
+    # D-110: sacrifice flies, the BABIP denominator's missing term —
+    # (H-HR)/(AB-K-HR+SF). Defaulted so pre-SP-2 fixtures stay valid.
+    sacrifice_flies: int = 0
 
 
 @dataclass(frozen=True)
@@ -353,6 +356,7 @@ class MlbStatsApi:
                     home_runs=_optional_int(stat, "homeRuns", context) or 0,
                     strikeouts=_optional_int(stat, "strikeOuts", context) or 0,
                     total_bases=_optional_int(stat, "totalBases", context) or 0,
+                    sacrifice_flies=_optional_int(stat, "sacFlies", context) or 0,
                 )
         except PayloadMalformedError as exc:
             return FetchFailure(str(exc))

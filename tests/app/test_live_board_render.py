@@ -148,6 +148,15 @@ class _OutageSavant:
             ),
         )
 
+    def fetch_expected_stats(self, *, year: int) -> dict:
+        return {}
+
+    def fetch_sprint_speed(self, *, year: int) -> dict:
+        return {}
+
+    def fetch_squared_up(self, *, year: int, minimum: int = 0) -> dict:
+        return {}
+
 
 def _outage_board() -> SlateBoard:
     """A real board build in which every metric feed failed."""
@@ -798,6 +807,44 @@ def test_grid_line_cells_render_rates_and_named_absences() -> None:
     assert texts["Oppo Air %"] == "—"
     assert styles["+350 ft"] == streamlit_app._REASON_CSS
     assert styles["Pull Air %"] == streamlit_app._REASON_CSS
+
+
+def test_grid_line_cells_add_the_gaps_on_the_season_view_only() -> None:
+    """D-110: the season view alone carries xISO-ISO and xwOBA-wOBA, each
+    signed with its PA sample, placed beside its sibling column, and
+    reason-styled when the expected-stats board has no row for him."""
+    import streamlit_app
+
+    from greenmachine.live.pipeline import RegressionGaps
+
+    gaps = RegressionGaps(
+        xiso_minus_iso=Decimal("0.041"),
+        xwoba_minus_woba=Decimal("-0.012"),
+        plate_appearances=412,
+    )
+    texts, styles = streamlit_app._grid_line_cells(_grid_line(gaps=gaps), include_gaps=True)
+    columns = list(texts)
+    assert columns.index("xISO-ISO") == columns.index("ISO") + 1
+    assert columns.index("xwOBA-wOBA") == columns.index("xwOBA") + 1
+    assert texts["xISO-ISO"] == "+.041 (412 PA)"
+    assert texts["xwOBA-wOBA"] == "-.012 (412 PA)"
+    assert "xISO-ISO" not in styles  # a value cell carries no reason style
+    # The L30 view (the default) never shows the columns, even with data.
+    texts, _ = streamlit_app._grid_line_cells(_grid_line(gaps=gaps))
+    assert "xISO-ISO" not in texts
+    assert "xwOBA-wOBA" not in texts
+    # No board row: the season view names the absence on both columns.
+    texts, styles = streamlit_app._grid_line_cells(_grid_line(), include_gaps=True)
+    assert texts["xISO-ISO"] == "—"
+    assert texts["xwOBA-wOBA"] == "—"
+    assert styles["xISO-ISO"] == streamlit_app._REASON_CSS
+    assert styles["xwOBA-wOBA"] == streamlit_app._REASON_CSS
+    # A scope missing at every reach still reads 'no data available' and
+    # still gains the two gap columns as styled dashes.
+    texts, styles = streamlit_app._grid_line_cells(None, include_gaps=True)
+    assert texts["AB"] == "no data available"
+    assert texts["xISO-ISO"] == "—"
+    assert styles["xISO-ISO"] == streamlit_app._REASON_CSS
     assert styles["Oppo Air %"] == streamlit_app._REASON_CSS
 
 
@@ -1118,6 +1165,10 @@ def test_card_tags_carry_the_slot_and_the_high_k_reads() -> None:
         lineup_is_estimate=True,
         season_k_share=Decimal("0.28"),
         season=SimpleNamespace(plate_appearances=402),
+        season_gaps=None,
+        squared_up_share=None,
+        squared_up_swings=0,
+        squared_up_bat_speed=None,
     )
     arm = SimpleNamespace(season_whiff_weighted=Decimal("0.20"))
     tags = streamlit_app._card_tags(card, arm)
@@ -1133,6 +1184,81 @@ def test_card_tags_carry_the_slot_and_the_high_k_reads() -> None:
     assert "high-K" not in streamlit_app._card_tags(quiet, arm)
     no_line = SimpleNamespace(**{**vars(card), "season_k_share": None, "season": None})
     assert "high-K" not in streamlit_app._card_tags(no_line, arm)
+
+
+def test_card_tags_carry_the_x_gap_and_contact_first_reads() -> None:
+    """D-110: the x-gap tag fires when EITHER season gap's absolute value
+    reaches .030 — both values always shown with the PA sample; the
+    contact-first tag needs squared-up ≥ 35% AND bat speed ≥ 72 mph."""
+    from types import SimpleNamespace
+
+    import streamlit_app
+
+    from greenmachine.live.pipeline import RegressionGaps
+
+    base = dict(
+        result=SimpleNamespace(present_observations=[], missing_observations=[]),
+        order_position=None,
+        lineup_is_estimate=False,
+        season_k_share=None,
+        season=None,
+        season_gaps=None,
+        squared_up_share=None,
+        squared_up_swings=0,
+        squared_up_bat_speed=None,
+    )
+    # Either gap trips the tag; the other value still prints.
+    over = SimpleNamespace(
+        **{
+            **base,
+            "season_gaps": RegressionGaps(
+                xiso_minus_iso=Decimal("0.041"),
+                xwoba_minus_woba=Decimal("-0.012"),
+                plate_appearances=412,
+            ),
+        }
+    )
+    tags = streamlit_app._card_tags(over, None)
+    assert "x-gap: xISO +.041, xwOBA -.012 (season, 412 PA)" in tags
+    flipped = SimpleNamespace(
+        **{
+            **base,
+            "season_gaps": RegressionGaps(
+                xiso_minus_iso=Decimal("0.010"),
+                xwoba_minus_woba=Decimal("0.030"),
+                plate_appearances=88,
+            ),
+        }
+    )
+    assert "x-gap" in streamlit_app._card_tags(flipped, None)
+    # Under the line on both, and no board row: no tag.
+    under = SimpleNamespace(
+        **{
+            **base,
+            "season_gaps": RegressionGaps(
+                xiso_minus_iso=Decimal("0.029"),
+                xwoba_minus_woba=Decimal("-0.029"),
+                plate_appearances=88,
+            ),
+        }
+    )
+    assert "x-gap" not in streamlit_app._card_tags(under, None)
+    assert "x-gap" not in streamlit_app._card_tags(SimpleNamespace(**base), None)
+    # Contact-first: both sides of the ratified line are required.
+    contact = SimpleNamespace(
+        **{
+            **base,
+            "squared_up_share": Decimal("0.362"),
+            "squared_up_swings": 620,
+            "squared_up_bat_speed": Decimal("73.4"),
+        }
+    )
+    tags = streamlit_app._card_tags(contact, None)
+    assert "contact-first profile: squared-up 36.2% (620 swings), bat speed 73.4 mph" in tags
+    slow_bat = SimpleNamespace(**{**vars(contact), "squared_up_bat_speed": Decimal("71.9")})
+    assert "contact-first" not in streamlit_app._card_tags(slow_bat, None)
+    low_squared = SimpleNamespace(**{**vars(contact), "squared_up_share": Decimal("0.349")})
+    assert "contact-first" not in streamlit_app._card_tags(low_squared, None)
 
 
 def test_ordinal_never_says_1th() -> None:

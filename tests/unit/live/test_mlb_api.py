@@ -70,6 +70,7 @@ _PEOPLE_HITTING = {
                                 "homeRuns": 33,
                                 "strikeOuts": 130,
                                 "totalBases": 204,
+                                "sacFlies": 4,
                             }
                         }
                     ],
@@ -162,6 +163,8 @@ def test_season_hitting_counts_and_bat_side_parse() -> None:
     assert line.plate_appearances == 500
     assert line.home_runs == 33
     assert line.total_bases == 204
+    # D-110: sacrifice flies join the parse — the BABIP denominator's SF term.
+    assert line.sacrifice_flies == 4
     assert 102 not in lines  # no season split: the assembly layer marks absence
 
 

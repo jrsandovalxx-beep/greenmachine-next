@@ -2253,3 +2253,41 @@ season plate appearances, computed pipeline-side (the strikeouts count
 was parsed and unread until now). The form caption names the Oppo Air %
 denominator verbatim from the spec, and the breakup caption prints the
 10-BBE floor.
+
+
+## D-110 - SP-2: season regression gaps, sprint speed, BABIP, contact-first
+
+**(Same program; displays ship under the O-8 lines ratified in D-108.)**
+The dormant expected-statistics adapter is revived and its parse widened
+from {player_id, pa, bip, est_woba} to the board's full actual-vs-expected
+set — ba, slg, woba beside est_ba, est_slg, est_woba (column names verified
+live 2026-08; every column required, so a renamed or dropped column fails
+the whole board cleanly, never a wrong number). xISO is the board's own
+est_slg - est_ba; the gap xISO-ISO subtracts the board's actual slg - ba,
+and xwOBA-wOBA subtracts the board's actual woba from est_woba — the
+season-wOBA source question answered by taking BOTH sides of each gap
+from the one board, so denominators match by construction; this is named
+in the surface captions as the provenance note. The Matchups season view
+alone gains the two gap columns, signed three-digit with the PA sample
+("+.041 (412 PA)"), placed beside their sibling columns, reason-styled
+when the board has no row; the L30 view is unchanged and the scope
+caption says the gaps are season-scope. The Sluggers x-gap tag —
+"x-gap: xISO {±.xxx}, xwOBA {±.xxx} (season, {pa} PA)" — fires when
+EITHER gap's absolute value reaches the ratified .030 line, both values
+always printed. The dialog gains a Season profile block: BABIP off the
+season counting line as (H-HR)/(AB-K-HR+SF) — sacFlies joins the
+season-hitting parse for the denominator's SF term — with the two
+absences named separately (no counting line vs an empty denominator),
+and the sprint-speed line with its league-general wording, sourced from
+a new sprint-speed leaderboard fetch on the same host with the same
+board shape. The contact-first tag — "contact-first profile: squared-up
+{s}% ({n} swings), bat speed {b} mph" — fires at the ratified paired
+lines (squared-up ≥ 35% of competitive swings AND bat speed ≥ 72 mph),
+sourced from a new season contact board in the bat-tracking family
+(squared_up_per_swing over swings_competitive; verified live 2026-08 —
+the attack-angle board carries no squared-up column, and the contact
+board publishes one row per batter, no side split). Net new steady-state
+cost: +3 board-cached calls per build. Every rate carries its sample,
+every absence names its reason, and every firing line is printed in the
+Sluggers caption (the D-079 pattern). Signed rates render ASCII
+("+.041") because the lint gate bars the typographic minus in source.
