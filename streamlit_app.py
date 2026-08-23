@@ -511,32 +511,30 @@ def _day_events(day_iso: str, year: int) -> object:
 # ordinary weather-unavailable absence instead (D-054: absence is a value).
 WEATHER_FAILURE_CIRCUIT_BREAKER = 3
 
-# Diagnostics from the last board build's weather reads, rendered after the
-# board. Module-level because the reader closure runs inside the cached build;
-# the list is cleared at the start of each build, so it always names the
-# current board's weather story and nothing older.
-LIVE_WEATHER_DIAGNOSTICS: list[str] = []
+# Diagnostics from board builds' weather reads, keyed by slate date and
+# rendered after the board. Keyed, not one shared list: a cached board serves
+# without rebuilding, so a single list could show one slate's failures under
+# another (D-103). A cache hit keeps its own build's diagnostics forever.
+LIVE_WEATHER_DIAGNOSTICS: dict[str, list[str]] = {}
 
 
-def _forecast_lookup(pick: Callable[[WeatherForecast], object]) -> object:
+def _forecast_lookup(pick: Callable[[WeatherForecast], object], diagnostics: list[str]) -> object:
     """A venue -> forecast-reading closure over the weather seam.
 
     ``pick`` chooses which reading a present forecast yields; the closure
-    answers ``None`` locally, on absence, on a read failure (recorded in
-    ``LIVE_WEATHER_DIAGNOSTICS``), and once the circuit breaker has tripped —
-    one discipline shared by every conditions reader.
+    answers ``None`` locally, on absence, on a read failure (recorded in the
+    build's ``diagnostics``), and once the circuit breaker has tripped — one
+    discipline shared by every conditions reader.
     """
     adapter, live = weather_binding()
 
     def read(venue: ParkVenue) -> object | None:
-        if not live or len(LIVE_WEATHER_DIAGNOSTICS) >= WEATHER_FAILURE_CIRCUIT_BREAKER:
+        if not live or len(diagnostics) >= WEATHER_FAILURE_CIRCUIT_BREAKER:
             return None
         try:
             field = adapter.forecast_for(venue)
         except Exception as exc:  # composition-root last resort: weather downgrades to absence
-            LIVE_WEATHER_DIAGNOSTICS.append(
-                f"{venue.venue_id}: {type(exc).__name__} on {type(venue).__name__}"
-            )
+            diagnostics.append(f"{venue.venue_id}: {type(exc).__name__} on {type(venue).__name__}")
             return None
         if field.value is None:
             return None
@@ -545,15 +543,17 @@ def _forecast_lookup(pick: Callable[[WeatherForecast], object]) -> object:
     return read
 
 
-def _temperature_lookup() -> object:
+def _temperature_lookup(diagnostics: list[str]) -> object:
     """A venue -> °F reader over the weather seam; None locally or on absence."""
-    return _forecast_lookup(lambda forecast: forecast.temperature_f)
+    return _forecast_lookup(lambda forecast: forecast.temperature_f, diagnostics)
 
 
-def _wind_lookup() -> object:
+def _wind_lookup(diagnostics: list[str]) -> object:
     """A venue -> (wind mph, compass direction) reader over the weather seam;
     None locally or on absence — same discipline as the temperature lookup."""
-    return _forecast_lookup(lambda forecast: (forecast.wind_speed_mph, forecast.wind_direction))
+    return _forecast_lookup(
+        lambda forecast: (forecast.wind_speed_mph, forecast.wind_direction), diagnostics
+    )
 
 
 @st.cache_data(ttl=BOARD_TTL_SECONDS, show_spinner=False)
@@ -566,18 +566,20 @@ def live_board(slate_iso: str) -> SlateBoard | FetchFailure:
     def fetch_day(day: date) -> object:
         return _day_events(day.isoformat(), year)
 
-    LIVE_WEATHER_DIAGNOSTICS.clear()
-    return build_board(
+    weather_diagnostics: list[str] = []
+    board = build_board(
         api=api,
         savant=savant,
         slate_date=slate_date,
         as_of=datetime.now(UTC),
         config=production_config(),
         fetch_day_events=fetch_day,  # type: ignore[arg-type]
-        temperature_for=_temperature_lookup(),  # type: ignore[arg-type]
+        temperature_for=_temperature_lookup(weather_diagnostics),  # type: ignore[arg-type]
         park_factors=park_factor_table(),
-        wind_for=_wind_lookup(),  # type: ignore[arg-type]
+        wind_for=_wind_lookup(weather_diagnostics),  # type: ignore[arg-type]
     )
+    LIVE_WEATHER_DIAGNOSTICS[slate_iso] = weather_diagnostics
+    return board
 
 
 _NOT_EVALUABLE = "not evaluable"
@@ -1626,8 +1628,9 @@ def render_live_board() -> None:
     # one selection survives a dismiss.
     if selected is not None:
         _open_batter_detail(selected, _game_of(board, selected))
-    if LIVE_WEATHER_DIAGNOSTICS:
-        joined = "; ".join(LIVE_WEATHER_DIAGNOSTICS)
+    weather_failures = LIVE_WEATHER_DIAGNOSTICS.get(slate_date.isoformat(), [])
+    if weather_failures:
+        joined = "; ".join(weather_failures)
         st.caption(
             "Weather reads that failed during this build (absent on the board): "
             f"{joined}. Further venues were not asked."

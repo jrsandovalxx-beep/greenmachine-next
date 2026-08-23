@@ -2095,3 +2095,23 @@ whichever basis the column shows. xwOBA's removal is from the form model
 itself, not just the grid: the Matchups tables read their own grid-line
 path, so nothing they show changed.
 
+## D-103 - The form fallback window stays honest, and diagnostics name their slate
+**Three correctness fixes out of the polish pass's recommendation list
+(Product Owner, 2026-08-22, asked which of the list to implement: no
+preference — the low-risk correctness items proceed under standing
+authorization).** First, the real bug the polish pass surfaced but was
+forbidden to touch: ``build_board`` rebound the local ``reach_start`` when
+a starter's empty last-30-days forced the pitcher's 45-day mix reach, and
+the form section's L14 fallback cutoff was computed from that rebound
+value — so on any slate with such a starter, every batter's "L14" fallback
+silently read 45 days while the screen said L14, and the swing-tracking
+metrics beside them stayed at 14. The rebinding is renamed and a test pins
+the window (it fails on the old code, passes now). Second, the
+weather-failure caption is keyed by slate date instead of one shared list,
+so a cached board can no longer wear another slate's diagnostics. Third,
+two failure-message paths in the MLB adapter named JSON locations that do
+not exist; they now name the real paths. The remaining recommendations —
+wording changes, build-time work on the pinned fetch behavior, the
+build_board restructure, dormant surfaces — stay parked for the owner's
+call.
+

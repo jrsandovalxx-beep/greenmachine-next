@@ -211,7 +211,7 @@ def _parse_game(raw: Any, context: str) -> ScheduledGame:
         venue_id=_require_int(venue.get("id"), f"{context}.venue.id"),
         venue_name=_require_str(venue.get("name"), f"{context}.venue.name"),
         home_team=_require_str(home_team.get("name"), f"{context}.teams.home.team.name"),
-        away_team=_require_str(away_team.get("name"), f"{context}.teams.away.name"),
+        away_team=_require_str(away_team.get("name"), f"{context}.teams.away.team.name"),
         home_probable=_probable(home, f"{context}.teams.home"),
         away_probable=_probable(away, f"{context}.teams.away"),
     )
@@ -401,7 +401,7 @@ class MlbStatsApi:
                             GameLogEntry(
                                 date=_require_str(split.get("date"), person_context),
                                 game_pk=_require_int(
-                                    game.get("gamePk"), f"{person_context}.gamePk"
+                                    game.get("gamePk"), f"{person_context}.splits.game.gamePk"
                                 ),
                                 home_runs=_optional_int(stat, "homeRuns", context) or 0,
                                 plate_appearances=(
