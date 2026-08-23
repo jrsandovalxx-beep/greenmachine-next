@@ -33,6 +33,7 @@ from greenmachine.live.mlb_api import (
     Slate,
 )
 from greenmachine.live.pipeline import BatterCard, GameCard, SlateBoard, build_board
+from greenmachine.live.savant import SprintSpeedRow
 
 SLATE_DATE = date(2026, 8, 20)
 AS_OF = datetime(2026, 8, 20, 18, 0, tzinfo=UTC)
@@ -126,6 +127,15 @@ class _RunnerSavant:
 
     def fetch_bat_tracking(self, *, year: int, minimum: int = 0, start: str = "", end: str = ""):
         return ()
+
+    def fetch_expected_stats(self, *, year: int) -> dict:
+        return {}
+
+    def fetch_sprint_speed(self, *, year: int) -> dict:
+        return {BATTER_ID: SprintSpeedRow(player_id=BATTER_ID, sprint_speed=Decimal("28.9"))}
+
+    def fetch_squared_up(self, *, year: int, minimum: int = 0) -> dict:
+        return {}
 
 
 def _runner_card() -> tuple[BatterCard, GameCard]:

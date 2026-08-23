@@ -29,8 +29,11 @@ from greenmachine.live.mlb_api import (
 from greenmachine.live.pipeline import build_board
 from greenmachine.live.savant import (
     BatTrackingRow,
+    ExpectedStatsRow,
     PitchArsenalRow,
     PitchEvent,
+    SprintSpeedRow,
+    SquaredUpRow,
     StatcastBatterRow,
 )
 
@@ -205,9 +208,15 @@ class _FakeSavant:
         *,
         batter_arsenal: tuple[PitchArsenalRow, ...] | FetchFailure = (),
         pitcher_arsenal: tuple[PitchArsenalRow, ...] | FetchFailure = (),
+        expected: dict[int, ExpectedStatsRow] | FetchFailure | None = None,
+        sprint: dict[int, SprintSpeedRow] | FetchFailure | None = None,
+        squared: dict[int, SquaredUpRow] | FetchFailure | None = None,
     ) -> None:
         self._batter_arsenal = batter_arsenal
         self._pitcher_arsenal = pitcher_arsenal
+        self._expected = expected
+        self._sprint = sprint
+        self._squared = squared
 
     def fetch_pitch_arsenal(
         self, *, kind: str, year: int
@@ -223,6 +232,23 @@ class _FakeSavant:
         self, *, year: int, minimum: int = 0, start: str = "", end: str = ""
     ) -> tuple[BatTrackingRow, ...]:
         return (_tracking_row(BATTER_ID),)
+
+    def fetch_expected_stats(self, *, year: int) -> dict[int, ExpectedStatsRow] | FetchFailure:
+        if self._expected is not None:
+            return self._expected
+        return {}
+
+    def fetch_sprint_speed(self, *, year: int) -> dict[int, SprintSpeedRow] | FetchFailure:
+        if self._sprint is not None:
+            return self._sprint
+        return {}
+
+    def fetch_squared_up(
+        self, *, year: int, minimum: int = 0
+    ) -> dict[int, SquaredUpRow] | FetchFailure:
+        if self._squared is not None:
+            return self._squared
+        return {}
 
 
 def _park_factors() -> dict[int, dict[Handedness, ParkFactor]]:
@@ -903,6 +929,139 @@ def _log_entry(date: str, home_runs: int, plate_appearances: int = 4) -> GameLog
         home_runs=home_runs,
         plate_appearances=plate_appearances,
     )
+
+
+def _expected_row(player_id: int) -> ExpectedStatsRow:
+    return ExpectedStatsRow(
+        player_id=player_id,
+        plate_appearances=500,
+        balls_in_play=380,
+        batting_average=Decimal("0.250"),
+        slugging=Decimal("0.460"),
+        woba=Decimal("0.340"),
+        expected_batting_average=Decimal("0.270"),
+        expected_slugging=Decimal("0.500"),
+        xwoba=Decimal("0.360"),
+    )
+
+
+def test_the_season_line_carries_the_regression_gaps() -> None:
+    """D-110: xISO is est_slg - est_ba against the board's own slg - ba;
+    xwOBA-wOBA reads the same board — one source, matched denominators."""
+    savant = _FakeSavant(expected={BATTER_ID: _expected_row(BATTER_ID)})
+    board = _build(_FakeApi(), savant)
+    assert not isinstance(board, FetchFailure)
+    batter = board.games[0].away_batters[0]
+    gaps = batter.season_gaps
+    assert gaps is not None
+    # expected ISO .500 - .270 = .230; actual ISO .460 - .250 = .210.
+    assert gaps.xiso_minus_iso == Decimal("0.020")
+    assert gaps.xwoba_minus_woba == Decimal("0.020")
+    assert gaps.plate_appearances == 500
+    assert batter.season_line is not None
+    assert batter.season_line.gaps == gaps
+    # The L30 line never carries the season gaps.
+    assert batter.mix_line is None or batter.mix_line.gaps is None
+
+
+def test_regression_gaps_are_absent_without_a_board_row() -> None:
+    board = _build(_FakeApi(), _FakeSavant())
+    assert not isinstance(board, FetchFailure)
+    batter = board.games[0].away_batters[0]
+    assert batter.season_gaps is None
+    assert batter.season_line is not None
+    assert batter.season_line.gaps is None
+
+
+def test_babip_reads_the_season_counting_line() -> None:
+    """D-110: (H-HR)/(AB-K-HR+SF) — 88 over 440-130-33+4 = 281."""
+    hitting = {
+        BATTER_ID: SeasonHittingLine(
+            player_id=BATTER_ID,
+            full_name="Covered Batter",
+            bats="L",
+            games=120,
+            plate_appearances=500,
+            at_bats=440,
+            hits=121,
+            home_runs=33,
+            strikeouts=130,
+            sacrifice_flies=4,
+        )
+    }
+    board = _build(_FakeApi(hitting=hitting), _FakeSavant())
+    assert not isinstance(board, FetchFailure)
+    batter = board.games[0].away_batters[0]
+    assert batter.babip is not None
+    assert batter.babip == Decimal(88) / Decimal(281)
+
+
+def test_babip_names_its_absences() -> None:
+    """No counting line → None; an empty denominator → None with the line
+    still present, so the surface can name which absence it is."""
+    board = _build(_FakeApi(hitting={}), _FakeSavant())
+    assert not isinstance(board, FetchFailure)
+    batter = board.games[0].away_batters[0]
+    assert batter.season is None
+    assert batter.babip is None
+
+    all_whiff = {
+        BATTER_ID: SeasonHittingLine(
+            player_id=BATTER_ID,
+            full_name="All Whiff",
+            bats="L",
+            games=10,
+            plate_appearances=40,
+            at_bats=36,
+            hits=4,
+            home_runs=4,
+            strikeouts=32,
+        )
+    }
+    board = _build(_FakeApi(hitting=all_whiff), _FakeSavant())
+    assert not isinstance(board, FetchFailure)
+    batter = board.games[0].away_batters[0]
+    assert batter.season is not None
+    assert batter.babip is None  # 36 - 32 - 4 + 0 = 0 — never an invented zero
+
+
+def test_the_card_carries_sprint_speed_and_the_contact_profile() -> None:
+    savant = _FakeSavant(
+        sprint={BATTER_ID: SprintSpeedRow(player_id=BATTER_ID, sprint_speed=Decimal("29.4"))},
+        squared={
+            BATTER_ID: SquaredUpRow(
+                player_id=BATTER_ID,
+                competitive_swings=620,
+                squared_up_per_swing=Decimal("0.36"),
+                avg_bat_speed=Decimal("73.4"),
+            )
+        },
+    )
+    board = _build(_FakeApi(), savant)
+    assert not isinstance(board, FetchFailure)
+    batter = board.games[0].away_batters[0]
+    assert batter.sprint_speed_fps == Decimal("29.4")
+    assert batter.squared_up_share == Decimal("0.36")
+    assert batter.squared_up_swings == 620
+    assert batter.squared_up_bat_speed == Decimal("73.4")
+
+
+def test_the_d110_board_failures_degrade_to_named_absences() -> None:
+    savant = _FakeSavant(
+        expected=FetchFailure("expected-stats: HTTP 503"),
+        sprint=FetchFailure("sprint-speed: HTTP 503"),
+        squared=FetchFailure("squared-up: HTTP 503"),
+    )
+    board = _build(_FakeApi(), savant)
+    assert not isinstance(board, FetchFailure)
+    batter = board.games[0].away_batters[0]
+    assert batter.season_gaps is None
+    assert batter.sprint_speed_fps is None
+    assert batter.squared_up_share is None
+    joined = " ".join(board.diagnostics)
+    assert "expected-stats board" in joined
+    assert "sprint-speed board" in joined
+    assert "squared-up board" in joined
 
 
 def test_the_mix_reach_never_stretches_the_form_fallback_window() -> None:

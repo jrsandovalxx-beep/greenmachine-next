@@ -65,8 +65,11 @@ from greenmachine.live.mlb_api import (
 from greenmachine.live.savant import (
     BaseballSavant,
     BatTrackingRow,
+    ExpectedStatsRow,
     PitchArsenalRow,
     PitchEvent,
+    SprintSpeedRow,
+    SquaredUpRow,
     StatcastBatterRow,
 )
 
@@ -210,6 +213,45 @@ class PitchLine:
 
 
 @dataclass(frozen=True)
+class RegressionGaps:
+    """The season regression gaps (D-110): expected minus actual for ISO and
+    wOBA, both sides of each gap read off the same expected-statistics board
+    so the denominators match by construction. Computed here, pipeline-side;
+    the view only formats (§GMF-008)."""
+
+    xiso_minus_iso: Decimal
+    xwoba_minus_woba: Decimal
+    plate_appearances: int
+
+
+def _regression_gaps(row: ExpectedStatsRow | None) -> RegressionGaps | None:
+    """Expected minus actual for the season (D-110). xISO is the board's own
+    est_slg - est_ba; the actual ISO is its slg - ba — one board, one
+    denominator. None when the batter has no row, never an invented zero."""
+    if row is None:
+        return None
+    expected_iso = row.expected_slugging - row.expected_batting_average
+    actual_iso = row.slugging - row.batting_average
+    return RegressionGaps(
+        xiso_minus_iso=expected_iso - actual_iso,
+        xwoba_minus_woba=row.xwoba - row.woba,
+        plate_appearances=row.plate_appearances,
+    )
+
+
+def _babip(line: SeasonHittingLine | None) -> Decimal | None:
+    """BABIP off the season counting line (D-110): (H-HR)/(AB-K-HR+SF).
+    None when the line is missing or its denominator is empty — the surface
+    names which, never an invented zero."""
+    if line is None:
+        return None
+    denominator = line.at_bats - line.strikeouts - line.home_runs + line.sacrifice_flies
+    if denominator <= 0:
+        return None
+    return Decimal(line.hits - line.home_runs) / Decimal(denominator)
+
+
+@dataclass(frozen=True)
 class BatterGridLine:
     """One row of the matchups grid (D-079): every figure derived here,
     pipeline-side, over a stated scope — the view formats, never derives.
@@ -238,6 +280,10 @@ class BatterGridLine:
     oppo_air_share: Decimal | None = None
     expected_woba: Decimal | None = None
     whiff_share: Decimal | None = None
+    # SP-2 (D-110): the season regression gaps — carried only by the season
+    # scope's line; the L30 line leaves this None and the surface omits the
+    # columns there.
+    gaps: RegressionGaps | None = None
 
 
 @dataclass(frozen=True)
@@ -270,6 +316,16 @@ class BatterCard:
     # SP-1 (D-109): season strikeout share (K/PA) for the high-K tags —
     # computed here, selected by the view.
     season_k_share: Decimal | None = None
+    # SP-2 (D-110): the season regression-gap set, BABIP off the counting
+    # line, sprint speed, and the contact-first profile inputs (squared-up
+    # share of competitive swings and the same board's bat speed) — all
+    # computed here, selected by the view.
+    season_gaps: RegressionGaps | None = None
+    babip: Decimal | None = None
+    sprint_speed_fps: Decimal | None = None
+    squared_up_share: Decimal | None = None
+    squared_up_swings: int = 0
+    squared_up_bat_speed: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -659,13 +715,15 @@ def _season_grid_line(
     line: SeasonHittingLine | None,
     statcast: StatcastBatterRow | None,
     arsenal_rows: Sequence[PitchArsenalRow],
+    gaps: RegressionGaps | None = None,
 ) -> BatterGridLine | None:
     """The batter's season-view grid line (D-079's toggle target), composed
     from the season sources: the hitting line for AB/H/HR/AVG/SLG/ISO, the
     statcast board for EV/barrels/hard-hit, and the arsenal board for
     PA-weighted xwOBA and pitch-weighted Swing-Str. No season source
     publishes a 350-foot distance read or a pull-air read, so those cells
-    stay None — the surface names the absence (D-081/D-090)."""
+    stay None — the surface names the absence (D-081/D-090). The D-110
+    regression gaps ride along when the expected-stats board covers him."""
     if line is None and statcast is None and not arsenal_rows:
         return None
     at_bats = line.at_bats if line else 0
@@ -705,6 +763,7 @@ def _season_grid_line(
         oppo_air_share=None,
         expected_woba=(woba_total / Decimal(woba_pa)) if woba_pa else None,
         whiff_share=(whiff_total / Decimal(whiff_pitches)) if whiff_pitches else None,
+        gaps=gaps,
     )
 
 
@@ -1068,6 +1127,37 @@ def build_board(
         if not statcast:
             diagnostics.append("statcast board: returned zero rows")
 
+    # D-110's three season boards: expected statistics (the regression gaps'
+    # only source), sprint speed, and the contact-quality board behind the
+    # contact-first profile. Each degrades to a named absence on its own.
+    expected_result = savant.fetch_expected_stats(year=year)
+    expected_stats: dict[int, ExpectedStatsRow]
+    if isinstance(expected_result, FetchFailure):
+        diagnostics.append(f"expected-stats board: {expected_result.reason}")
+        expected_stats = {}
+    else:
+        expected_stats = expected_result
+        if not expected_stats:
+            diagnostics.append("expected-stats board: returned zero rows")
+    sprint_result = savant.fetch_sprint_speed(year=year)
+    sprint_speed: dict[int, SprintSpeedRow]
+    if isinstance(sprint_result, FetchFailure):
+        diagnostics.append(f"sprint-speed board: {sprint_result.reason}")
+        sprint_speed = {}
+    else:
+        sprint_speed = sprint_result
+        if not sprint_speed:
+            diagnostics.append("sprint-speed board: returned zero rows")
+    squared_result = savant.fetch_squared_up(year=year)
+    squared_up: dict[int, SquaredUpRow]
+    if isinstance(squared_result, FetchFailure):
+        diagnostics.append(f"squared-up board: {squared_result.reason}")
+        squared_up = {}
+    else:
+        squared_up = squared_result
+        if not squared_up:
+            diagnostics.append("squared-up board: returned zero rows")
+
     short_start = (as_of - timedelta(days=FORM_SHORT_DAYS)).date()
     reach_start = (as_of - timedelta(days=FORM_REACH_DAYS)).date()
     tracking_short_result = savant.fetch_bat_tracking(
@@ -1300,6 +1390,10 @@ def build_board(
                 )
 
                 factor = factor_left if side == "L" else factor_right
+                # D-110's season reads for this batter, resolved once.
+                gaps = _regression_gaps(expected_stats.get(player_id))
+                sprint_row = sprint_speed.get(player_id)
+                squared_row = squared_up.get(player_id)
                 # The grid scope (D-079): his L30 events against the
                 # starter's qualifying mix pitches, from the starter's side.
                 mix_scope_events = tuple(
@@ -1395,6 +1489,7 @@ def build_board(
                             line,
                             statcast_row,
                             arsenal_by_batter.get(player_id, ()),
+                            gaps,
                         ),
                         mix_label=mix_label,
                         homered_on_last_game_day=_homered_on_last_game_day(
@@ -1405,6 +1500,20 @@ def build_board(
                             Decimal(line.strikeouts) / Decimal(line.plate_appearances)
                             if line is not None and line.plate_appearances
                             else None
+                        ),
+                        season_gaps=gaps,
+                        babip=_babip(line),
+                        sprint_speed_fps=(
+                            sprint_row.sprint_speed if sprint_row is not None else None
+                        ),
+                        squared_up_share=(
+                            squared_row.squared_up_per_swing if squared_row is not None else None
+                        ),
+                        squared_up_swings=(
+                            squared_row.competitive_swings if squared_row is not None else 0
+                        ),
+                        squared_up_bat_speed=(
+                            squared_row.avg_bat_speed if squared_row is not None else None
                         ),
                     )
                 )

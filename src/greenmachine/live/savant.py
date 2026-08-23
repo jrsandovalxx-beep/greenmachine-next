@@ -41,6 +41,17 @@ _EXPECTED_STATS_URL = (
     "https://baseballsavant.mlb.com/leaderboard/expected_statistics"
     "?type=batter&year={year}&min=0&csv=true"
 )
+_SPRINT_SPEED_URL = (
+    "https://baseballsavant.mlb.com/leaderboard/sprint_speed?year={year}&min=0&csv=true"
+)
+# D-110: the bat-tracking family's contact board — one row per batter (no
+# side split), carrying squared-up-per-swing and bat speed over competitive
+# swings. Verified live 2026-08: columns id, swings_competitive,
+# squared_up_per_swing, avg_bat_speed.
+_SQUARED_UP_URL = (
+    "https://baseballsavant.mlb.com/leaderboard/bat-tracking"
+    "?csv=true&batSide=&dateStart=&dateEnd=&minSwings={minimum}&year={year}"
+)
 _BAT_TRACKING_URL = (
     "https://baseballsavant.mlb.com/leaderboard/bat-tracking/swing-path-attack-angle"
     "?csv=true&batSide=&dateStart={start}&dateEnd={end}&minSwings={minimum}&year={year}"
@@ -78,10 +89,40 @@ class StatcastBatterRow:
 
 @dataclass(frozen=True)
 class ExpectedStatsRow:
+    """The season expected-statistics board (D-110): actual and expected
+    rates side by side off the one board, so a regression gap's two sides
+    share a denominator. Every column is required — an unknown column is a
+    clean FetchFailure, never a wrong number."""
+
     player_id: int
     plate_appearances: int
     balls_in_play: int
+    batting_average: Decimal
+    slugging: Decimal
+    woba: Decimal
+    expected_batting_average: Decimal
+    expected_slugging: Decimal
     xwoba: Decimal
+
+
+@dataclass(frozen=True)
+class SprintSpeedRow:
+    """One batter's season sprint speed in feet per second (D-110)."""
+
+    player_id: int
+    sprint_speed: Decimal
+
+
+@dataclass(frozen=True)
+class SquaredUpRow:
+    """One batter's season contact-quality line (D-110): squared-up share of
+    competitive swings and mean bat speed, both sides of the contact-first
+    profile. The board publishes one row per batter — no side split."""
+
+    player_id: int
+    competitive_swings: int
+    squared_up_per_swing: Decimal
+    avg_bat_speed: Decimal
 
 
 @dataclass(frozen=True)
@@ -303,7 +344,13 @@ class BaseballSavant:
         return {row.player_id: row for row in parsed}
 
     def fetch_expected_stats(self, *, year: int) -> dict[int, ExpectedStatsRow] | FetchFailure:
-        """Season expected-statistics board (xwOBA), keyed by player id."""
+        """Season expected-statistics board, keyed by player id (D-110).
+
+        The board carries actual and expected rates side by side (verified
+        live 2026-08: ba/slg/woba beside est_ba/est_slg/est_woba); every one
+        is required, so a renamed or dropped column fails the whole board
+        cleanly rather than smuggling in a wrong number.
+        """
         context = "expected-stats"
 
         def parse(row: dict[str, str]) -> ExpectedStatsRow:
@@ -312,10 +359,52 @@ class BaseballSavant:
                 player_id=player_id,
                 plate_appearances=_int(row.get("pa"), context),
                 balls_in_play=_int(row.get("bip"), context),
+                batting_average=_decimal(row.get("ba"), context),
+                slugging=_decimal(row.get("slg"), context),
+                woba=_decimal(row.get("woba"), context),
+                expected_batting_average=_decimal(row.get("est_ba"), context),
+                expected_slugging=_decimal(row.get("est_slg"), context),
                 xwoba=_decimal(row.get("est_woba"), context),
             )
 
         parsed = self._board(_EXPECTED_STATS_URL.format(year=year), context, parse)
+        if isinstance(parsed, FetchFailure):
+            return parsed
+        return {row.player_id: row for row in parsed}
+
+    def fetch_sprint_speed(self, *, year: int) -> dict[int, SprintSpeedRow] | FetchFailure:
+        """Season sprint-speed leaderboard (feet per second), keyed by player
+        id (D-110)."""
+        context = "sprint-speed"
+
+        def parse(row: dict[str, str]) -> SprintSpeedRow:
+            return SprintSpeedRow(
+                player_id=_int(row.get("player_id"), context),
+                sprint_speed=_decimal(row.get("sprint_speed"), context),
+            )
+
+        parsed = self._board(_SPRINT_SPEED_URL.format(year=year), context, parse)
+        if isinstance(parsed, FetchFailure):
+            return parsed
+        return {row.player_id: row for row in parsed}
+
+    def fetch_squared_up(
+        self, *, year: int, minimum: int = 0
+    ) -> dict[int, SquaredUpRow] | FetchFailure:
+        """Season contact-quality board: squared-up share of competitive
+        swings and mean bat speed, keyed by player id (D-110). One row per
+        batter — the board publishes no side split."""
+        context = "squared-up"
+
+        def parse(row: dict[str, str]) -> SquaredUpRow:
+            return SquaredUpRow(
+                player_id=_int(row.get("id"), context),
+                competitive_swings=_int(row.get("swings_competitive"), context),
+                squared_up_per_swing=_decimal(row.get("squared_up_per_swing"), context),
+                avg_bat_speed=_decimal(row.get("avg_bat_speed"), context),
+            )
+
+        parsed = self._board(_SQUARED_UP_URL.format(year=year, minimum=minimum), context, parse)
         if isinstance(parsed, FetchFailure):
             return parsed
         return {row.player_id: row for row in parsed}

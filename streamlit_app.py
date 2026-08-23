@@ -622,6 +622,12 @@ def _weather_text(game: GameCard) -> tuple[str, bool]:
 # emphasis line it uses).
 _HIGH_K_SHARE = Decimal("0.27")
 _LOW_WHIFF_SHARE = Decimal("0.22")
+# D-110: the x-gap tag fires when either season gap's absolute value reaches
+# .030 (ratified O-8); contact-first needs squared-up ≥ 35% of competitive
+# swings AND bat speed ≥ 72 mph on the season contact board — both.
+_X_GAP_LINE = Decimal("0.03")
+_SQUARED_UP_LINE = Decimal("0.35")
+_CONTACT_BAT_SPEED_LINE = Decimal("72")
 
 # The ratified pitch-type sample floor (10 BBE) for the breakup table's
 # per-pitch EV and Air% — below it the INSUFFICIENT treatment, never hidden.
@@ -663,6 +669,29 @@ def _card_tags(card: BatterCard, opposing: PitcherCard | None) -> str:
     elif high_k:
         pa = card.season.plate_appearances if card.season is not None else 0
         tags.append(f"high-K profile: K% {float(k_share) * 100:.1f} ({pa} PA)")
+    # D-110: the regression-gap tag — both gaps always shown, fired by either
+    # crossing the ratified line; no expected-stats row, no tag.
+    gaps = card.season_gaps
+    if gaps is not None and (
+        abs(gaps.xiso_minus_iso) >= _X_GAP_LINE or abs(gaps.xwoba_minus_woba) >= _X_GAP_LINE
+    ):
+        tags.append(
+            f"x-gap: xISO {_signed_avg_text(gaps.xiso_minus_iso)}, "
+            f"xwOBA {_signed_avg_text(gaps.xwoba_minus_woba)} "
+            f"(season, {gaps.plate_appearances} PA)"
+        )
+    squared = card.squared_up_share
+    if (
+        squared is not None
+        and squared >= _SQUARED_UP_LINE
+        and card.squared_up_bat_speed is not None
+        and card.squared_up_bat_speed >= _CONTACT_BAT_SPEED_LINE
+    ):
+        tags.append(
+            f"contact-first profile: squared-up {float(squared) * 100:.1f}% "
+            f"({card.squared_up_swings} swings), "
+            f"bat speed {float(card.squared_up_bat_speed):.1f} mph"
+        )
     return " · ".join(tags)
 
 
@@ -911,6 +940,15 @@ def _avg_text(value: Decimal | None) -> str:
     return text[1:] if text.startswith("0") else text
 
 
+def _signed_avg_text(value: Decimal) -> str:
+    """A signed three-digit rate for the D-110 regression gaps: +.041,
+    -.012 — the sign always printed, the leading zero always dropped."""
+    text = f"{float(value):+.3f}"
+    if text.startswith(("+0", "-0")):
+        return text[0] + text[2:]
+    return text
+
+
 def _pct_text(value: Decimal | None) -> str:
     return "—" if value is None else f"{float(value):.1%}"
 
@@ -1128,6 +1166,28 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
             "the same denominator."
         )
 
+    st.markdown("**Season profile**")
+    if card.babip is not None:
+        st.caption(
+            f"BABIP {_avg_text(card.babip)} — (H-HR)/(AB-K-HR+SF) over the "
+            "season counting line (D-110)."
+        )
+    elif card.season is not None:
+        st.caption(
+            "BABIP not computable — the season counting line's BABIP "
+            "denominator (AB-K-HR+SF) is empty."
+        )
+    else:
+        st.caption("BABIP not computable — season counting line unavailable.")
+    if card.sprint_speed_fps is not None:
+        st.caption(
+            f"sprint speed {float(card.sprint_speed_fps):.1f} ft/s — shown "
+            "because sustained wOBA-over-x gaps co-occur with elite speed "
+            "league-wide."
+        )
+    else:
+        st.caption("sprint speed not covered by source for this batter.")
+
     pitcher = _opposing_pitcher(game, card) if game is not None else None
     threshold_pct = st.slider(
         "Usage threshold for this window's tables",
@@ -1292,11 +1352,16 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "v1 model (D-071). Park factor is the batter-side home-run factor; "
         "weather is the venue reading; the tags box carries advisories — low "
         "samples, missing components, estimated lineups — plus context tags: "
-        "the lineup slot, and the high-K reads (D-109). A neon **$** marks a "
+        "the lineup slot, the high-K reads (D-109), and the regression-gap "
+        "and contact-first reads (D-110). A neon **$** marks a "
         "batter who homered in his most recent game day on or before this "
         "slate (D-094). Tag firing lines: high-K at K% ≥ 27% of season plate "
         "appearances; the low-whiff interaction at an arsenal-wide whiff of "
-        "≤ 22% — the interaction tag needs both."
+        "≤ 22% — the interaction tag needs both. The x-gap tag fires when "
+        "either season gap's absolute value reaches .030 — both sides of a "
+        "gap read the same expected-statistics board, actual vs expected. "
+        "Contact-first needs squared-up ≥ 35% of competitive swings AND bat "
+        "speed ≥ 72 mph on the season contact board — both."
     )
     texts, styles, cards = _slugger_frames(board)
     if texts.empty:
@@ -1381,11 +1446,25 @@ def _render_arms(board: SlateBoard) -> None:
     )
 
 
-def _grid_line_cells(line: BatterGridLine | None) -> tuple[dict[str, str], dict[str, str]]:
+def _insert_after(texts: dict[str, str], after: str, additions: dict[str, str]) -> dict[str, str]:
+    """A copy of the cells dict with ``additions`` placed right behind the
+    ``after`` column — column order on this grid is dict insertion order."""
+    out: dict[str, str] = {}
+    for column, text in texts.items():
+        out[column] = text
+        if column == after:
+            out.update(additions)
+    return out
+
+
+def _grid_line_cells(
+    line: BatterGridLine | None, *, include_gaps: bool = False
+) -> tuple[dict[str, str], dict[str, str]]:
     """One batter's metric cells for the matchups grid (D-079). A None
     scope or a None rate renders as a named absence, never an invented
     zero; a scope missing at every reach states 'no data available'
-    (D-081)."""
+    (D-081). ``include_gaps`` is the season view's alone: the D-110
+    regression-gap columns appear only there, each with its PA sample."""
     if line is None:
         texts = {
             "AB": "no data available",
@@ -1405,39 +1484,65 @@ def _grid_line_cells(line: BatterGridLine | None) -> tuple[dict[str, str], dict[
             "Swing-Str %": "—",
         }
         styles = {column: _REASON_CSS for column in texts}
-        return texts, styles
-    rate_texts: dict[str, str | None] = {
-        "EV": (f"{float(line.exit_velocity):.1f}" if line.exit_velocity is not None else None),
-        "Barrel/PA %": (_pct_text(line.barrel_per_pa) if line.barrel_per_pa is not None else None),
-        "Hard-Hit %": (_pct_text(line.hard_hit_share) if line.hard_hit_share is not None else None),
-        "AVG": (_avg_text(line.batting_average) if line.batting_average is not None else None),
-        "SLG": _avg_text(line.slugging) if line.slugging is not None else None,
-        "ISO": _avg_text(line.iso) if line.iso is not None else None,
-        "Pull Air %": (_pct_text(line.pull_air_share) if line.pull_air_share is not None else None),
-        "Oppo Air %": (_pct_text(line.oppo_air_share) if line.oppo_air_share is not None else None),
-        "xwOBA": _avg_text(line.expected_woba) if line.expected_woba is not None else None,
-        "Swing-Str %": _pct_text(line.whiff_share) if line.whiff_share is not None else None,
-    }
-    texts = {
-        "AB": str(line.at_bats),
-        "H": str(line.hits),
-        "Barrels": str(line.barrels) if line.barrels is not None else "—",
-        "HR": str(line.home_runs),
-        # D-097: a count of balls hit 350+ feet, not a rate — the PO reads
-        # counting numbers (AB, H, barrels, HR, 350+ balls), not BIP shares.
-        "+350 ft": (str(line.distance_350_count) if line.distance_350_count is not None else "—"),
-    }
-    styles: dict[str, str] = {}
-    if line.barrels is None:
-        styles["Barrels"] = _REASON_CSS
-    if line.distance_350_count is None:
-        styles["+350 ft"] = _REASON_CSS
-    for column, text in rate_texts.items():
-        if text is None:
-            texts[column] = "—"
-            styles[column] = _REASON_CSS
-        else:
-            texts[column] = text
+    else:
+        rate_texts: dict[str, str | None] = {
+            "EV": (f"{float(line.exit_velocity):.1f}" if line.exit_velocity is not None else None),
+            "Barrel/PA %": (
+                _pct_text(line.barrel_per_pa) if line.barrel_per_pa is not None else None
+            ),
+            "Hard-Hit %": (
+                _pct_text(line.hard_hit_share) if line.hard_hit_share is not None else None
+            ),
+            "AVG": (_avg_text(line.batting_average) if line.batting_average is not None else None),
+            "SLG": _avg_text(line.slugging) if line.slugging is not None else None,
+            "ISO": _avg_text(line.iso) if line.iso is not None else None,
+            "Pull Air %": (
+                _pct_text(line.pull_air_share) if line.pull_air_share is not None else None
+            ),
+            "Oppo Air %": (
+                _pct_text(line.oppo_air_share) if line.oppo_air_share is not None else None
+            ),
+            "xwOBA": _avg_text(line.expected_woba) if line.expected_woba is not None else None,
+            "Swing-Str %": _pct_text(line.whiff_share) if line.whiff_share is not None else None,
+        }
+        texts = {
+            "AB": str(line.at_bats),
+            "H": str(line.hits),
+            "Barrels": str(line.barrels) if line.barrels is not None else "—",
+            "HR": str(line.home_runs),
+            # D-097: a count of balls hit 350+ feet, not a rate — the PO reads
+            # counting numbers (AB, H, barrels, HR, 350+ balls), not BIP shares.
+            "+350 ft": (
+                str(line.distance_350_count) if line.distance_350_count is not None else "—"
+            ),
+        }
+        styles = {}
+        if line.barrels is None:
+            styles["Barrels"] = _REASON_CSS
+        if line.distance_350_count is None:
+            styles["+350 ft"] = _REASON_CSS
+        for column, text in rate_texts.items():
+            if text is None:
+                texts[column] = "—"
+                styles[column] = _REASON_CSS
+            else:
+                texts[column] = text
+    if include_gaps:
+        gaps = line.gaps if line is not None else None
+        gap_cells = {
+            "xISO-ISO": gaps.xiso_minus_iso if gaps is not None else None,
+            "xwOBA-wOBA": gaps.xwoba_minus_woba if gaps is not None else None,
+        }
+        for anchor, name in (("ISO", "xISO-ISO"), ("xwOBA", "xwOBA-wOBA")):
+            value = gap_cells[name]
+            if value is None:
+                texts = _insert_after(texts, anchor, {name: "—"})
+                styles[name] = _REASON_CSS
+            else:
+                sample = gaps.plate_appearances if gaps is not None else 0
+                texts = _insert_after(
+                    texts, anchor, {name: f"{_signed_avg_text(value)} ({sample} PA)"}
+                )
     return texts, styles
 
 
@@ -1455,7 +1560,10 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
         key="matchups_season_view",
         help=(
             "D-079's toggle. Season +350 ft, Pull Air % and Oppo Air % have "
-            "no published source, so those cells name the absence."
+            "no published source, so those cells name the absence. This view "
+            "alone carries the D-110 regression gaps, xISO-ISO and "
+            "xwOBA-wOBA — expected minus actual, both sides off the same "
+            "expected-statistics board so the denominators match."
         ),
     )
     selected: BatterCard | None = None
@@ -1479,7 +1587,10 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
                     st.caption(
                         f"Scope: {scope_text}. "
                         + (
-                            "Columns read the batter's season sources."
+                            "Columns read the batter's season sources; the "
+                            "xISO-ISO and xwOBA-wOBA gaps are season-scope "
+                            "reads off the expected-statistics board, shown "
+                            "on this view only (D-110)."
                             if season_view
                             else (
                                 "Columns read the batter's last 30 days "
@@ -1494,7 +1605,7 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
                     # tap away in the batter detail, so the grid stays lean.
                     evaluated = isinstance(card.result, EvaluatedGradeResult)
                     line = card.season_line if season_view else card.mix_line
-                    metric_texts, metric_styles = _grid_line_cells(line)
+                    metric_texts, metric_styles = _grid_line_cells(line, include_gaps=season_view)
                     texts = {
                         "#": (str(card.order_position) if card.order_position is not None else "—"),
                         "Batter": card.full_name,
