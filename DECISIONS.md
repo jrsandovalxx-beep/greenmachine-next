@@ -2151,3 +2151,53 @@ window, never qualifying season-long); that case now captions the reason
 instead of rendering a blank grid. A fourth parked item — a "forecasts
 refresh every 30 minutes" line — does not exist anywhere in the codebase
 and is recorded here as a no-op.
+
+## D-106 - One arsenal breakup table, pitcher usage only
+**The batter dialog's two per-pitch tables merge into a single "Hitting
+stats — arsenal breakup" table (Product Owner, 2026-08-23: "I don't think
+what you did was wrong , it was just a bit confusing . I'd prefer to only
+see pitcher usage % , and no batter % for the arsenal. Additionally.
+Instead of two seperate tables let's do one single table called hitting
+stats - arsenal break up. This table wiill have two halves distinguished
+by a line or something in the middle maybe an opaque sub header over. I
+want pitcher metrics on on first half, and batter metrics on second half.
+One pitch will have one row with usage percentage (pitcher) and season
+long metrics for the pitcher + batter metrics that correspond to that
+exact pitch . (one month) (I'd like the ability to toggle between months
+and weeks. Single digit scroll. ) as for the metrics ,I will come back
+with that for now finish what you're doing and get started on this.").**
+The confusion being retired: the old matchup table's Usage% was the
+batter's seen-share — what the league threw him — sitting next to the
+pitcher's own season share in the arsenal table, so the same label meant
+two things. Now Usage% is only ever the pitcher's: his season board share
+by default, his share of pitches to this hitter hand over the recent
+window when the D-102 side toggle is on (that exception survives; every
+other number stays season-long either way). The table is one HTML grid
+with an opaque sub-header row splitting the halves — pitcher season-long
+figures first, batter window figures second, one row per pitch in his
+arsenal. The batter half is precomputed pipeline-side at five reaches —
+weeks one through four plus the full month the pitch record carries
+(``MATCHUP_LINE_WINDOWS_DAYS``) — so the dialog's Months/Weeks control
+selects, never derives (§GMF-008); months are pinned at the one month the
+record reaches, weeks scroll one through four. A pitch the batter has not
+seen from this side keeps its row with zeroed counts and dashed rates —
+dashed, never hidden. Below-threshold rows dim; the old qualifying-mix
+toggle on the matchup table is gone (the threshold slider still dims, and
+the event log keeps its own mix toggle). The metric columns shown are the
+ratified set carried over from the two merged tables; the owner will name
+final columns later, and the builder is the single place that change
+lands.
+
+## D-107 - The logo is an ouroboros around a glowing baseball
+**The header orb becomes the combination mark from the owner's reference
+images (Product Owner, 2026-08-23: "I also want to Change the green orb ,
+you can keep it but add the details in the image with the ouroboros ,
+make a combination for the logo on the landing page", then "Actually make
+it look like a baseball instead of an orb").** The mark — an ouroboros
+ringed around a glowing neon-green baseball — is original artwork
+generated for this project, shipped as a repo asset
+(``assets/gm_logo.png``) and injected by the composition root as a data
+URI, so the shell's standing rule survives intact: no remote request of
+any kind. It rides the same circle clip and the same 4.5s pulse the
+hand-drawn orb had; the painted seam orb stays in the module as the
+fallback when the asset is absent.

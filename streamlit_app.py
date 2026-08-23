@@ -44,6 +44,8 @@ type it removes is named rather than dropped.
 
 from __future__ import annotations
 
+import base64
+import html
 import os
 import subprocess
 from collections.abc import Callable
@@ -117,10 +119,10 @@ from greenmachine.shell import (
     BLOT_HTML,
     DIAL_CSS,
     FIELD_CSS,
-    ORB_HTML,
     SHELL_CSS,
     TITLE_HTML,
     field_wind_html,
+    orb_html,
 )
 from greenmachine.splits import ABSENCE_WORDS as SPLIT_ABSENCE_WORDS
 from greenmachine.splits import METRIC_COLUMNS as SPLIT_METRIC_COLUMNS
@@ -873,121 +875,110 @@ def _pct_text(value: Decimal | None) -> str:
     return "—" if value is None else f"{float(value):.1%}"
 
 
-def _pitch_line_frames(
-    lines: tuple[PitchLine, ...],
-    *,
-    whiff_column: str,
-    qualifying_only: bool,
-    threshold: float,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """A per-pitch table (D-080): usage, results, and contact quality, all
-    computed pipeline-side over the scope the surrounding prose names
-    (§GMF-008 — the view formats, never derives).
-
-    Rows below the qualifying usage share are dimmed; with the mix filter on
-    they leave the grid. A rate absent at source reads as a dash, never a
-    zero, and carries the absence style.
-    """
-    text_rows: list[dict[str, str]] = []
-    style_rows: list[dict[str, str]] = []
-    for line in lines:
-        below = float(line.usage_share) < threshold
-        if qualifying_only and below:
-            continue
-        texts = {
-            "Pitch": line.pitch_name or line.pitch_type or "— (untagged)",
-            "Usage%": f"{float(line.usage_share):.1%}",
-            "PA": str(line.plate_appearances),
-            "AVG": _avg_text(line.batting_average),
-            "SLG": _avg_text(line.slugging),
-            "ISO": _avg_text(line.iso),
-            "HR": str(line.home_runs) if line.home_runs is not None else "—",
-            "Barrel%": _pct_text(line.barrel_share),
-            "Hard-Hit%": _pct_text(line.hard_hit_share),
-            "xwOBA": _avg_text(line.expected_woba),
-            whiff_column: _pct_text(line.whiff_share),
-        }
-        styles: dict[str, str] = {}
-        if below:
-            styles = {column: _BELOW_MIX_CSS for column in texts}
-        else:
-            rates: tuple[tuple[str, Decimal | None], ...] = (
-                ("AVG", line.batting_average),
-                ("SLG", line.slugging),
-                ("ISO", line.iso),
-                ("Barrel%", line.barrel_share),
-                ("Hard-Hit%", line.hard_hit_share),
-                ("xwOBA", line.expected_woba),
-                (whiff_column, line.whiff_share),
-                ("HR", None if line.home_runs is None else Decimal(0)),
-            )
-            styles = {column: _REASON_CSS for column, value in rates if value is None}
-        text_rows.append(texts)
-        style_rows.append(styles)
-    return pd.DataFrame(text_rows), pd.DataFrame(style_rows)
+_BREAKUP_CSS = """
+<style>
+.gm-breakup-wrap { overflow-x: auto; margin: 0.25rem 0 0.5rem; }
+.gm-breakup { border-collapse: collapse; width: 100%; font-size: 0.82rem;
+  color: #d6ecc9; }
+.gm-breakup th, .gm-breakup td { padding: 3px 8px; text-align: right;
+  white-space: nowrap; }
+.gm-breakup th:first-child, .gm-breakup td:first-child { text-align: left; }
+.gm-breakup .gm-halves th { background: #123a16; color: #b8e986;
+  letter-spacing: 0.06em; font-size: 0.72rem; text-transform: uppercase;
+  text-align: center; border-bottom: 1px solid #2e5b23; }
+.gm-breakup .gm-cols th { color: #9dc48c; font-size: 0.72rem; font-weight: 600;
+  border-bottom: 1px solid #2e5b23; }
+.gm-breakup .gm-half-boundary { border-left: 3px solid rgba(155, 240, 11, 0.55); }
+.gm-breakup tbody tr { border-bottom: 1px solid rgba(46, 91, 35, 0.35); }
+.gm-breakup tr.gm-dim td { color: #8a9a8f; }
+</style>
+"""
 
 
-def _arsenal_frames(
+def _arsenal_breakup_html(
     pitcher: PitcherCard,
+    batter_lines: tuple[PitchLine, ...],
     *,
     threshold: float,
     side_filter: frozenset[str] | None,
-    side_usage: dict[str, Decimal] | None = None,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """The Arsenal table (D-087): every pitch he throws, season-long figures
-    from the arsenal board — never a window. ``side_filter`` trims the rows
-    to the pitch types he used against the batter's side, and with
-    ``side_usage`` set the Usage% column switches to that side's basis — his
-    share of pitches to this hitter hand over the recent window (D-102), the
-    only per-side split the sources publish. Every other number stays
-    season-long, and the surrounding prose names the switch.
-
-    Rows below the usage threshold — on whichever basis the column shows —
-    are dimmed; the board publishes no home-run or barrel counts, so those
-    columns simply do not exist here rather than showing invented zeros.
+    side_usage: dict[str, Decimal] | None,
+    window_label: str,
+    throws_text: str | None,
+) -> str:
+    """The arsenal breakup table (D-106): one row per pitch in the starter's
+    season arsenal. Usage% is HIS — the board's season share, or his share of
+    pitches to this hitter hand over the recent window when the side toggle
+    is on (D-102); the batter's seen-share never appears. The first half is
+    his season-long figures with the pitch; the second is the batter's
+    against that pitch from the starter's side over the named window — a
+    pitch he has not seen dashes rather than vanishing. Returns "" when a
+    side filter removes every row, so the surface names that reason instead
+    of rendering an empty table.
     """
-    lines = [
-        line
-        for line in pitcher.season_lines
-        if side_filter is None or line.pitch_type in side_filter
-    ]
-    if side_usage is not None:
-        lines.sort(key=lambda line: side_usage.get(line.pitch_type, Decimal(0)), reverse=True)
-    text_rows: list[dict[str, str]] = []
-    style_rows: list[dict[str, str]] = []
-    for line in lines:
-        usage = side_usage.get(line.pitch_type) if side_usage is not None else None
-        shown_usage = line.usage_share if usage is None else usage
-        texts = {
-            "Pitch": line.pitch_name or line.pitch_type or "— (untagged)",
-            "Usage%": f"{float(shown_usage):.1%}",
-            "PA": str(line.plate_appearances),
-            "AVG": _avg_text(line.batting_average),
-            "SLG": _avg_text(line.slugging),
-            "ISO": _avg_text(line.iso),
-            "wOBA": _avg_text(line.woba),
-            "xwOBA": _avg_text(line.expected_woba),
-            "Whiff%": _pct_text(line.whiff_share),
-            "K%": _pct_text(line.strikeout_share),
-            "Hard-Hit%": _pct_text(line.hard_hit_share),
-        }
-        if float(shown_usage) < threshold:
-            styles = {column: _BELOW_MIX_CSS for column in texts}
+    batter_by_type = {line.pitch_type: line for line in batter_lines}
+    rows: list[tuple[Decimal, str]] = []
+    for season in pitcher.season_lines:
+        if side_filter is not None and season.pitch_type not in side_filter:
+            continue
+        shown_usage = (
+            side_usage.get(season.pitch_type, season.usage_share)
+            if side_usage is not None
+            else season.usage_share
+        )
+        batter = batter_by_type.get(season.pitch_type)
+        if batter is None:
+            batter_cells = ["<td>0</td>"] + ["<td>—</td>"] * 8
         else:
-            rates: tuple[tuple[str, Decimal | None], ...] = (
-                ("AVG", line.batting_average),
-                ("SLG", line.slugging),
-                ("ISO", line.iso),
-                ("wOBA", line.woba),
-                ("xwOBA", line.expected_woba),
-                ("Whiff%", line.whiff_share),
-                ("K%", line.strikeout_share),
-                ("Hard-Hit%", line.hard_hit_share),
-            )
-            styles = {column: _REASON_CSS for column, value in rates if value is None}
-        text_rows.append(texts)
-        style_rows.append(styles)
-    return pd.DataFrame(text_rows), pd.DataFrame(style_rows)
+            batter_cells = [
+                f"<td>{batter.plate_appearances}</td>",
+                f"<td>{_avg_text(batter.batting_average)}</td>",
+                f"<td>{_avg_text(batter.slugging)}</td>",
+                f"<td>{_avg_text(batter.iso)}</td>",
+                f"<td>{batter.home_runs if batter.home_runs is not None else '—'}</td>",
+                f"<td>{_pct_text(batter.barrel_share)}</td>",
+                f"<td>{_pct_text(batter.hard_hit_share)}</td>",
+                f"<td>{_avg_text(batter.expected_woba)}</td>",
+                f"<td>{_pct_text(batter.whiff_share)}</td>",
+            ]
+        batter_cells[0] = batter_cells[0].replace("<td>", '<td class="gm-half-boundary">', 1)
+        dim = ' class="gm-dim"' if float(shown_usage) < threshold else ""
+        name = html.escape(season.pitch_name or season.pitch_type or "— (untagged)")
+        row = (
+            f"<tr{dim}><td>{name}</td><td>{float(shown_usage):.1%}</td>"
+            f"<td>{season.plate_appearances}</td>"
+            f"<td>{_avg_text(season.batting_average)}</td>"
+            f"<td>{_avg_text(season.slugging)}</td>"
+            f"<td>{_avg_text(season.iso)}</td>"
+            f"<td>{_avg_text(season.woba)}</td>"
+            f"<td>{_avg_text(season.expected_woba)}</td>"
+            f"<td>{_pct_text(season.whiff_share)}</td>"
+            f"<td>{_pct_text(season.strikeout_share)}</td>"
+            f"<td>{_pct_text(season.hard_hit_share)}</td>" + "".join(batter_cells) + "</tr>"
+        )
+        rows.append((shown_usage, row))
+    if not rows:
+        return ""
+    if side_usage is not None:
+        rows.sort(key=lambda item: item[0], reverse=True)
+    side_clause = f"{throws_text}-handed pitching" if throws_text else "the starter's side"
+    header = (
+        '<tr class="gm-halves"><th colspan="2"></th>'
+        '<th colspan="9" class="gm-half">Pitcher — season</th>'
+        f'<th colspan="9" class="gm-half gm-half-boundary">Batter — '
+        f"{html.escape(window_label)} vs {html.escape(side_clause)}</th></tr>"
+        '<tr class="gm-cols"><th>Pitch</th><th>Usage%</th>'
+        "<th>PA</th><th>AVG</th><th>SLG</th><th>ISO</th><th>wOBA</th><th>xwOBA</th>"
+        "<th>Whiff%</th><th>K%</th><th>Hard-Hit%</th>"
+        '<th class="gm-half-boundary">PA</th><th>AVG</th><th>SLG</th><th>ISO</th><th>HR</th>'
+        "<th>Barrel%</th><th>Hard-Hit%</th><th>xwOBA</th><th>Swing-Str%</th></tr>"
+    )
+    return (
+        '<div class="gm-breakup-wrap"><table class="gm-breakup"><thead>'
+        + header
+        + "</thead><tbody>"
+        + "".join(row for _, row in rows)
+        + "</tbody></table></div>"
+    )
 
 
 def _arsenal_side_note(pitcher: PitcherCard, side_set: frozenset[str], side_text: str) -> str:
@@ -1087,9 +1078,9 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
         value=int(QUALIFYING_USAGE_SHARE * 100),
         step=1,
         key=f"usage_threshold_{card.player_id}",
-        help="Sets the usage line for the matchup table, the arsenal table, "
-        "and the event log below. A display filter only — grading's own "
-        "qualifying line stays the ratified 15% (D-070).",
+        help="Sets the usage line for the arsenal breakup and the event log "
+        "below. A display filter only — grading's own qualifying line stays "
+        "the ratified 15% (D-070).",
     )
     threshold = threshold_pct / 100.0
 
@@ -1101,56 +1092,13 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
         else None
     )
     st.markdown(
-        "**Matchup — per-pitch vs "
-        + (f"{throws_text}-handed pitching" if throws_text else "the starter's side")
-        + " [L30]**"
+        "**Hitting stats — arsenal breakup**"
+        + (f" · {pitcher.full_name}" if pitcher is not None else "")
     )
     if pitcher is None:
         st.caption(
-            "No opposing starter is named for this game — the matchup scope "
-            "appears once probables post."
+            "No opposing starter is named for this game — the breakup appears once probables post."
         )
-    elif not card.pitch_lines:
-        st.caption(
-            (
-                f"He has seen no pitches from {throws_text}-handed pitching in "
-                if throws_text
-                else "The starter's throwing side is not on the board, or he "
-                "has seen nothing from it in "
-            )
-            + "the last 30 days on this board."
-        )
-    else:
-        mix_on = st.toggle(
-            f"Qualifying pitch mix only (≥{threshold_pct}% usage)",
-            value=False,
-            key=f"matchup_mix_{card.player_id}",
-            help="Off: every pitch type he has seen from this side over the "
-            "window. On: only the qualifying mix — types at or above the "
-            "threshold set above.",
-        )
-        pitch_texts, pitch_styles = _pitch_line_frames(
-            card.pitch_lines,
-            whiff_column="Swing-Str%",
-            qualifying_only=mix_on,
-            threshold=threshold,
-        )
-        if pitch_texts.empty:
-            st.caption("No pitch type meets the threshold in this scope.")
-        else:
-            st.dataframe(styled_text_frame(pitch_texts, pitch_styles), hide_index=True)
-        seen = sum(line.pitches for line in card.pitch_lines)
-        st.caption(
-            f"His lines against {throws_text}-handed pitching over the last 30 "
-            f"days — {seen} pitches seen, and usage is each pitch's share of "
-            "them. Rates over a handful of plate appearances stay jumpy; an "
-            "empty denominator reads as a dash. Rows dimmed sit below the "
-            "threshold (D-088)."
-        )
-
-    st.markdown(f"**Arsenal** — {pitcher.full_name}" if pitcher is not None else "**Arsenal**")
-    if pitcher is None:
-        st.caption("No opposing starter is named for this game.")
     elif not pitcher.season_lines:
         st.caption("No arsenal-board coverage for this pitcher, this season or last.")
     else:
@@ -1184,11 +1132,43 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
                         else pitcher.usage_vs_right
                     )
                 side_note = _arsenal_side_note(pitcher, side_set, side_text)
-        arsenal_texts, arsenal_styles = _arsenal_frames(
-            pitcher, threshold=threshold, side_filter=side_filter, side_usage=side_usage
+        window_unit = st.segmented_control(
+            "Batter-half window",
+            ["Months", "Weeks"],
+            default="Months",
+            key=f"breakup_unit_{card.player_id}",
+            help="The batter half's reach. Months is the full month the pitch "
+            "record carries; Weeks is one to four weeks back, precomputed at "
+            "each reach (D-106). The pitcher half stays season-long either way.",
         )
-        if arsenal_texts.empty:
-            # Only a side filter can empty the frame (season_lines is
+        if window_unit == "Weeks":
+            weeks_back = int(
+                st.number_input(
+                    "Weeks back",
+                    min_value=1,
+                    max_value=4,
+                    value=2,
+                    step=1,
+                    key=f"breakup_weeks_{card.player_id}",
+                )
+            )
+            window_days = weeks_back * 7
+            window_label = f"last {weeks_back} week" + ("s" if weeks_back != 1 else "")
+        else:
+            window_days = 30
+            window_label = "last month"
+        lines = card.matchup_lines_by_window.get(window_days, ())
+        table_html = _arsenal_breakup_html(
+            pitcher,
+            lines,
+            threshold=threshold,
+            side_filter=side_filter,
+            side_usage=side_usage,
+            window_label=window_label,
+            throws_text=throws_text,
+        )
+        if not table_html:
+            # Only a side filter can empty the table (season_lines is
             # non-empty above): none of the pitches he used against this
             # side made his arsenal board, so season-long figures don't
             # exist for them — name that instead of showing a blank grid.
@@ -1199,7 +1179,7 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
                 "show for them."
             )
         else:
-            st.dataframe(styled_text_frame(arsenal_texts, arsenal_styles), hide_index=True)
+            st.markdown(_BREAKUP_CSS + table_html, unsafe_allow_html=True)
         if side_usage is not None:
             st.caption(
                 f"Usage% is his share of pitches to {side_text}-handed "
@@ -1215,11 +1195,11 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
             else "."
         )
         st.caption(
-            "Every pitch he throws, season-long figures from the arsenal "
-            "board — never a window (D-087). The side filter reads the recent "
-            "31-day pitch record, the only per-side split on the board; with "
-            "it on, Usage% switches to that side's window share (D-102) and "
-            "every other number stays season-long. Rows dimmed sit below the "
+            "One row per pitch in his arsenal: Usage% and the first half are "
+            "his season-long figures from the arsenal board — never a window "
+            f"(D-087) — and the second half is the batter's {window_label} "
+            "against that exact pitch from this side. A pitch the batter has "
+            "not seen dashes instead of hiding. Rows dimmed sit below the "
             "threshold." + season_note
         )
 
@@ -1938,6 +1918,17 @@ def _render_backtest() -> None:
         st.caption("Days not tallied: " + "; ".join(failures) + ".")
 
 
+@st.cache_data
+def _logo_data_uri() -> str | None:
+    """The D-107 mark as inline data: read once from the repo asset, handed
+    to the shell as a data URI so the header never makes a remote request.
+    Absent asset → None, and the shell's hand-drawn orb stands in."""
+    path = REPO_ROOT / "assets" / "gm_logo.png"
+    if not path.is_file():
+        return None
+    return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode("ascii")
+
+
 def main() -> None:
     st.set_page_config(page_title="GreenMachine", layout="wide")
     bridge_secrets_into_environment()
@@ -1947,7 +1938,7 @@ def main() -> None:
     st.markdown(FIELD_CSS, unsafe_allow_html=True)
     orb, header, action = st.columns([1, 5, 1])
     with orb:
-        st.markdown(ORB_HTML, unsafe_allow_html=True)
+        st.markdown(orb_html(_logo_data_uri()), unsafe_allow_html=True)
     with header:
         st.markdown(TITLE_HTML, unsafe_allow_html=True)
         st.markdown(
