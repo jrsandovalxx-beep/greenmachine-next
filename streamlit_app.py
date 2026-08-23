@@ -1158,6 +1158,7 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
         side_filter: frozenset[str] | None = None
         side_usage: dict[str, Decimal] | None = None
         side_note = ""
+        side_text = ""
         if side_known:
             side_text = "left" if card.batting_side == "L" else "right"
             side_on = st.toggle(
@@ -1186,7 +1187,19 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
         arsenal_texts, arsenal_styles = _arsenal_frames(
             pitcher, threshold=threshold, side_filter=side_filter, side_usage=side_usage
         )
-        st.dataframe(styled_text_frame(arsenal_texts, arsenal_styles), hide_index=True)
+        if arsenal_texts.empty:
+            # Only a side filter can empty the frame (season_lines is
+            # non-empty above): none of the pitches he used against this
+            # side made his arsenal board, so season-long figures don't
+            # exist for them — name that instead of showing a blank grid.
+            st.caption(
+                "None of the pitches he used against "
+                f"{side_text}-handed batters in the recent record appear on "
+                "his arsenal board, so there are no season-long figures to "
+                "show for them."
+            )
+        else:
+            st.dataframe(styled_text_frame(arsenal_texts, arsenal_styles), hide_index=True)
         if side_usage is not None:
             st.caption(
                 f"Usage% is his share of pitches to {side_text}-handed "
@@ -1240,7 +1253,7 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "weather is the venue reading; the tags box carries advisories — low "
         "samples, missing components, estimated lineups. A neon **$** marks a "
         "batter who homered in his most recent game day on or before this "
-        "slate (D-094). Select a row to open the batter's detail."
+        "slate (D-094)."
     )
     texts, styles, cards = _slugger_frames(board)
     if texts.empty:
@@ -1503,7 +1516,8 @@ def _render_conditions(board: SlateBoard) -> None:
         texts: dict[str, str] = {
             "Game": f"{game.away_team} at {game.home_team}",
             "Venue": game.venue_name,
-            "Type": game.venue_type.value,
+            # Human label, not the enum's snake_case value.
+            "Type": game.venue_type.value.replace("_", " "),
         }
         styles: dict[str, str] = {}
         for column in numeric_columns:

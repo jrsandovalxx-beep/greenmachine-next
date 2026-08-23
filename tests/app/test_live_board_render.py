@@ -1026,3 +1026,24 @@ def test_backtest_excludes_a_day_the_source_has_not_indexed(
     summary = [frame for frame in frames if "Hit rate" in frame.columns]
     assert summary, "the per-grade summary still renders"
     assert summary[0]["Batters"].tolist() == ["0", "0", "0", "0", "0"]
+
+
+def test_arsenal_frames_empty_when_the_side_record_matches_no_board_pitch() -> None:
+    """D-105: a side filter can name pitch types his arsenal board lacks
+    (thrown against this side in the window, never qualifying season-long) —
+    the frame comes back empty and the render path names the reason instead
+    of showing a blank grid."""
+    from types import SimpleNamespace
+
+    import streamlit_app
+
+    pitcher = SimpleNamespace(
+        season_lines=(_season_line(),),
+        pitches_vs_left=frozenset({"FF", "SL"}),
+        pitches_vs_right=frozenset({"SL"}),
+    )
+    texts, styles = streamlit_app._arsenal_frames(
+        pitcher, threshold=0.15, side_filter=pitcher.pitches_vs_right
+    )
+    assert texts.empty
+    assert styles.empty
