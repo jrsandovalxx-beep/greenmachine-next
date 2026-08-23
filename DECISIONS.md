@@ -2115,3 +2115,39 @@ wording changes, build-time work on the pinned fetch behavior, the
 build_board restructure, dormant surfaces — stay parked for the owner's
 call.
 
+
+## D-104 - Range-chunk consolidation: built, measured, rejected
+**The per-day pitch fetch stays (Product Owner, 2026-08-22: "Do what
+ever you recommend for efficiency and smoothness").** The investigation
+started from a belief that the cold build's one-CSV-per-window-day
+pattern (31 days, 46 with the 45-day mix reach) dominated its minutes.
+The consolidation was built in full — epoch-aligned 7-day range chunks
+with recursive midpoint splitting against the search CSV's silent
+truncation cap (observed and proven: a 7-day range needing 27,642 rows
+answers exactly 24,999 without a word) — and then measured against the
+existing path on the same network within the same hour. Per-day: a
+cold board in 121s. Range chunks: 145s. The per-day fetch costs ~1.7s
+of mostly fixed latency; a 7-day range costs ~7s of row volume, and a
+week that hits the cap splits into extra requests that eat whatever the
+fewer round-trips saved. The instrumented build's real cost profile:
+~75s pitch window either way, ~17s of per-game batting orders, ~15s of
+season boards, ~38s of in-process assembly — no single fetch shape
+changes it. The consolidation was reverted rather than shipped: extra
+machinery (cap detection, recursive splits, chunk-aligned caching) that
+pays for nothing is the kind of complexity this project removes. The
+remaining lever on cold-build time is concurrency across the
+independent fetches, parked for the owner's call because it raises
+politeness and rate-limit questions against two sources that a pure
+client-side change cannot answer.
+
+## D-105 - Three wording fixes from the parked polish list
+**(Same authorization as D-104.)** The Sluggers intro caption no longer
+carries a second copy of "select a row" — the point-of-use caption under
+the grid already says it. The Conditions table's Type column shows a
+human label ("retractable roof") instead of the enum's raw snake_case
+value. And the Arsenal table's side filter can name pitch types his
+season arsenal board lacks (thrown against this hand in the recent
+window, never qualifying season-long); that case now captions the reason
+instead of rendering a blank grid. A fourth parked item — a "forecasts
+refresh every 30 minutes" line — does not exist anywhere in the codebase
+and is recorded here as a no-op.
