@@ -34,11 +34,13 @@ from greenmachine.domain.values import GameId, PlayerId, SourceCaptureId, VenueI
 from greenmachine.inputs.contract import Handedness, ParkFactor, ParkVenue, VenueType
 from greenmachine.inputs.park_reference import PARK_VENUES
 from greenmachine.live.form import (
+    AIR_BALL_TYPES,
     BARREL_CLASSIFICATION,
     HARD_HIT_THRESHOLD_MPH,
     FormSection,
     aggregate_form,
     is_measurable_air,
+    is_oppo_air,
     is_pull_air,
     resolve_form_section,
 )
@@ -198,6 +200,12 @@ class PitchLine:
     expected_woba: Decimal | None
     whiff_share: Decimal | None
     woba: Decimal | None = None  # the arsenal board's own wOBA (season scopes)
+    # SP-1 (D-109): per-pitch contact shape for the breakup table's batter
+    # half — mean exit velocity and the air-ball share of classified contact.
+    # batted_balls is the ratified 10-BBE pitch-type floor's basis.
+    batted_balls: int = 0
+    mean_launch_speed: Decimal | None = None
+    air_ball_share: Decimal | None = None
     strikeout_share: Decimal | None = None  # the arsenal board's K% (season scopes)
 
 
@@ -225,8 +233,11 @@ class BatterGridLine:
     iso: Decimal | None
     distance_350_count: int | None
     pull_air_share: Decimal | None
-    expected_woba: Decimal | None
-    whiff_share: Decimal | None
+    # SP-1 (D-109): the pull mirror over the identical measurable-air
+    # denominator — None on the season view, which publishes no spray read.
+    oppo_air_share: Decimal | None = None
+    expected_woba: Decimal | None = None
+    whiff_share: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -256,6 +267,9 @@ class BatterCard:
     # from the near-real-time game log. Never a guess: no log, no tag.
     homered_on_last_game_day: bool
     result: EvaluatedGradeResult | NotEvaluableGradeResult
+    # SP-1 (D-109): season strikeout share (K/PA) for the high-K tags —
+    # computed here, selected by the view.
+    season_k_share: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -281,6 +295,9 @@ class PitcherCard:
     # arsenal leaderboard publishes usage across all batters only.
     usage_vs_left: dict[str, Decimal]
     usage_vs_right: dict[str, Decimal]
+    # SP-1 (D-109): arsenal-wide whiff — the pitch-weighted mean over his
+    # season lines, for the low-whiff side of the high-K interaction tag.
+    season_whiff_weighted: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -459,6 +476,17 @@ def _pitch_lines(events: Sequence[PitchEvent]) -> tuple[PitchLine, ...]:
             for event in batted
             if event.launch_speed is not None and event.launch_speed >= HARD_HIT_THRESHOLD_MPH
         )
+        # Contact shape (D-109): EV over the pitches with a measured speed,
+        # air-ball share over classified contact — the same BBE definition
+        # the form section uses.
+        bbe = [event for event in group if event.launch_speed_angle is not None]
+        air_balls = sum(1 for event in bbe if event.bb_type in AIR_BALL_TYPES)
+        mean_speed: Decimal | None = None
+        if batted:
+            mean_speed = sum(
+                (event.launch_speed for event in batted if event.launch_speed is not None),
+                Decimal(0),
+            ) / Decimal(len(batted))
         lines.append(
             PitchLine(
                 pitch_type=pitch_type,
@@ -474,6 +502,9 @@ def _pitch_lines(events: Sequence[PitchEvent]) -> tuple[PitchLine, ...]:
                 hard_hit_share=Decimal(hard_hits) / Decimal(len(batted)) if batted else None,
                 expected_woba=outcomes.expected_woba,
                 whiff_share=outcomes.whiff_share,
+                batted_balls=len(bbe),
+                mean_launch_speed=mean_speed,
+                air_ball_share=Decimal(air_balls) / Decimal(len(bbe)) if bbe else None,
             )
         )
     lines.sort(key=lambda line: line.usage_share, reverse=True)
@@ -509,6 +540,20 @@ def _season_pitch_lines(rows: Sequence[PitchArsenalRow]) -> tuple[PitchLine, ...
     ]
     lines.sort(key=lambda line: line.usage_share, reverse=True)
     return tuple(lines)
+
+
+def _arsenal_whiff_weighted(rows: Sequence[PitchArsenalRow]) -> Decimal | None:
+    """Arsenal-wide whiff (D-109): the pitch-weighted mean over a pitcher's
+    season arsenal rows — one read of how hard his whole mix is to hit, for
+    the low-whiff side of the high-K interaction tag. None when the board
+    shows no pitches, never an invented zero."""
+    weighed = [row for row in rows if row.pitches > 0]
+    total = sum(row.pitches for row in weighed)
+    if not total:
+        return None
+    return sum((row.whiff_share * Decimal(row.pitches) for row in weighed), Decimal(0)) / Decimal(
+        total
+    )
 
 
 def _matchup_lines(
@@ -583,6 +628,7 @@ def _batter_grid_line(events: Sequence[PitchEvent]) -> BatterGridLine | None:
     # counts (D-090 keeps it a separate metric from the distance column).
     measurable_air = [event for event in batted if is_measurable_air(event)]
     pulls = sum(1 for event in measurable_air if is_pull_air(event))
+    oppos = sum(1 for event in measurable_air if is_oppo_air(event))
     return BatterGridLine(
         pitches=len(events),
         plate_appearances=outcomes.plate_appearances,
@@ -603,6 +649,7 @@ def _batter_grid_line(events: Sequence[PitchEvent]) -> BatterGridLine | None:
         iso=outcomes.iso,
         distance_350_count=long_balls,
         pull_air_share=(Decimal(pulls) / Decimal(len(measurable_air)) if measurable_air else None),
+        oppo_air_share=(Decimal(oppos) / Decimal(len(measurable_air)) if measurable_air else None),
         expected_woba=outcomes.expected_woba,
         whiff_share=outcomes.whiff_share,
     )
@@ -655,6 +702,7 @@ def _season_grid_line(
         iso=(slugging - average if average is not None and slugging is not None else None),
         distance_350_count=None,
         pull_air_share=None,
+        oppo_air_share=None,
         expected_woba=(woba_total / Decimal(woba_pa)) if woba_pa else None,
         whiff_share=(whiff_total / Decimal(whiff_pitches)) if whiff_pitches else None,
     )
@@ -859,6 +907,7 @@ def _pitcher_card(
         ),
         usage_vs_left=_side_usage(window_events, "L"),
         usage_vs_right=_side_usage(window_events, "R"),
+        season_whiff_weighted=_arsenal_whiff_weighted(season_rows),
     )
 
 
@@ -1352,6 +1401,11 @@ def build_board(
                             game_logs.get(player_id, ())
                         ),
                         result=result,
+                        season_k_share=(
+                            Decimal(line.strikeouts) / Decimal(line.plate_appearances)
+                            if line is not None and line.plate_appearances
+                            else None
+                        ),
                     )
                 )
 

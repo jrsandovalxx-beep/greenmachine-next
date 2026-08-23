@@ -617,8 +617,29 @@ def _weather_text(game: GameCard) -> tuple[str, bool]:
     return f"{float(game.temperature_fahrenheit):.0f}°F, open air", False
 
 
-def _card_tags(card: BatterCard) -> str:
-    """The shortlist's tags box: advisories and absences as compact tags."""
+# D-109: the shortlist tags' firing lines, ratified in the O-8 batch and
+# printed in the tab caption (the D-079 pattern — a surface prints every
+# emphasis line it uses).
+_HIGH_K_SHARE = Decimal("0.27")
+_LOW_WHIFF_SHARE = Decimal("0.22")
+
+# The ratified pitch-type sample floor (10 BBE) for the breakup table's
+# per-pitch EV and Air% — below it the INSUFFICIENT treatment, never hidden.
+_MIN_BBE_PITCH_TYPE = 10
+
+
+def _ordinal(position: int) -> str:
+    """The lineup-slot ordinal — never "1th"."""
+    if 10 <= position % 100 <= 20:
+        return f"{position}th"
+    return f"{position}" + {1: "st", 2: "nd", 3: "rd"}.get(position % 10, "th")
+
+
+def _card_tags(card: BatterCard, opposing: PitcherCard | None) -> str:
+    """The shortlist's tags box: advisories and absences as compact tags,
+    plus the D-109 context tags (lineup slot, high-K reads). Tags join with
+    " · ", so no tag carries an interpunct inside itself — commas inside,
+    interpuncts between."""
     tags: list[str] = []
     insufficient, missing = _component_flags(card)
     if insufficient:
@@ -627,6 +648,21 @@ def _card_tags(card: BatterCard) -> str:
         tags.append(f"missing: {missing}")
     if card.lineup_is_estimate:
         tags.append("est. lineup")
+    if card.order_position is not None:
+        slot = f"bats {_ordinal(card.order_position)}"
+        tags.append(slot + (" (est.)" if card.lineup_is_estimate else ""))
+    k_share = card.season_k_share
+    high_k = k_share is not None and k_share >= _HIGH_K_SHARE
+    whiff = opposing.season_whiff_weighted if opposing is not None else None
+    if high_k and whiff is not None and whiff <= _LOW_WHIFF_SHARE:
+        pa = card.season.plate_appearances if card.season is not None else 0
+        tags.append(
+            f"high-K bat vs low-whiff arm: K% {float(k_share) * 100:.1f} "
+            f"({pa} PA), arsenal whiff {float(whiff) * 100:.1f}%"
+        )
+    elif high_k:
+        pa = card.season.plate_appearances if card.season is not None else 0
+        tags.append(f"high-K profile: K% {float(k_share) * 100:.1f} ({pa} PA)")
     return " · ".join(tags)
 
 
@@ -665,7 +701,7 @@ def _slugger_frames(board: SlateBoard) -> tuple[pd.DataFrame, pd.DataFrame, list
                         f"{float(factor.factor):.0f}" if factor is not None else "not covered"
                     ),
                     "Weather": weather,
-                    "Tags": _card_tags(card),
+                    "Tags": _card_tags(card, opposing),
                 }
                 styles = {"Grade": _HIGHLIGHT}
                 if card.homered_on_last_game_day:
@@ -714,7 +750,9 @@ _FORM_PRECISION = {
     "EV": 1,
     "AtkAng": 1,
     "IdealAtkAng%": 1,
+    "SwSp%": 1,
     "Pull Air %": 1,
+    "Oppo Air %": 1,
     "Hard%": 1,
 }
 
@@ -734,18 +772,20 @@ def _form_section_frames(form: FormSection) -> tuple[pd.DataFrame, pd.DataFrame]
     data available" (D-078). Built on the §GMF-002 grid machinery, like every
     live surface.
     """
-    fields: tuple[tuple[str, FormValue], ...] = (
+    fields: tuple[tuple[str, FormValue | None], ...] = (
         ("Barrel%", form.barrel_pct),
         ("EV", form.exit_velocity),
         ("AtkAng", form.attack_angle_degrees),
         ("IdealAtkAng%", form.ideal_attack_angle_pct),
+        ("SwSp%", form.sweet_spot_pct),
         ("Pull Air %", form.pull_air_pct),
+        ("Oppo Air %", form.oppo_air_pct),
         ("Hard%", form.hard_hit_pct),
     )
     texts: dict[str, str] = {}
     styles: dict[str, str] = {}
     for column, metric in fields:
-        if metric.value is None:
+        if metric is None or metric.value is None:
             texts[column] = _FORM_ABSENT_TEXT
             styles[column] = _REASON_CSS
             continue
@@ -927,8 +967,20 @@ def _arsenal_breakup_html(
         )
         batter = batter_by_type.get(season.pitch_type)
         if batter is None:
-            batter_cells = ["<td>0</td>"] + ["<td>—</td>"] * 8
+            batter_cells = ["<td>0</td>"] + ["<td>—</td>"] * 10
         else:
+            # Per-pitch contact shape (D-109): the ratified 10-BBE
+            # pitch-type floor — below it the value keeps its exact sample
+            # with an INSUFFICIENT marker; an empty denominator dashes.
+            ev_text = "—"
+            air_text = "—"
+            insufficient_note = ""
+            if 0 < batter.batted_balls < _MIN_BBE_PITCH_TYPE:
+                insufficient_note = f" · n={batter.batted_balls} · INSUFFICIENT"
+            if batter.mean_launch_speed is not None:
+                ev_text = f"{float(batter.mean_launch_speed):.1f}" + insufficient_note
+            if batter.air_ball_share is not None:
+                air_text = _pct_text(batter.air_ball_share) + insufficient_note
             batter_cells = [
                 f"<td>{batter.plate_appearances}</td>",
                 f"<td>{_avg_text(batter.batting_average)}</td>",
@@ -939,6 +991,8 @@ def _arsenal_breakup_html(
                 f"<td>{_pct_text(batter.hard_hit_share)}</td>",
                 f"<td>{_avg_text(batter.expected_woba)}</td>",
                 f"<td>{_pct_text(batter.whiff_share)}</td>",
+                f"<td>{ev_text}</td>",
+                f"<td>{air_text}</td>",
             ]
         batter_cells[0] = batter_cells[0].replace("<td>", '<td class="gm-half-boundary">', 1)
         dim = ' class="gm-dim"' if float(shown_usage) < threshold else ""
@@ -964,13 +1018,14 @@ def _arsenal_breakup_html(
     header = (
         '<tr class="gm-halves"><th colspan="2"></th>'
         '<th colspan="9" class="gm-half">Pitcher — season</th>'
-        f'<th colspan="9" class="gm-half gm-half-boundary">Batter — '
+        f'<th colspan="11" class="gm-half gm-half-boundary">Batter — '
         f"{html.escape(window_label)} vs {html.escape(side_clause)}</th></tr>"
         '<tr class="gm-cols"><th>Pitch</th><th>Usage%</th>'
         "<th>PA</th><th>AVG</th><th>SLG</th><th>ISO</th><th>wOBA</th><th>xwOBA</th>"
         "<th>Whiff%</th><th>K%</th><th>Hard-Hit%</th>"
         '<th class="gm-half-boundary">PA</th><th>AVG</th><th>SLG</th><th>ISO</th><th>HR</th>'
-        "<th>Barrel%</th><th>Hard-Hit%</th><th>xwOBA</th><th>Swing-Str%</th></tr>"
+        "<th>Barrel%</th><th>Hard-Hit%</th><th>xwOBA</th><th>Swing-Str%</th>"
+        "<th>EV</th><th>Air%</th></tr>"
     )
     return (
         '<div class="gm-breakup-wrap"><table class="gm-breakup"><thead>'
@@ -1067,7 +1122,10 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
             "empty falls back to its L14 window, marked '· L14'. A metric below "
             "its sample floor keeps its value with its exact sample and an "
             "INSUFFICIENT marker; one with no observations at either reach reads "
-            "'not enough data available' (D-068)."
+            "'not enough data available' (D-068). Oppo Air % = opposite-field "
+            "share of measurable air balls (fly balls, line drives and popups "
+            "with hit coordinates and a known batting side); Pull Air % uses "
+            "the same denominator."
         )
 
     pitcher = _opposing_pitcher(game, card) if game is not None else None
@@ -1200,7 +1258,9 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
             f"(D-087) — and the second half is the batter's {window_label} "
             "against that exact pitch from this side. A pitch the batter has "
             "not seen dashes instead of hiding. Rows dimmed sit below the "
-            "threshold." + season_note
+            "threshold. Per-pitch EV and Air% carry the ratified 10-BBE "
+            "pitch-type floor — below it the value keeps its exact sample "
+            "with an INSUFFICIENT marker (D-109)." + season_note
         )
 
     st.markdown("**Recent exit velocity — event log**")
@@ -1231,9 +1291,12 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "The shortlist (D-084): only batters graded A or S under the provisional "
         "v1 model (D-071). Park factor is the batter-side home-run factor; "
         "weather is the venue reading; the tags box carries advisories — low "
-        "samples, missing components, estimated lineups. A neon **$** marks a "
+        "samples, missing components, estimated lineups — plus context tags: "
+        "the lineup slot, and the high-K reads (D-109). A neon **$** marks a "
         "batter who homered in his most recent game day on or before this "
-        "slate (D-094)."
+        "slate (D-094). Tag firing lines: high-K at K% ≥ 27% of season plate "
+        "appearances; the low-whiff interaction at an arsenal-wide whiff of "
+        "≤ 22% — the interaction tag needs both."
     )
     texts, styles, cards = _slugger_frames(board)
     if texts.empty:
@@ -1337,6 +1400,7 @@ def _grid_line_cells(line: BatterGridLine | None) -> tuple[dict[str, str], dict[
             "ISO": "—",
             "+350 ft": "—",
             "Pull Air %": "—",
+            "Oppo Air %": "—",
             "xwOBA": "—",
             "Swing-Str %": "—",
         }
@@ -1350,6 +1414,7 @@ def _grid_line_cells(line: BatterGridLine | None) -> tuple[dict[str, str], dict[
         "SLG": _avg_text(line.slugging) if line.slugging is not None else None,
         "ISO": _avg_text(line.iso) if line.iso is not None else None,
         "Pull Air %": (_pct_text(line.pull_air_share) if line.pull_air_share is not None else None),
+        "Oppo Air %": (_pct_text(line.oppo_air_share) if line.oppo_air_share is not None else None),
         "xwOBA": _avg_text(line.expected_woba) if line.expected_woba is not None else None,
         "Swing-Str %": _pct_text(line.whiff_share) if line.whiff_share is not None else None,
     }
@@ -1389,8 +1454,8 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
         value=False,
         key="matchups_season_view",
         help=(
-            "D-079's toggle. Season +350 ft and Pull Air % have no "
-            "published source, so those cells name the absence."
+            "D-079's toggle. Season +350 ft, Pull Air % and Oppo Air % have "
+            "no published source, so those cells name the absence."
         ),
     )
     selected: BatterCard | None = None
