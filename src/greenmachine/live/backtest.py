@@ -104,11 +104,17 @@ class GradeTally:
 
 def tally_grades(rows: tuple[BacktestRow, ...]) -> tuple[GradeTally, ...]:
     """Pool outcome rows by grade letter, in ladder order (S first)."""
+    batters: dict[str, int] = {}
+    homered: dict[str, int] = {}
+    for row in rows:
+        batters[row.grade] = batters.get(row.grade, 0) + 1
+        if row.homered:
+            homered[row.grade] = homered.get(row.grade, 0) + 1
     return tuple(
         GradeTally(
             grade=grade,
-            batters=sum(1 for row in rows if row.grade == grade),
-            homered=sum(1 for row in rows if row.grade == grade and row.homered),
+            batters=batters.get(grade, 0),
+            homered=homered.get(grade, 0),
         )
         for grade in GRADE_ORDER
     )

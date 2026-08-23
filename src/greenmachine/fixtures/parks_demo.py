@@ -218,16 +218,18 @@ def parks_demo_snapshot(adapter: WeatherAdapter | None = None) -> InputSnapshot:
     """
     weather = adapter if adapter is not None else FixtureWeatherAdapter()
     factors = read_factors()
-    parks = tuple(
-        ParkInputs(
+
+    def _park(venue: ParkVenue) -> ParkInputs:
+        sides = factor_fields(venue, factors)
+        return ParkInputs(
             venue=venue,
-            park_factor_lhb=factor_fields(venue, factors)[Handedness.LEFT],
-            park_factor_rhb=factor_fields(venue, factors)[Handedness.RIGHT],
+            park_factor_lhb=sides[Handedness.LEFT],
+            park_factor_rhb=sides[Handedness.RIGHT],
             roof_status=_roof_field(venue),
             forecast=weather.forecast_for(venue),
         )
-        for venue in PARK_VENUES
-    )
+
+    parks = tuple(_park(venue) for venue in PARK_VENUES)
     # The contract rejects a field that names an undeclared source, and the
     # adapter's fields name the *adapter's* source — so the snapshot declares
     # whatever the bound adapter names, not only the fixture's own sources.

@@ -44,10 +44,10 @@ MLB_SCHEME = "https"
 REQUEST_TIMEOUT_SECONDS = 30.0
 
 # Retry posture (D-069(a), "bounded"): transient statuses get exactly one
-# retry after a fixed delay; everything else answers as it arrived. The delay
-# is injected at the call site so no test ever waits.
+# retry after a fixed delay — encoded structurally in ``get_with_retry``, not
+# by a loop bound. The delay is injected at the call site so no test ever
+# waits.
 RETRYABLE_STATUSES: frozenset[int] = frozenset({429, 500, 502, 503, 504})
-MAX_ATTEMPTS = 2
 RETRY_DELAY_SECONDS = 2.0
 
 

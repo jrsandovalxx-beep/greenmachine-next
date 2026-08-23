@@ -25,13 +25,14 @@ from greenmachine.live.form import FormSection, FormValue
 from greenmachine.live.mlb_api import (
     BattingOrders,
     FetchFailure,
+    GameLogEntry,
     ProbablePitcher,
     ScheduledGame,
     SeasonHittingLine,
     SeasonPitchingLine,
     Slate,
 )
-from greenmachine.live.pipeline import BatterCard, SlateBoard, build_board
+from greenmachine.live.pipeline import BatterCard, GameCard, SlateBoard, build_board
 
 SLATE_DATE = date(2026, 8, 20)
 AS_OF = datetime(2026, 8, 20, 18, 0, tzinfo=UTC)
@@ -110,6 +111,11 @@ class _RunnerApi:
             )
         }
 
+    def fetch_recent_game_logs(
+        self, player_ids: tuple[int, ...], start: str, end: str
+    ) -> dict[int, tuple[GameLogEntry, ...]]:
+        return {}
+
 
 class _RunnerSavant:
     def fetch_pitch_arsenal(self, *, kind: str, year: int) -> tuple:
@@ -122,7 +128,7 @@ class _RunnerSavant:
         return ()
 
 
-def _runner_card() -> BatterCard:
+def _runner_card() -> tuple[BatterCard, GameCard]:
     board = build_board(
         api=_RunnerApi(),  # type: ignore[arg-type]
         savant=_RunnerSavant(),  # type: ignore[arg-type]
@@ -145,7 +151,7 @@ def _runner_card() -> BatterCard:
         },
     )
     assert isinstance(board, SlateBoard)
-    return replace(board.games[0].home_batters[0], form=SHOWCASE_FORM)
+    return replace(board.games[0].home_batters[0], form=SHOWCASE_FORM), board.games[0]
 
 
-streamlit_app._render_batter_detail(_runner_card())
+streamlit_app._render_batter_detail(*_runner_card())

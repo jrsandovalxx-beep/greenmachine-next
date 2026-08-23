@@ -816,9 +816,7 @@ def score_snapshot(
         missing_observations=snapshot.missing_observations,
         validation_findings=_sample_warning_findings(snapshot),
         audit_derivation=tuple(audit.entries),
-        component_scores=tuple(
-            scores_by_component[component_id] for component_id in scores_by_component
-        ),
+        component_scores=tuple(scores_by_component.values()),
         category_scores=category_scores,
         total_score=total,
         grade=grade,

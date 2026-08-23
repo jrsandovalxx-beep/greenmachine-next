@@ -76,7 +76,7 @@ from greenmachine.grid import (
     styled_text_frame,
     visible_columns,
 )
-from greenmachine.inputs import InputSnapshot, Window
+from greenmachine.inputs import InputSnapshot, WeatherForecast, Window
 from greenmachine.inputs.contract import Handedness, ParkFactor, ParkVenue, VenueType
 from greenmachine.inputs.savant_park_factors import basis_statement, read_factors
 from greenmachine.live.backtest import (
@@ -518,11 +518,17 @@ WEATHER_FAILURE_CIRCUIT_BREAKER = 3
 LIVE_WEATHER_DIAGNOSTICS: list[str] = []
 
 
-def _temperature_lookup() -> object:
-    """A venue -> °F reader over the weather seam; None locally or on absence."""
+def _forecast_lookup(pick: Callable[[WeatherForecast], object]) -> object:
+    """A venue -> forecast-reading closure over the weather seam.
+
+    ``pick`` chooses which reading a present forecast yields; the closure
+    answers ``None`` locally, on absence, on a read failure (recorded in
+    ``LIVE_WEATHER_DIAGNOSTICS``), and once the circuit breaker has tripped —
+    one discipline shared by every conditions reader.
+    """
     adapter, live = weather_binding()
 
-    def read(venue: ParkVenue) -> Decimal | None:
+    def read(venue: ParkVenue) -> object | None:
         if not live or len(LIVE_WEATHER_DIAGNOSTICS) >= WEATHER_FAILURE_CIRCUIT_BREAKER:
             return None
         try:
@@ -534,31 +540,20 @@ def _temperature_lookup() -> object:
             return None
         if field.value is None:
             return None
-        return field.value.temperature_f
+        return pick(field.value)
 
     return read
+
+
+def _temperature_lookup() -> object:
+    """A venue -> °F reader over the weather seam; None locally or on absence."""
+    return _forecast_lookup(lambda forecast: forecast.temperature_f)
 
 
 def _wind_lookup() -> object:
     """A venue -> (wind mph, compass direction) reader over the weather seam;
     None locally or on absence — same discipline as the temperature lookup."""
-    adapter, live = weather_binding()
-
-    def read(venue: ParkVenue) -> tuple[Decimal, str] | None:
-        if not live or len(LIVE_WEATHER_DIAGNOSTICS) >= WEATHER_FAILURE_CIRCUIT_BREAKER:
-            return None
-        try:
-            field = adapter.forecast_for(venue)
-        except Exception as exc:  # composition-root last resort: wind downgrades to absence
-            LIVE_WEATHER_DIAGNOSTICS.append(
-                f"{venue.venue_id}: {type(exc).__name__} on {type(venue).__name__}"
-            )
-            return None
-        if field.value is None:
-            return None
-        return field.value.wind_speed_mph, field.value.wind_direction
-
-    return read
+    return _forecast_lookup(lambda forecast: (forecast.wind_speed_mph, forecast.wind_direction))
 
 
 @st.cache_data(ttl=BOARD_TTL_SECONDS, show_spinner=False)
@@ -1264,6 +1259,17 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
     return cards[selected_rows[0]]
 
 
+# Absence texts that appear in otherwise-plain cells on the Arms and Backtest
+# tables. Every such cell takes the one muted reason style, so an absence reads
+# the same wherever it appears on the board (the D-076 colour discipline).
+_ABSENCE_TEXTS = frozenset({"starter not announced", "not yet observed", "no batters graded", "—"})
+
+
+def _absence_styles(texts: dict[str, str]) -> dict[str, str]:
+    """Per-cell reason CSS for every cell whose text names an absence."""
+    return {column: _REASON_CSS for column, text in texts.items() if text in _ABSENCE_TEXTS}
+
+
 def _render_arms(board: SlateBoard) -> None:
     st.caption(
         "Expected starters with their season line and the arsenal they actually "
@@ -1277,20 +1283,19 @@ def _render_arms(board: SlateBoard) -> None:
             (game.away_pitcher, game.away_team),
         ):
             if card is None:
-                text_rows.append(
-                    {
-                        "Game": f"{game.away_team} at {game.home_team}",
-                        "Pitcher": "TBD",
-                        "Team": team,
-                        "Throws": "starter not announced",
-                        "ERA": "starter not announced",
-                        "WHIP": "starter not announced",
-                        "GS": "starter not announced",
-                        "K": "starter not announced",
-                        "Arsenal": "starter not announced",
-                    }
-                )
-                style_rows.append({"GS": _REASON_CSS, "K": _REASON_CSS})
+                tbd_texts = {
+                    "Game": f"{game.away_team} at {game.home_team}",
+                    "Pitcher": "TBD",
+                    "Team": team,
+                    "Throws": "starter not announced",
+                    "ERA": "starter not announced",
+                    "WHIP": "starter not announced",
+                    "GS": "starter not announced",
+                    "K": "starter not announced",
+                    "Arsenal": "starter not announced",
+                }
+                text_rows.append(tbd_texts)
+                style_rows.append(_absence_styles(tbd_texts))
                 continue
             arsenal = " · ".join(
                 f"{row.pitch_type} {float(row.usage_share * 100):.0f}%"
@@ -1298,20 +1303,19 @@ def _render_arms(board: SlateBoard) -> None:
                 for row in card.arsenal
             )
             observed = card.season is not None
-            text_rows.append(
-                {
-                    "Game": f"{game.away_team} at {game.home_team}",
-                    "Pitcher": card.full_name,
-                    "Team": team,
-                    "Throws": card.throws or "not yet observed",
-                    "ERA": card.season.era if card.season else "not yet observed",
-                    "WHIP": card.season.whip if card.season else "not yet observed",
-                    "GS": str(card.season.games_started) if observed else "not yet observed",
-                    "K": str(card.season.strikeouts) if observed else "not yet observed",
-                    "Arsenal": arsenal,
-                }
-            )
-            style_rows.append({} if observed else {"GS": _REASON_CSS, "K": _REASON_CSS})
+            texts = {
+                "Game": f"{game.away_team} at {game.home_team}",
+                "Pitcher": card.full_name,
+                "Team": team,
+                "Throws": card.throws or "not yet observed",
+                "ERA": card.season.era if card.season else "not yet observed",
+                "WHIP": card.season.whip if card.season else "not yet observed",
+                "GS": str(card.season.games_started) if observed else "not yet observed",
+                "K": str(card.season.strikeouts) if observed else "not yet observed",
+                "Arsenal": arsenal,
+            }
+            text_rows.append(texts)
+            style_rows.append(_absence_styles(texts))
     st.dataframe(
         styled_text_frame(pd.DataFrame(text_rows), pd.DataFrame(style_rows)),
         hide_index=True,
@@ -1774,11 +1778,10 @@ def _backtest_game_logs(
     (D-100), not the day-indexed pitch record."""
     api, _ = live_mlb_adapters()
     start = end = date.fromisoformat(slate_iso).strftime("%m/%d/%Y")
+    ordered = tuple(sorted(player_ids))
     logs: dict[int, tuple[GameLogEntry, ...]] = {}
     for i in range(0, len(player_ids), SEASON_IDS_PER_REQUEST):
-        fetched = api.fetch_recent_game_logs(
-            tuple(sorted(player_ids))[i : i + SEASON_IDS_PER_REQUEST], start, end
-        )
+        fetched = api.fetch_recent_game_logs(ordered[i : i + SEASON_IDS_PER_REQUEST], start, end)
         if isinstance(fetched, FetchFailure):
             return fetched
         logs.update(fetched)
@@ -1894,7 +1897,10 @@ def _render_backtest() -> None:
             }
         )
     st.dataframe(
-        pd.DataFrame(summary_rows),
+        styled_text_frame(
+            pd.DataFrame(summary_rows),
+            pd.DataFrame([_absence_styles(row) for row in summary_rows]),
+        ),
         hide_index=True,
         key=f"backtest_summary_{days}",
     )

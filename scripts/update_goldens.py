@@ -139,7 +139,7 @@ def _update(arguments: argparse.Namespace) -> list[str]:
     messages: list[str] = []
     for case, data in planned:
         target = case.directory / case.expected_filename
-        relative = target.relative_to(root.resolve()).as_posix()
+        relative = target.relative_to(resolved_root).as_posix()
         if target.read_bytes() == data:
             messages.append(f"unchanged {case.case_id}: {relative}")
             continue

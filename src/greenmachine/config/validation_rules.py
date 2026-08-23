@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
 from decimal import Decimal, DecimalException
+from typing import TypeVar
 
 from greenmachine.common.numeric import (
     NumericPolicyError,
@@ -35,6 +36,7 @@ from .schema import (
     BinaryScoring,
     BucketedScoring,
     ComponentConfig,
+    ComponentProfileConfig,
     Direction,
     GreenMachineConfig,
     ScoringMethod,
@@ -85,14 +87,17 @@ def _duplicates(values: Iterable[object]) -> list[str]:
     return sorted(str(value) for value, count in counts.items() if count > 1)
 
 
+_ArithResult = TypeVar("_ArithResult")
+
+
 def _arith(
-    compute: Callable[[], Decimal],
+    compute: Callable[[], _ArithResult],
     file_path: str | None,
     key_path: tuple[str, ...],
     *,
     metric: str | None = None,
     window_profile: str | None = None,
-) -> Decimal:
+) -> _ArithResult:
     """Run Decimal arithmetic on configuration values, translating any failure.
 
     All arithmetic goes through the GM-005 primitives, so it runs under the
@@ -102,27 +107,6 @@ def _arith(
     :class:`ConfigSemanticError` that names the file and key path, so no
     implementation exception escapes the public API.
     """
-    try:
-        return compute()
-    except (NumericPolicyError, DecimalException) as exc:
-        raise _fail(
-            f"decimal arithmetic on configuration values failed: {exc}",
-            file_path,
-            key_path,
-            metric=metric,
-            window_profile=window_profile,
-        ) from exc
-
-
-def _arith_list(
-    compute: Callable[[], list[Decimal]],
-    file_path: str | None,
-    key_path: tuple[str, ...],
-    *,
-    metric: str | None = None,
-    window_profile: str | None = None,
-) -> list[Decimal]:
-    """Like :func:`_arith`, but for a computation that returns a list of Decimals."""
     try:
         return compute()
     except (NumericPolicyError, DecimalException) as exc:
@@ -189,7 +173,8 @@ def _validate_allocations(
         raise _fail(
             f"category declared more than once: {repeated}", file_path, (*base, "categories")
         )
-    if missing := sorted(c.value for c in Category if c not in set(declared)):
+    declared_set = set(declared)
+    if missing := sorted(c.value for c in Category if c not in declared_set):
         raise _fail(f"category missing: {missing}", file_path, (*base, "categories"))
 
     # Every component belongs to exactly one category, and every component that
@@ -298,7 +283,8 @@ def _validate_grade_cutoffs(allocations: AllocationConfig, file_path: str | None
     grades = [cutoff.grade for cutoff in cutoffs]
     if repeated := _duplicates(grades):
         raise _fail(f"grade declared more than once: {repeated}", file_path, base)
-    if missing := sorted(g.value for g in Grade if g not in set(grades)):
+    grades_set = set(grades)
+    if missing := sorted(g.value for g in Grade if g not in grades_set):
         raise _fail(f"grade missing from the cutoff table: {missing}", file_path, base)
 
     ordered = sorted(cutoffs, key=lambda cutoff: cutoff.lower)
@@ -419,8 +405,6 @@ def _validate_profile(
     base: tuple[str, ...],
     metric: str,
 ) -> None:
-    from .schema import ComponentProfileConfig  # local import keeps the module graph flat
-
     assert isinstance(profile, ComponentProfileConfig)
     location = (*base, str(profile_index))
     where = profile.window_profile.value
@@ -715,15 +699,14 @@ def _assert_covers_domain(
                 probes.append(min(add(boundary, step), midpoint))
         return probes
 
-    probes = _arith_list(
-        build_probes, file_path, key_path, metric=metric, window_profile=window_profile
-    )
+    probes = _arith(build_probes, file_path, key_path, metric=metric, window_profile=window_profile)
 
+    bounds = list(boundaries)
     for probe in probes:
         if probe < boundaries[0] or probe > boundaries[-1]:
             continue
         try:
-            resolve_scoring_interval(probe, list(boundaries))
+            resolve_scoring_interval(probe, bounds)
         except NumericPolicyError as exc:
             raise _fail(
                 f"{label} do not cover their domain exactly once: {exc}",

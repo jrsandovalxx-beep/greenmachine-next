@@ -54,7 +54,6 @@ from greenmachine.grid import (
 )
 from greenmachine.inputs import (
     AbsenceReason,
-    Handedness,
     InputSnapshot,
     ParkInputs,
     RoofStatus,
@@ -72,9 +71,6 @@ FORECAST_COLUMN = "Forecast"
 # The graded, sortable columns — the only ones that reach the grid machinery.
 FACTOR_COLUMNS: tuple[str, ...] = (LHB_FACTOR_COLUMN, RHB_FACTOR_COLUMN)
 
-# The text columns, carried in the frame as words.
-CONDITION_COLUMNS: tuple[str, ...] = (TEAM_COLUMN, VENUE_TYPE_COLUMN, ROOF_COLUMN, FORECAST_COLUMN)
-
 # Display order: venue type sits immediately before the factors, so criterion
 # 2's "per handedness beside venue type" is true of the rendered row and not
 # only of the data behind it.
@@ -86,11 +82,6 @@ ALL_COLUMNS: tuple[str, ...] = (
     ROOF_COLUMN,
     FORECAST_COLUMN,
 )
-
-FACTOR_COLUMN_SIDES: dict[str, Handedness] = {
-    LHB_FACTOR_COLUMN: Handedness.LEFT,
-    RHB_FACTOR_COLUMN: Handedness.RIGHT,
-}
 
 # Venue type in the user's words. Never bare "not applicable" for the roof of
 # an open-air park: the difference between "there is no roof" and "the roof is
@@ -226,9 +217,13 @@ def ordered_parks(snapshot: InputSnapshot) -> tuple[ParkInputs, ...]:
     return tuple(sorted(snapshot.parks, key=lambda park: (park.venue.name, park.venue.venue_id)))
 
 
+def _rows_for(parks: tuple[ParkInputs, ...]) -> list[FieldRow]:
+    return [(park.venue.name, park_factor_fields(park)) for park in parks]
+
+
 def screen_rows(snapshot: InputSnapshot) -> list[FieldRow]:
     """The venues as grid rows — identity text and the two factor fields."""
-    return [(park.venue.name, park_factor_fields(park)) for park in ordered_parks(snapshot)]
+    return _rows_for(ordered_parks(snapshot))
 
 
 @dataclass(frozen=True)
@@ -248,8 +243,8 @@ class ParksScreen:
 
 
 def screen_frames(snapshot: InputSnapshot) -> ParksScreen:
-    rows = screen_rows(snapshot)
     parks = ordered_parks(snapshot)
+    rows = _rows_for(parks)
     data = numeric_frame(rows, VENUE_COLUMN, FACTOR_COLUMNS)
     position = 1
     for column, values in (
