@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import csv
 import io
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 from greenmachine.live.mlb_api import FetchFailure
 from greenmachine.live.transport import (
@@ -199,7 +200,12 @@ def _percent_or_none(raw: Any) -> Decimal | None:
     return value / Decimal(100) if value is not None else None
 
 
-def _parse_rows(rows: list[dict[str, str]], context: str, parse: Any) -> list[Any]:
+_T = TypeVar("_T")
+
+
+def _parse_rows(
+    rows: list[dict[str, str]], context: str, parse: Callable[[dict[str, str]], _T]
+) -> list[_T]:
     """Parse each row; drop the unparseable tiny-sample rows Savant ships.
 
     A row with an empty required numeric is almost always a near-zero-sample
@@ -207,7 +213,7 @@ def _parse_rows(rows: list[dict[str, str]], context: str, parse: Any) -> list[An
     the whole board over it would manufacture a source outage. If nothing
     parses at all, the payload is malformed and the board fails.
     """
-    parsed: list[Any] = []
+    parsed: list[_T] = []
     for row in rows:
         try:
             parsed.append(parse(row))
@@ -254,14 +260,24 @@ class BaseballSavant:
         except PayloadMalformedError as exc:
             return FetchFailure(str(exc))
 
+    def _board(
+        self, url: str, context: str, parse: Callable[[dict[str, str]], _T]
+    ) -> list[_T] | FetchFailure:
+        """One board read: the CSV fetched and parsed row-wise, every failure
+        surfaced as a :class:`FetchFailure` — the shape all six boards share."""
+        rows = self._get_csv(url, context)
+        if isinstance(rows, FetchFailure):
+            return rows
+        try:
+            return _parse_rows(rows, context, parse)
+        except PayloadMalformedError as exc:
+            return FetchFailure(str(exc))
+
     def fetch_statcast_batters(
         self, *, year: int, minimum: int = 0
     ) -> dict[int, StatcastBatterRow] | FetchFailure:
         """Season Statcast quality-of-contact board, keyed by player id."""
         context = "statcast-batters"
-        rows = self._get_csv(_STATCAST_BATTERS_URL.format(year=year, minimum=minimum), context)
-        if isinstance(rows, FetchFailure):
-            return rows
 
         def parse(row: dict[str, str]) -> StatcastBatterRow:
             player_id = _int(row.get("player_id"), context)
@@ -279,18 +295,16 @@ class BaseballSavant:
                 sweet_spot_share=_percent(row.get("anglesweetspotpercent"), context),
             )
 
-        try:
-            parsed = _parse_rows(rows, context, parse)
-        except PayloadMalformedError as exc:
-            return FetchFailure(str(exc))
+        parsed = self._board(
+            _STATCAST_BATTERS_URL.format(year=year, minimum=minimum), context, parse
+        )
+        if isinstance(parsed, FetchFailure):
+            return parsed
         return {row.player_id: row for row in parsed}
 
     def fetch_expected_stats(self, *, year: int) -> dict[int, ExpectedStatsRow] | FetchFailure:
         """Season expected-statistics board (xwOBA), keyed by player id."""
         context = "expected-stats"
-        rows = self._get_csv(_EXPECTED_STATS_URL.format(year=year), context)
-        if isinstance(rows, FetchFailure):
-            return rows
 
         def parse(row: dict[str, str]) -> ExpectedStatsRow:
             player_id = _int(row.get("player_id"), context)
@@ -301,10 +315,9 @@ class BaseballSavant:
                 xwoba=_decimal(row.get("est_woba"), context),
             )
 
-        try:
-            parsed = _parse_rows(rows, context, parse)
-        except PayloadMalformedError as exc:
-            return FetchFailure(str(exc))
+        parsed = self._board(_EXPECTED_STATS_URL.format(year=year), context, parse)
+        if isinstance(parsed, FetchFailure):
+            return parsed
         return {row.player_id: row for row in parsed}
 
     def fetch_bat_tracking(
@@ -315,12 +328,6 @@ class BaseballSavant:
         ``start``/``end`` are ISO dates; empty strings mean season-to-date.
         """
         context = "bat-tracking"
-        rows = self._get_csv(
-            _BAT_TRACKING_URL.format(year=year, minimum=minimum, start=start, end=end),
-            context,
-        )
-        if isinstance(rows, FetchFailure):
-            return rows
 
         def parse(row: dict[str, str]) -> BatTrackingRow:
             return BatTrackingRow(
@@ -332,10 +339,13 @@ class BaseballSavant:
                 competitive_swings=_int(row.get("competitive_swings"), context),
             )
 
-        try:
-            parsed = _parse_rows(rows, context, parse)
-        except PayloadMalformedError as exc:
-            return FetchFailure(str(exc))
+        parsed = self._board(
+            _BAT_TRACKING_URL.format(year=year, minimum=minimum, start=start, end=end),
+            context,
+            parse,
+        )
+        if isinstance(parsed, FetchFailure):
+            return parsed
         return tuple(parsed)
 
     def fetch_batted_ball(
@@ -343,9 +353,6 @@ class BaseballSavant:
     ) -> dict[int, BattedBallRow] | FetchFailure:
         """Season batted-ball profile board (air rate, pull-air rate)."""
         context = "batted-ball"
-        rows = self._get_csv(_BATTED_BALL_URL.format(year=year, minimum=minimum), context)
-        if isinstance(rows, FetchFailure):
-            return rows
 
         def parse(row: dict[str, str]) -> BattedBallRow:
             player_id = _int(row.get("id"), context)
@@ -356,10 +363,9 @@ class BaseballSavant:
                 pull_air_share_of_bbe=_decimal(row.get("pull_air_rate"), context),
             )
 
-        try:
-            parsed = _parse_rows(rows, context, parse)
-        except PayloadMalformedError as exc:
-            return FetchFailure(str(exc))
+        parsed = self._board(_BATTED_BALL_URL.format(year=year, minimum=minimum), context, parse)
+        if isinstance(parsed, FetchFailure):
+            return parsed
         return {row.player_id: row for row in parsed}
 
     def fetch_pitch_arsenal(
@@ -367,9 +373,6 @@ class BaseballSavant:
     ) -> tuple[PitchArsenalRow, ...] | FetchFailure:
         """Per-pitch-type arsenal rows for pitchers or batters."""
         context = f"pitch-arsenal-{kind}"
-        rows = self._get_csv(_PITCH_ARSENAL_URL.format(kind=kind, year=year), context)
-        if isinstance(rows, FetchFailure):
-            return rows
 
         def parse(row: dict[str, str]) -> PitchArsenalRow:
             return PitchArsenalRow(
@@ -390,18 +393,14 @@ class BaseballSavant:
                 hard_hit_share=_percent_or_none(row.get("hard_hit_percent")),
             )
 
-        try:
-            parsed = _parse_rows(rows, context, parse)
-        except PayloadMalformedError as exc:
-            return FetchFailure(str(exc))
+        parsed = self._board(_PITCH_ARSENAL_URL.format(kind=kind, year=year), context, parse)
+        if isinstance(parsed, FetchFailure):
+            return parsed
         return tuple(parsed)
 
     def fetch_pitch_events(self, *, year: int, day: str) -> tuple[PitchEvent, ...] | FetchFailure:
         """Every pitch of one calendar day (``day`` is ISO ``YYYY-MM-DD``)."""
         context = f"pitch-events[{day}]"
-        rows = self._get_csv(_PITCH_EVENTS_URL.format(year=year, day=day), context)
-        if isinstance(rows, FetchFailure):
-            return rows
 
         def parse(row: dict[str, str]) -> PitchEvent:
             return PitchEvent(
@@ -426,8 +425,7 @@ class BaseballSavant:
                 hit_distance=_decimal_or_none(row.get("hit_distance_sc")),
             )
 
-        try:
-            parsed = _parse_rows(rows, context, parse)
-        except PayloadMalformedError as exc:
-            return FetchFailure(str(exc))
+        parsed = self._board(_PITCH_EVENTS_URL.format(year=year, day=day), context, parse)
+        if isinstance(parsed, FetchFailure):
+            return parsed
         return tuple(parsed)

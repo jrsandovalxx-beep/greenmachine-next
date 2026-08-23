@@ -239,7 +239,7 @@ def _season_line(
     person: dict[str, Any],
     group: str,
     context: str,
-) -> tuple[int, str, dict[str, Any]] | None:
+) -> tuple[int, str, dict[str, Any]]:
     player_id = _require_int(person.get("id"), f"{context}.id")
     name = person.get("fullName")
     full_name = name if isinstance(name, str) and name else ""
@@ -337,10 +337,9 @@ class MlbStatsApi:
             lines: dict[int, SeasonHittingLine] = {}
             for index, raw_person in enumerate(people):
                 person = _require_mapping(raw_person, f"{context}.people[{index}]")
-                parsed_line = _season_line(person, "hitting", f"{context}.people[{index}]")
-                if parsed_line is None:
-                    continue
-                player_id, full_name, stat = parsed_line
+                player_id, full_name, stat = _season_line(
+                    person, "hitting", f"{context}.people[{index}]"
+                )
                 if not stat:
                     continue  # no season split: the assembly layer marks absence
                 lines[player_id] = SeasonHittingLine(
@@ -434,10 +433,9 @@ class MlbStatsApi:
             lines: dict[int, SeasonPitchingLine] = {}
             for index, raw_person in enumerate(people):
                 person = _require_mapping(raw_person, f"{context}.people[{index}]")
-                parsed_line = _season_line(person, "pitching", f"{context}.people[{index}]")
-                if parsed_line is None:
-                    continue
-                player_id, full_name, stat = parsed_line
+                player_id, full_name, stat = _season_line(
+                    person, "pitching", f"{context}.people[{index}]"
+                )
                 if not stat:
                     continue
                 era = stat.get("era")

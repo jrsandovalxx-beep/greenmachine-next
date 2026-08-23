@@ -19,10 +19,11 @@ Judgment calls logged in D-073:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from typing import Protocol, TypeVar
 from zoneinfo import ZoneInfo
 
 from greenmachine.config.schema import GreenMachineConfig
@@ -33,11 +34,11 @@ from greenmachine.domain.values import GameId, PlayerId, SourceCaptureId, VenueI
 from greenmachine.inputs.contract import Handedness, ParkFactor, ParkVenue, VenueType
 from greenmachine.inputs.park_reference import PARK_VENUES
 from greenmachine.live.form import (
-    AIR_BALL_TYPES,
     BARREL_CLASSIFICATION,
     HARD_HIT_THRESHOLD_MPH,
     FormSection,
     aggregate_form,
+    is_measurable_air,
     is_pull_air,
     resolve_form_section,
 )
@@ -69,6 +70,9 @@ from greenmachine.live.savant import (
 
 FORM_REACH_DAYS = 14
 FORM_SHORT_DAYS = 7
+# The exit-velocity log lists every pitch from the batter's most recent games
+# in the form window, capped at this many games (D-086).
+RECENT_EVENT_GAMES_CAP = 7
 # The batter's matchup table reads his pitches seen against the
 # opposing starter's side over this many days (D-088).
 MATCHUP_WINDOW_DAYS = 30
@@ -309,27 +313,21 @@ def _homered_on_last_game_day(entries: tuple[GameLogEntry, ...]) -> bool:
     game — the game log carries only final games, so an in-progress one
     neither tags nor clears. A homer earlier with a quieter game after it
     does not tag. No entries, no tag."""
-    played_days = [entry.date for entry in entries if entry.plate_appearances > 0]
-    if not played_days:
+    played = [entry for entry in entries if entry.plate_appearances > 0]
+    if not played:
         return False
-    last_day = max(played_days)
-    return any(
-        entry.date == last_day and entry.home_runs > 0
-        for entry in entries
-        if entry.plate_appearances > 0
-    )
+    last_day = max(entry.date for entry in played)
+    return any(entry.date == last_day and entry.home_runs > 0 for entry in played)
 
 
-def _recent_window_events(
-    events: tuple[PitchEvent, ...], cap_games: int = 7
-) -> tuple[PitchEvent, ...]:
+def _recent_window_events(events: tuple[PitchEvent, ...]) -> tuple[PitchEvent, ...]:
     """The batter's events from the most recent games in the form window,
     newest game first — the exit-velocity log's rows (D-086). Every pitch of
     a kept game is carried: the pitch mix needs the full counts, and the
     sheet's threshold toggle is a view filter over these rows, not a data
     cut. Source is the same form-window feed the form section reads.
     """
-    dates = sorted({event.game_date for event in events}, reverse=True)[:cap_games]
+    dates = sorted({event.game_date for event in events}, reverse=True)[:RECENT_EVENT_GAMES_CAP]
     keep = set(dates)
     kept = [event for event in events if event.game_date in keep]
     order = {day: index for index, day in enumerate(dates)}
@@ -376,6 +374,58 @@ _WHIFF_DESCRIPTIONS = frozenset(
 )
 
 
+@dataclass(frozen=True)
+class _PlateOutcomes:
+    """The plate-outcome numbers every scoped line derives the same way:
+    counts over the scope's PA-ending pitches, whiffs over its swings, each
+    rate None where its denominator is empty — the surface names the absence
+    rather than inventing a zero. One definition serves the per-pitch lines
+    and the whole-scope grid line, so the two can never disagree."""
+
+    plate_appearances: int
+    at_bats: int
+    hits: int
+    home_runs: int
+    batting_average: Decimal | None
+    slugging: Decimal | None
+    iso: Decimal | None
+    expected_woba: Decimal | None
+    whiff_share: Decimal | None
+
+
+def _plate_outcomes(events: Sequence[PitchEvent]) -> _PlateOutcomes:
+    ending = [event for event in events if event.event]
+    at_bats = sum(1 for event in ending if event.event not in _NON_AT_BAT_EVENTS)
+    hits = sum(1 for event in ending if event.event in _HIT_BASES)
+    bases = sum(_HIT_BASES.get(event.event, 0) for event in ending)
+    average = Decimal(hits) / Decimal(at_bats) if at_bats else None
+    slugging = Decimal(bases) / Decimal(at_bats) if at_bats else None
+    woba_ending = [
+        event for event in ending if event.estimated_woba is not None and event.woba_denom
+    ]
+    woba_total = sum(
+        (event.estimated_woba for event in woba_ending if event.estimated_woba is not None),
+        Decimal(0),
+    )
+    woba_denominator = sum(
+        (event.woba_denom for event in woba_ending if event.woba_denom is not None),
+        Decimal(0),
+    )
+    swings = sum(1 for event in events if event.description in _SWING_DESCRIPTIONS)
+    whiffs = sum(1 for event in events if event.description in _WHIFF_DESCRIPTIONS)
+    return _PlateOutcomes(
+        plate_appearances=len(ending),
+        at_bats=at_bats,
+        hits=hits,
+        home_runs=sum(1 for event in ending if event.event == "home_run"),
+        batting_average=average,
+        slugging=slugging,
+        iso=(slugging - average if average is not None and slugging is not None else None),
+        expected_woba=(woba_total / woba_denominator) if woba_denominator else None,
+        whiff_share=Decimal(whiffs) / Decimal(swings) if swings else None,
+    )
+
+
 def _pitch_lines(events: Sequence[PitchEvent]) -> tuple[PitchLine, ...]:
     """Per-pitch-type lines over one stated scope of pitch events (§GMF-008).
 
@@ -394,12 +444,7 @@ def _pitch_lines(events: Sequence[PitchEvent]) -> tuple[PitchLine, ...]:
     lines: list[PitchLine] = []
     total = len(events)
     for pitch_type, group in by_pitch.items():
-        ending = [event for event in group if event.event]
-        at_bats = sum(1 for event in ending if event.event not in _NON_AT_BAT_EVENTS)
-        hits = sum(1 for event in ending if event.event in _HIT_BASES)
-        bases = sum(_HIT_BASES.get(event.event, 0) for event in ending)
-        average = Decimal(hits) / Decimal(at_bats) if at_bats else None
-        slugging = Decimal(bases) / Decimal(at_bats) if at_bats else None
+        outcomes = _plate_outcomes(group)
         batted = [event for event in group if event.launch_speed is not None]
         barrels = sum(1 for event in batted if event.launch_speed_angle == BARREL_CLASSIFICATION)
         hard_hits = sum(
@@ -407,34 +452,21 @@ def _pitch_lines(events: Sequence[PitchEvent]) -> tuple[PitchLine, ...]:
             for event in batted
             if event.launch_speed is not None and event.launch_speed >= HARD_HIT_THRESHOLD_MPH
         )
-        woba_ending = [
-            event for event in ending if event.estimated_woba is not None and event.woba_denom
-        ]
-        woba_total = sum(
-            (event.estimated_woba for event in woba_ending if event.estimated_woba is not None),
-            Decimal(0),
-        )
-        woba_denominator = sum(
-            (event.woba_denom for event in woba_ending if event.woba_denom is not None),
-            Decimal(0),
-        )
-        swings = sum(1 for event in group if event.description in _SWING_DESCRIPTIONS)
-        whiffs = sum(1 for event in group if event.description in _WHIFF_DESCRIPTIONS)
         lines.append(
             PitchLine(
                 pitch_type=pitch_type,
                 pitch_name=_PITCH_NAMES.get(pitch_type, pitch_type),
                 pitches=len(group),
                 usage_share=Decimal(len(group)) / Decimal(total),
-                plate_appearances=len(ending),
-                batting_average=average,
-                slugging=slugging,
-                iso=(slugging - average if average is not None and slugging is not None else None),
-                home_runs=sum(1 for event in ending if event.event == "home_run"),
+                plate_appearances=outcomes.plate_appearances,
+                batting_average=outcomes.batting_average,
+                slugging=outcomes.slugging,
+                iso=outcomes.iso,
+                home_runs=outcomes.home_runs,
                 barrel_share=Decimal(barrels) / Decimal(len(batted)) if batted else None,
                 hard_hit_share=Decimal(hard_hits) / Decimal(len(batted)) if batted else None,
-                expected_woba=(woba_total / woba_denominator) if woba_denominator else None,
-                whiff_share=Decimal(whiffs) / Decimal(swings) if swings else None,
+                expected_woba=outcomes.expected_woba,
+                whiff_share=outcomes.whiff_share,
             )
         )
     lines.sort(key=lambda line: line.usage_share, reverse=True)
@@ -479,13 +511,7 @@ def _batter_grid_line(events: Sequence[PitchEvent]) -> BatterGridLine | None:
     the surface states 'no data available' (D-081)."""
     if not events:
         return None
-    ending = [event for event in events if event.event]
-    plate_appearances = len(ending)
-    at_bats = sum(1 for event in ending if event.event not in _NON_AT_BAT_EVENTS)
-    hits = sum(1 for event in ending if event.event in _HIT_BASES)
-    bases = sum(_HIT_BASES.get(event.event, 0) for event in ending)
-    average = Decimal(hits) / Decimal(at_bats) if at_bats else None
-    slugging = Decimal(bases) / Decimal(at_bats) if at_bats else None
+    outcomes = _plate_outcomes(events)
     # BBE follows the source's contact classification (as form does), so
     # classified fouls never swell the batted-ball denominators.
     batted = [event for event in events if event.launch_speed_angle is not None]
@@ -505,48 +531,30 @@ def _batter_grid_line(events: Sequence[PitchEvent]) -> BatterGridLine | None:
     # Pull Air % mirrors the form section: pulled air balls over measurable
     # air balls — a ball without coordinates or a known side leaves both
     # counts (D-090 keeps it a separate metric from the distance column).
-    measurable_air = [
-        event
-        for event in batted
-        if event.bb_type in AIR_BALL_TYPES
-        and event.hc_x is not None
-        and event.hc_y is not None
-        and event.batter_side in ("L", "R")
-    ]
+    measurable_air = [event for event in batted if is_measurable_air(event)]
     pulls = sum(1 for event in measurable_air if is_pull_air(event))
-    woba_ending = [
-        event for event in ending if event.estimated_woba is not None and event.woba_denom
-    ]
-    woba_total = sum(
-        (event.estimated_woba for event in woba_ending if event.estimated_woba is not None),
-        Decimal(0),
-    )
-    woba_denominator = sum(
-        (event.woba_denom for event in woba_ending if event.woba_denom is not None),
-        Decimal(0),
-    )
-    swings = sum(1 for event in events if event.description in _SWING_DESCRIPTIONS)
-    whiffs = sum(1 for event in events if event.description in _WHIFF_DESCRIPTIONS)
     return BatterGridLine(
         pitches=len(events),
-        plate_appearances=plate_appearances,
-        at_bats=at_bats,
-        hits=hits,
+        plate_appearances=outcomes.plate_appearances,
+        at_bats=outcomes.at_bats,
+        hits=outcomes.hits,
         batted_balls=len(batted),
         barrels=barrels,
-        home_runs=sum(1 for event in ending if event.event == "home_run"),
+        home_runs=outcomes.home_runs,
         exit_velocity=(speed_total / Decimal(len(speeds))) if speeds else None,
         barrel_per_pa=(
-            Decimal(barrels) / Decimal(plate_appearances) if plate_appearances else None
+            Decimal(barrels) / Decimal(outcomes.plate_appearances)
+            if outcomes.plate_appearances
+            else None
         ),
         hard_hit_share=Decimal(hard_hits) / Decimal(len(batted)) if batted else None,
-        batting_average=average,
-        slugging=slugging,
-        iso=(slugging - average if average is not None and slugging is not None else None),
+        batting_average=outcomes.batting_average,
+        slugging=outcomes.slugging,
+        iso=outcomes.iso,
         distance_350_count=long_balls,
         pull_air_share=(Decimal(pulls) / Decimal(len(measurable_air)) if measurable_air else None),
-        expected_woba=(woba_total / woba_denominator) if woba_denominator else None,
-        whiff_share=Decimal(whiffs) / Decimal(swings) if swings else None,
+        expected_woba=outcomes.expected_woba,
+        whiff_share=outcomes.whiff_share,
     )
 
 
@@ -652,6 +660,22 @@ def _board_mix_rows(board_rows: Sequence[PitchArsenalRow]) -> tuple[PitchMixRow,
 
 def _chunked(ids: tuple[int, ...], size: int) -> list[tuple[int, ...]]:
     return [ids[index : index + size] for index in range(0, len(ids), size)]
+
+
+class _HasPlayerId(Protocol):
+    @property
+    def player_id(self) -> int: ...
+
+
+_PlayerRow = TypeVar("_PlayerRow", bound=_HasPlayerId)
+
+
+def _by_player(rows: Iterable[_PlayerRow]) -> dict[int, tuple[_PlayerRow, ...]]:
+    """Rows grouped by player id, source order preserved within each player."""
+    grouped: dict[int, list[_PlayerRow]] = {}
+    for row in rows:
+        grouped.setdefault(row.player_id, []).append(row)
+    return {player_id: tuple(group) for player_id, group in grouped.items()}
 
 
 def _parse_start(raw: str, official_date: str) -> datetime:
@@ -857,18 +881,8 @@ def build_board(
         if not pitcher_arsenal_rows:
             diagnostics.append("pitcher arsenal board: returned zero rows")
     league = league_baselines(batter_rows=batter_arsenal, pitcher_rows=pitcher_arsenal_rows)
-    arsenal_lists_by_pitcher: dict[int, list[PitchArsenalRow]] = {}
-    for row in pitcher_arsenal_rows:
-        arsenal_lists_by_pitcher.setdefault(row.player_id, []).append(row)
-    arsenal_by_pitcher = {
-        player_id: tuple(rows) for player_id, rows in arsenal_lists_by_pitcher.items()
-    }
-    arsenal_lists_by_batter: dict[int, list[PitchArsenalRow]] = {}
-    for row in batter_arsenal:
-        arsenal_lists_by_batter.setdefault(row.player_id, []).append(row)
-    arsenal_by_batter = {
-        player_id: tuple(rows) for player_id, rows in arsenal_lists_by_batter.items()
-    }
+    arsenal_by_pitcher = _by_player(pitcher_arsenal_rows)
+    arsenal_by_batter = _by_player(batter_arsenal)
 
     # Pitcher metrics are season figures with a last-season fallback (D-087):
     # a probable with no current-season arsenal row reads his prior-year board
@@ -911,13 +925,9 @@ def build_board(
         if isinstance(fallback_result, FetchFailure):
             diagnostics.append(f"pitcher arsenal fallback ({year - 1}): {fallback_result.reason}")
         else:
-            fallback_lists: dict[int, list[PitchArsenalRow]] = {}
-            for row in fallback_result:
-                if row.player_id in missing_current:
-                    fallback_lists.setdefault(row.player_id, []).append(row)
-            fallback_arsenal_by_pitcher = {
-                player_id: tuple(rows) for player_id, rows in fallback_lists.items()
-            }
+            fallback_arsenal_by_pitcher = _by_player(
+                row for row in fallback_result if row.player_id in missing_current
+            )
 
     season_hitting: dict[int, SeasonHittingLine] = {}
     for chunk in _chunked(all_batter_ids, SEASON_IDS_PER_REQUEST):
@@ -979,6 +989,10 @@ def build_board(
         tracking_reach = ()
     else:
         tracking_reach = tracking_reach_result
+    # Grouped once: the per-batter loop below reads each board hundreds of
+    # times, and a full-board scan per batter is quadratic in slate size.
+    short_tracking_by_batter = _by_player(tracking_short)
+    reach_tracking_by_batter = _by_player(tracking_reach)
 
     # The fetch window spans the matchup window (D-088), the longest read on
     # the board; form still slices its own L7/L14 reaches out of it.
@@ -1002,7 +1016,7 @@ def build_board(
     for event in events:
         events_by_batter.setdefault(event.batter_id, []).append(event)
         events_by_pitcher.setdefault(event.pitcher_id, []).append(event)
-    matchup_cutoff = (as_of - timedelta(days=MATCHUP_WINDOW_DAYS)).date().isoformat()
+    matchup_cutoff = window_start.isoformat()
 
     # D-081's reach: a starter with no pitches in the matchup window extends
     # the read to L45. The extra days are fetched once, only when some
@@ -1080,6 +1094,18 @@ def build_board(
             factor_left = per_side.get(Handedness.LEFT)
             factor_right = per_side.get(Handedness.RIGHT)
 
+        # Game-scoped, batter-invariant: one start instant and one frozen
+        # context shared by every card in the game.
+        start_utc = _parse_start(game.game_datetime_utc, game.official_date)
+        game_context = _game_context(
+            game.game_pk,
+            game.official_date,
+            start_utc,
+            venue,
+            game.venue_id,
+            game.venue_name,
+        )
+
         pitcher_cards: dict[str, PitcherCard | None] = {}
         probable_by_side: dict[str, tuple[int, str] | None] = {}
         for side_key, probable in (("home", game.home_probable), ("away", game.away_probable)):
@@ -1122,11 +1148,20 @@ def build_board(
                 )
                 starter_mix = mix_by_pitcher.get(pitcher_id, ())
                 mix_label = mix_label_by_pitcher.get(pitcher_id, "")
-            for position, player_id in enumerate(lineup_ids[(game.game_pk, team)], start=1):
+            # The grid scope's mix line (D-079): the starter's qualifying
+            # pitch types, one set for every batter on this side.
+            qualifying_mix = frozenset(
+                row.pitch_type for row in starter_mix if row.usage_share >= MIX_USAGE_SHARE
+            )
+            lineup_key = (game.game_pk, team)
+            lineup_is_estimate = lineup_key in lineup_estimated
+            for position, player_id in enumerate(lineup_ids[lineup_key], start=1):
                 line = season_hitting.get(player_id)
                 bats = line.bats if line else ""
-                player_short = tuple(row for row in tracking_short if row.player_id == player_id)
-                player_reach = tuple(row for row in tracking_reach if row.player_id == player_id)
+                display_name = line.full_name if line and line.full_name else f"Player {player_id}"
+                statcast_row = statcast.get(player_id)
+                player_short = short_tracking_by_batter.get(player_id, ())
+                player_reach = reach_tracking_by_batter.get(player_id, ())
                 sides = tuple({row.side for row in player_reach if row.side in ("R", "L")})
                 side, _side_reason = resolve_batting_side(bats, sides, pitcher_throws)
                 side_short = _side_resolved_tracking(player_short, side)
@@ -1160,9 +1195,6 @@ def build_board(
                 factor = factor_left if side == "L" else factor_right
                 # The grid scope (D-079): his L30 events against the
                 # starter's qualifying mix pitches, from the starter's side.
-                qualifying_mix = frozenset(
-                    row.pitch_type for row in starter_mix if row.usage_share >= MIX_USAGE_SHARE
-                )
                 mix_scope_events = tuple(
                     event for event in matchup_scope_events if event.pitch_type in qualifying_mix
                 )
@@ -1175,12 +1207,12 @@ def build_board(
                         pitcher_rows=starter_mix,
                         batter_rows=tuple(
                             BatterPitchLine(
-                                pitch_type=line.pitch_type,
-                                pitches=line.pitches,
-                                expected_woba=line.expected_woba,
-                                whiff_share=line.whiff_share,
+                                pitch_type=pitch_line.pitch_type,
+                                pitches=pitch_line.pitches,
+                                expected_woba=pitch_line.expected_woba,
+                                whiff_share=pitch_line.whiff_share,
                             )
-                            for line in _pitch_lines(mix_scope_events)
+                            for pitch_line in _pitch_lines(mix_scope_events)
                         ),
                         league=league,
                     )
@@ -1189,27 +1221,17 @@ def build_board(
                     and pitcher_arsenal_available
                     else None
                 )
-                start_utc = _parse_start(game.game_datetime_utc, game.official_date)
                 grading_input = BatterGradingInput(
-                    game=_game_context(
-                        game.game_pk,
-                        game.official_date,
-                        start_utc,
-                        venue,
-                        game.venue_id,
-                        game.venue_name,
-                    ),
+                    game=game_context,
                     batter=Batter(
                         player_id=PlayerId(str(player_id)),
-                        full_name=line.full_name
-                        if line and line.full_name
-                        else f"Player {player_id}",
+                        full_name=display_name,
                     ),
                     pitcher=pitcher_entity,
                     pitcher_throws=pitcher_throws,
                     bats=bats,
                     tracking_sides=sides,
-                    statcast=statcast.get(player_id),
+                    statcast=statcast_row,
                     form=form if form_source_available else None,
                     tracking_rows_present=bool(player_reach),
                     matchup=matchup,
@@ -1230,16 +1252,14 @@ def build_board(
                 lineups[side_key].append(
                     BatterCard(
                         player_id=player_id,
-                        full_name=line.full_name
-                        if line and line.full_name
-                        else f"Player {player_id}",
+                        full_name=display_name,
                         team=team,
                         bats=bats,
                         batting_side=side,
                         order_position=position,
-                        lineup_is_estimate=(game.game_pk, team) in lineup_estimated,
+                        lineup_is_estimate=lineup_is_estimate,
                         season=line,
-                        statcast=statcast.get(player_id),
+                        statcast=statcast_row,
                         form=form,
                         recent_events=recent_events,
                         pitch_lines=_pitch_lines(matchup_scope_events),
@@ -1250,7 +1270,7 @@ def build_board(
                         ),
                         season_line=_season_grid_line(
                             line,
-                            statcast.get(player_id),
+                            statcast_row,
                             arsenal_by_batter.get(player_id, ()),
                         ),
                         mix_label=mix_label,
@@ -1265,7 +1285,7 @@ def build_board(
             GameCard(
                 game_pk=game.game_pk,
                 status=game.status,
-                scheduled_start_utc=_parse_start(game.game_datetime_utc, game.official_date),
+                scheduled_start_utc=start_utc,
                 venue_name=game.venue_name,
                 venue_type=venue_type,
                 home_team=game.home_team,

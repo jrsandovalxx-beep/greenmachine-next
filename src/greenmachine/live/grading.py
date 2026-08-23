@@ -61,6 +61,9 @@ QUALIFYING_USAGE_SHARE = Decimal("0.15")
 # board's 15% qualifying share, which D-070 ratified for the season surface.
 MIX_USAGE_SHARE = Decimal("0.14")
 ROOFED_VENUE_NEUTRAL_FAHRENHEIT = Decimal("72")
+# The RECENT_7D window the whole grade is stamped with, and D-068's fallback
+# reach behind it.
+RECENT_WINDOW_DAYS = 7
 FORM_FALLBACK_REACH_DAYS = 14
 PERCENT = Decimal(100)
 
@@ -453,11 +456,10 @@ def build_batter_observations(
     carrying the named reason — never a zero, never a guessed value.
     """
     window_end = as_of
-    window_start = as_of - timedelta(days=7)
+    window_start = as_of - timedelta(days=RECENT_WINDOW_DAYS)
     observations: dict[ComponentId, MetricObservation | MissingObservation] = {}
 
     # --- Power profile: season quality-of-contact board (direct aggregate) ---
-    power_rows: tuple[tuple[ComponentId, str, Decimal, int], ...] = ()
     if data.statcast is not None:
         power_rows = (
             (
@@ -479,24 +481,24 @@ def build_batter_observations(
                 data.statcast.batted_ball_events,
             ),
         )
-    for component_id, unit, value, sample in power_rows:
-        observations[component_id] = _present(
-            component_id=component_id,
-            value=value,
-            unit=unit,
-            sample_type=_component_config(config, component_id).sample_type,
-            sample=sample,
-            minimum=_profile_minimum(config, component_id),
-            provider=ProviderId.BASEBALL_SAVANT,
-            method=AcquisitionMethod.DIRECT_AGGREGATE,
-            window_start=window_start,
-            window_end=window_end,
-            as_of=as_of,
-            capture=capture,
-            coverage_start=season_start,
-            coverage_end=as_of,
-        )
-    if data.statcast is None:
+        for component_id, unit, value, sample in power_rows:
+            observations[component_id] = _present(
+                component_id=component_id,
+                value=value,
+                unit=unit,
+                sample_type=_component_config(config, component_id).sample_type,
+                sample=sample,
+                minimum=_profile_minimum(config, component_id),
+                provider=ProviderId.BASEBALL_SAVANT,
+                method=AcquisitionMethod.DIRECT_AGGREGATE,
+                window_start=window_start,
+                window_end=window_end,
+                as_of=as_of,
+                capture=capture,
+                coverage_start=season_start,
+                coverage_end=as_of,
+            )
+    else:
         for component_id in (
             ComponentId.EXIT_VELOCITY,
             ComponentId.BARREL_PCT,
@@ -754,7 +756,7 @@ def grade_batter(
         pitcher_role=pitcher.role,
         as_of=as_of,
         window_profile=WindowProfile.RECENT_7D,
-        window_start=as_of - timedelta(days=7),
+        window_start=as_of - timedelta(days=RECENT_WINDOW_DAYS),
         window_end=as_of,
         present_observations=present,
         missing_observations=missing,

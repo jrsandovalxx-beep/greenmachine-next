@@ -57,15 +57,27 @@ class FormMetrics:
     pull_air_pct: Decimal | None  # per air ball, percent scale
 
 
+def is_measurable_air(event: PitchEvent) -> bool:
+    """Whether one classified contact is an air ball with a measurable spray:
+    coordinates present and the batter's side known. This is Pull Air %'s
+    denominator in both the form section and the matchup grid line — one
+    definition, so the two surfaces cannot drift apart."""
+    return (
+        event.bb_type in AIR_BALL_TYPES
+        and event.hc_x is not None
+        and event.hc_y is not None
+        and event.batter_side in ("L", "R")
+    )
+
+
 def is_pull_air(event: PitchEvent) -> bool:
     """Whether one batted ball is a pulled air ball (D-071's signed spray
     convention): air-ball contact whose spray angle points to the batter's
     pull side. Unmeasurable coordinates or an unknown side read as not-pull
     rather than inventing a direction."""
-    if event.hc_x is None or event.hc_y is None or event.batter_side not in ("L", "R"):
+    if not is_measurable_air(event):
         return False
-    if event.bb_type not in AIR_BALL_TYPES:
-        return False
+    assert event.hc_x is not None and event.hc_y is not None  # the guard just checked both
     spray = math.degrees(
         math.atan2(
             float(event.hc_x - _HOME_PLATE_X),
@@ -91,16 +103,18 @@ def aggregate_form(events: tuple[PitchEvent, ...]) -> FormMetrics:
     bbe = [event for event in events if event.launch_speed_angle is not None]
     barrels = sum(1 for event in bbe if event.launch_speed_angle == BARREL_CLASSIFICATION)
     speeds = [event.launch_speed for event in bbe if event.launch_speed is not None]
-    angles = [event.launch_angle for event in bbe if event.launch_angle is not None]
     hard_hits = sum(1 for speed in speeds if speed >= HARD_HIT_THRESHOLD_MPH)
-    sweet_spots = sum(1 for angle in angles if _SWEET_SPOT_LOW <= angle <= _SWEET_SPOT_HIGH)
-    air_events = [event for event in bbe if event.bb_type in AIR_BALL_TYPES]
-    pulls = sum(1 for event in air_events if is_pull_air(event))
-    measurable_air = [
-        event
-        for event in air_events
-        if event.hc_x is not None and event.hc_y is not None and event.batter_side in ("L", "R")
-    ]
+    sweet_spots = sum(
+        1
+        for event in bbe
+        if event.launch_angle is not None
+        and _SWEET_SPOT_LOW <= event.launch_angle <= _SWEET_SPOT_HIGH
+    )
+    # is_pull_air is False for every unmeasurable contact, so counting pulls
+    # over the measurable denominator is the same count with the numerator and
+    # denominator visibly drawn from one list.
+    measurable_air = [event for event in bbe if is_measurable_air(event)]
+    pulls = sum(1 for event in measurable_air if is_pull_air(event))
     ev_avg: Decimal | None = None
     if speeds:
         ev_avg = sum(speeds) / Decimal(len(speeds))

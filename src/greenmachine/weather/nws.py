@@ -138,11 +138,11 @@ def _as_decimal(value: object, field_name: str) -> Decimal:
 
 def _leading_number(text: str, field_name: str) -> Decimal:
     """NWS reports wind as ``10 mph`` or ``5 to 10 mph``; take the first number."""
-    head = text.strip().split()
-    if not head:
+    parts = text.strip().split()
+    if not parts:
         raise MalformedPayloadError(f"{field_name} is empty")
     try:
-        return Decimal(head[0])
+        return Decimal(parts[0])
     except InvalidOperation as exc:
         raise MalformedPayloadError(f"{field_name} does not begin with a number") from exc
 
@@ -275,40 +275,28 @@ class NwsWeatherAdapter:
                 obtained_at=self._clock.now(),
             )
         except StatusFailureError as failure:
-            self._reasons[venue.venue_id] = failure.reason()
-            return SnapshotField[WeatherForecast].absent(
-                AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_ID
-            )
+            reason = failure.reason()
         except HostNotPermittedError:
             # A hop tried to leave the pinned host. Reported as unavailable like
             # any other non-answer, but named precisely: this is the boundary
             # holding, not the source failing.
-            self._reasons[venue.venue_id] = (
+            reason = (
                 "the source tried to redirect this request off api.weather.gov, and the "
                 "host pin refused the hop - no forecast rather than a fetch from elsewhere"
             )
-            return SnapshotField[WeatherForecast].absent(
-                AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_ID
-            )
         except TransportTimeoutError:
-            self._reasons[venue.venue_id] = "the request timed out before the source answered"
-            return SnapshotField[WeatherForecast].absent(
-                AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_ID
-            )
+            reason = "the request timed out before the source answered"
         except TransportError as exc:
-            self._reasons[venue.venue_id] = (
-                f"the source could not be reached ({type(exc).__name__})"
-            )
-            return SnapshotField[WeatherForecast].absent(
-                AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_ID
-            )
+            # The bare TransportError clause stays last: the two named failures
+            # above are its subclasses.
+            reason = f"the source could not be reached ({type(exc).__name__})"
         except MalformedPayloadError as exc:
-            self._reasons[venue.venue_id] = f"the source answered an unreadable payload ({exc})"
-            return SnapshotField[WeatherForecast].absent(
-                AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_ID
-            )
-        self._reasons.pop(venue.venue_id, None)
-        return SnapshotField.present(forecast, SOURCE_ID)
+            reason = f"the source answered an unreadable payload ({exc})"
+        else:
+            self._reasons.pop(venue.venue_id, None)
+            return SnapshotField.present(forecast, SOURCE_ID)
+        self._reasons[venue.venue_id] = reason
+        return SnapshotField[WeatherForecast].absent(AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_ID)
 
     def __repr__(self) -> str:
         return f"NwsWeatherAdapter(host={NWS_HOST!r}, freshness={self._freshness})"
