@@ -20,7 +20,7 @@ Judgment calls logged in D-073:
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Protocol, TypeVar
@@ -76,6 +76,10 @@ RECENT_EVENT_GAMES_CAP = 7
 # The batter's matchup table reads his pitches seen against the
 # opposing starter's side over this many days (D-088).
 MATCHUP_WINDOW_DAYS = 30
+# The arsenal breakup's batter half is precomputed at each of these reaches
+# (D-106): weeks one through four plus the full month the pitch record
+# carries — the dialog's window control selects, never derives.
+MATCHUP_LINE_WINDOWS_DAYS = (7, 14, 21, 28, 30)
 GAME_LOG_LOOKBACK_DAYS = 5
 # D-081's reach: a starter whose mix has no pitches in the matchup window
 # extends the read to L45 before falling back to the season board.
@@ -240,7 +244,10 @@ class BatterCard:
     statcast: StatcastBatterRow | None
     form: FormSection | None
     recent_events: tuple[PitchEvent, ...]
-    pitch_lines: tuple[PitchLine, ...]
+    # D-106: the arsenal breakup's batter half, precomputed at each reach in
+    # MATCHUP_LINE_WINDOWS_DAYS — one line per pitch in the starter's season
+    # arsenal, his usage share, the batter's window figures.
+    matchup_lines_by_window: dict[int, tuple[PitchLine, ...]]
     mix_line: BatterGridLine | None
     season_line: BatterGridLine | None
     mix_label: str
@@ -501,6 +508,49 @@ def _season_pitch_lines(rows: Sequence[PitchArsenalRow]) -> tuple[PitchLine, ...
         for row in rows
     ]
     lines.sort(key=lambda line: line.usage_share, reverse=True)
+    return tuple(lines)
+
+
+def _matchup_lines(
+    starter_lines: tuple[PitchLine, ...], seen_lines: tuple[PitchLine, ...]
+) -> tuple[PitchLine, ...]:
+    """The arsenal breakup's batter half (D-106): one line per pitch in the
+    starter's season arsenal, in his usage order, carrying HIS usage share —
+    the batter's seen-share said what the league throws, never what this
+    starter does. The batter's own figures keep their window scope; a pitch
+    he has not seen from this side keeps zeroed counts and empty rates, so
+    the surface dashes the cells instead of hiding the row.
+    """
+    by_type = {line.pitch_type: line for line in seen_lines}
+    lines: list[PitchLine] = []
+    for starter in starter_lines:
+        seen = by_type.get(starter.pitch_type)
+        if seen is None:
+            lines.append(
+                PitchLine(
+                    pitch_type=starter.pitch_type,
+                    pitch_name=starter.pitch_name,
+                    pitches=0,
+                    usage_share=starter.usage_share,
+                    plate_appearances=0,
+                    batting_average=None,
+                    slugging=None,
+                    iso=None,
+                    home_runs=None,
+                    barrel_share=None,
+                    hard_hit_share=None,
+                    expected_woba=None,
+                    whiff_share=None,
+                )
+            )
+        else:
+            lines.append(
+                replace(
+                    seen,
+                    pitch_name=starter.pitch_name or seen.pitch_name,
+                    usage_share=starter.usage_share,
+                )
+            )
     return tuple(lines)
 
 
@@ -1017,6 +1067,10 @@ def build_board(
         events_by_batter.setdefault(event.batter_id, []).append(event)
         events_by_pitcher.setdefault(event.pitcher_id, []).append(event)
     matchup_cutoff = window_start.isoformat()
+    window_cutoffs = {
+        days: (as_of - timedelta(days=days)).date().isoformat()
+        for days in MATCHUP_LINE_WINDOWS_DAYS
+    }
 
     # D-081's reach: a starter with no pitches in the matchup window extends
     # the read to L45. The extra days are fetched once, only when some
@@ -1134,6 +1188,8 @@ def build_board(
         for side_key, team in (("home", game.home_team), ("away", game.away_team)):
             opposing = "away" if side_key == "home" else "home"
             opposing_probable = probable_by_side[opposing]
+            opposing_card = pitcher_cards[opposing]
+            starter_season_lines = opposing_card.season_lines if opposing_card is not None else ()
             pitcher_entity: Pitcher | None = None
             pitcher_throws = ""
             starter_mix: tuple[PitchMixRow, ...] = ()
@@ -1264,7 +1320,23 @@ def build_board(
                         statcast=statcast_row,
                         form=form,
                         recent_events=recent_events,
-                        pitch_lines=_pitch_lines(matchup_scope_events),
+                        matchup_lines_by_window=(
+                            {
+                                days: _matchup_lines(
+                                    starter_season_lines,
+                                    _pitch_lines(
+                                        tuple(
+                                            event
+                                            for event in matchup_scope_events
+                                            if event.game_date >= window_cutoffs[days]
+                                        )
+                                    ),
+                                )
+                                for days in MATCHUP_LINE_WINDOWS_DAYS
+                            }
+                            if starter_season_lines
+                            else {}
+                        ),
                         mix_line=(
                             _batter_grid_line(mix_scope_events)
                             if pitcher_entity is not None

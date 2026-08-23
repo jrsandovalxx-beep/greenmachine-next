@@ -15,6 +15,7 @@ from greenmachine.shell import (
     ORB_HTML,
     SHELL_CSS,
     TITLE_HTML,
+    orb_html,
 )
 
 # The SVG namespace identifier is a constant string, never fetched.
@@ -40,7 +41,22 @@ def test_the_shell_carries_the_three_shell_pieces() -> None:
     assert "data:image/svg+xml" in SHELL_CSS  # the net is inline artwork
     assert "gm-orb-pulse" in SHELL_CSS  # the orb breathes
     assert '[data-testid="stTab"]' in SHELL_CSS  # the tabs are the blades
-    assert "gm-orb-seam" in ORB_HTML  # the orb is seamed like a baseball
+    assert "gm-orb-seam" in ORB_HTML  # the fallback orb is seamed like a baseball
+
+
+def test_the_logo_orb_is_inline_artwork_with_a_drawn_fallback() -> None:
+    """D-107: the header mark is the ouroboros-around-a-baseball logo,
+    injected as a data URI on the same pulsing circle — inline data, never a
+    fetch — and with no asset the hand-drawn seam orb stands in."""
+    logo = orb_html("data:image/png;base64,AAAA")
+    assert "gm-orb" in logo  # the circle clip and the pulse still apply
+    assert "gm-orb-img" in logo
+    assert 'src="data:image/png;base64,AAAA"' in logo
+    assert "gm-orb-seam" not in logo  # the painted seams yield to the mark
+    scrubbed = logo.replace(_SVG_NAMESPACE, "")
+    assert "http://" not in scrubbed
+    assert "https://" not in scrubbed
+    assert orb_html(None) == ORB_HTML
 
 
 def test_the_blot_is_a_morphing_blob_not_a_wheel() -> None:

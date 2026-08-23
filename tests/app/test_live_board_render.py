@@ -506,42 +506,6 @@ def _pitch_line(**overrides: object) -> object:
     return PitchLine(**base)  # type: ignore[arg-type]
 
 
-def test_per_pitch_table_formats_rates_and_dims_below_threshold() -> None:
-    """D-080/§GMF-008: the view only formats — rates arrive computed, a
-    missing rate is a styled dash, and a below-mix row is dimmed, not cut."""
-
-    import streamlit_app
-
-    lines = (
-        _pitch_line(),
-        _pitch_line(
-            pitch_type="CH",
-            pitch_name="Changeup",
-            usage_share=Decimal("0.08"),
-            barrel_share=None,
-            whiff_share=None,
-        ),
-    )
-    texts, styles = streamlit_app._pitch_line_frames(
-        lines, whiff_column="Swing-Str%", qualifying_only=False, threshold=0.15
-    )
-    assert list(texts.columns)[:3] == ["Pitch", "Usage%", "PA"]
-    assert "Swing-Str%" in texts.columns
-    assert texts.at[0, "Usage%"] == "30.0%"
-    assert texts.at[0, "AVG"] == ".280"
-    assert texts.at[0, "xwOBA"] == ".355"
-    # The changeup is below the qualifying share: dimmed, still listed.
-    assert texts.at[1, "Pitch"] == "Changeup"
-    assert styles.at[1, "Usage%"] == streamlit_app._BELOW_MIX_CSS
-    # Its absent rates are dashes, never zeros — even on a dimmed row.
-    assert texts.at[1, "Barrel%"] == "—"
-    assert texts.at[1, "Swing-Str%"] == "—"
-    texts_on, _ = streamlit_app._pitch_line_frames(
-        lines, whiff_column="Swing-Str%", qualifying_only=True, threshold=0.15
-    )
-    assert list(texts_on["Pitch"]) == ["4-Seam Fastball"]
-
-
 def _season_line(**overrides: object) -> object:
     from greenmachine.live.pipeline import PitchLine
 
@@ -566,10 +530,11 @@ def _season_line(**overrides: object) -> object:
     return PitchLine(**base)  # type: ignore[arg-type]
 
 
-def test_arsenal_table_lists_the_whole_season_with_threshold_dimming() -> None:
-    """D-087: the Arsenal table is every pitch he throws, season-long — the
-    season-only columns (wOBA, K%) are present, the unpublished ones (HR,
-    Barrel%) simply do not exist, and below-threshold rows dim."""
+def test_breakup_table_pairs_pitcher_season_with_batter_window() -> None:
+    """D-106: one table, two halves under an opaque sub-header — Usage% is
+    the pitcher's season share (the batter's seen-share never appears), the
+    first half is his season-long figures, the second the batter's window
+    line against that exact pitch, and a below-threshold row dims."""
     from types import SimpleNamespace
 
     import streamlit_app
@@ -578,37 +543,38 @@ def test_arsenal_table_lists_the_whole_season_with_threshold_dimming() -> None:
         season_lines=(
             _season_line(),
             _season_line(pitch_type="CH", pitch_name="Changeup", usage_share=Decimal("0.08")),
-        ),
-        pitches_vs_left=frozenset({"FF", "CH"}),
-        pitches_vs_right=frozenset({"FF"}),
+        )
     )
-    texts, styles = streamlit_app._arsenal_frames(pitcher, threshold=0.15, side_filter=None)
-    assert list(texts.columns) == [
-        "Pitch",
-        "Usage%",
-        "PA",
-        "AVG",
-        "SLG",
-        "ISO",
-        "wOBA",
-        "xwOBA",
-        "Whiff%",
-        "K%",
-        "Hard-Hit%",
-    ]
-    assert "HR" not in texts.columns and "Barrel%" not in texts.columns
-    assert texts.at[0, "wOBA"] == ".310"
-    assert texts.at[0, "K%"] == "22.0%"
-    assert styles.at[1, "Usage%"] == streamlit_app._BELOW_MIX_CSS  # 8% usage dims
-    # Raising the threshold past the fastball dims it too — the slider's job.
-    _, styles_high = streamlit_app._arsenal_frames(pitcher, threshold=0.50, side_filter=None)
-    assert styles_high.at[0, "Usage%"] == streamlit_app._BELOW_MIX_CSS
+    batter_lines = (
+        _pitch_line(),
+        _pitch_line(pitch_type="CH", pitch_name="Changeup", usage_share=Decimal("0.08")),
+    )
+    markup = streamlit_app._arsenal_breakup_html(
+        pitcher,
+        batter_lines,
+        threshold=0.15,
+        side_filter=None,
+        side_usage=None,
+        window_label="last month",
+        throws_text="right",
+    )
+    assert "Pitcher — season" in markup
+    assert "Batter — last month vs right-handed pitching" in markup
+    assert "gm-half-boundary" in markup
+    # Usage is the season board's — never the batter's seen share.
+    assert ">45.0%<" in markup
+    # Season-only columns (wOBA, K%) show; the batter half carries his HRs.
+    assert ">.310<" in markup
+    assert ">22.0%<" in markup
+    assert ">2</td>" in markup
+    # The 8%-usage changeup is below the qualifying share: dimmed, still listed.
+    assert markup.count('class="gm-dim"') == 1
+    assert "Changeup" in markup
 
 
-def test_arsenal_side_filter_keeps_metrics_season_long() -> None:
-    """D-087: the side toggle filters WHICH pitches list — and only Usage%
-    changes basis (D-102). Every other number on a filtered row keeps its
-    full-season figures."""
+def test_breakup_table_dashes_a_pitch_the_batter_has_not_seen() -> None:
+    """D-106: a pitch in his arsenal the batter never saw from this side
+    keeps its row — zero plate appearances and dashed rates, never hidden."""
     from types import SimpleNamespace
 
     import streamlit_app
@@ -617,25 +583,28 @@ def test_arsenal_side_filter_keeps_metrics_season_long() -> None:
         season_lines=(
             _season_line(),
             _season_line(pitch_type="CH", pitch_name="Changeup", usage_share=Decimal("0.20")),
-        ),
-        pitches_vs_left=frozenset({"FF", "CH"}),
-        pitches_vs_right=frozenset({"FF"}),
+        )
     )
-    texts, _ = streamlit_app._arsenal_frames(
-        pitcher, threshold=0.15, side_filter=pitcher.pitches_vs_right
+    markup = streamlit_app._arsenal_breakup_html(
+        pitcher,
+        (_pitch_line(),),  # the batter's window holds fastballs only
+        threshold=0.15,
+        side_filter=None,
+        side_usage=None,
+        window_label="last 2 weeks",
+        throws_text="right",
     )
-    assert list(texts["Pitch"]) == ["4-Seam Fastball"]
-    # Season figures, untouched by the filter — usage included, since no
-    # per-side basis was supplied (the toggle's empty-record fallback).
-    assert texts.at[0, "PA"] == "100"
-    assert texts.at[0, "Usage%"] == "45.0%"
+    assert "Batter — last 2 weeks" in markup
+    changeup_row = markup.split("Changeup", 1)[1].split("</tr>", 1)[0]
+    assert '<td class="gm-half-boundary">0</td>' in changeup_row
+    assert changeup_row.count("<td>—</td>") == 8
 
 
-def test_arsenal_side_toggle_switches_usage_to_the_hitter_hand_basis() -> None:
-    """D-102: with the side toggle on, Usage% is his share of pitches to
-    that hitter hand over the recent window — the arsenal board's all-batters
-    usage never claimed a per-side split. Rows order by the shown basis and
-    dim against it; every other column stays season-long."""
+def test_breakup_side_toggle_switches_usage_to_the_hitter_hand_basis() -> None:
+    """D-102 survives the merge: with the side toggle on, Usage% is his
+    share of pitches to that hitter hand over the recent window, rows order
+    by the shown basis and dim against it, and every other number stays
+    season-long."""
     from types import SimpleNamespace
 
     import streamlit_app
@@ -644,31 +613,71 @@ def test_arsenal_side_toggle_switches_usage_to_the_hitter_hand_basis() -> None:
         season_lines=(
             _season_line(),  # FF, 45% season usage
             _season_line(pitch_type="CH", pitch_name="Changeup", usage_share=Decimal("0.20")),
-        ),
-        pitches_vs_left=frozenset({"FF", "CH"}),
-        pitches_vs_right=frozenset({"FF", "CH"}),
+        )
     )
     side_usage = {"FF": Decimal("0.30"), "CH": Decimal("0.70")}
-    texts, styles = streamlit_app._arsenal_frames(
+    markup = streamlit_app._arsenal_breakup_html(
         pitcher,
+        (),
         threshold=0.15,
-        side_filter=pitcher.pitches_vs_right,
+        side_filter=frozenset({"FF", "CH"}),
         side_usage=side_usage,
+        window_label="last month",
+        throws_text="right",
     )
-    # The changeup leads vs this hand, so it sorts first and shows 70%.
-    assert list(texts["Pitch"]) == ["Changeup", "4-Seam Fastball"]
-    assert texts.at[0, "Usage%"] == "70.0%"
-    assert texts.at[1, "Usage%"] == "30.0%"
-    # Other numbers stay the season board's.
-    assert texts.at[0, "PA"] == "100"
-    assert texts.at[0, "wOBA"] == ".310"
-    # The threshold dims on the shown basis: raising it past 30% dims the
-    # fastball even though its season usage is 45%.
-    assert "Usage%" not in styles.columns
-    _, styles_high = streamlit_app._arsenal_frames(
-        pitcher, threshold=0.45, side_filter=pitcher.pitches_vs_right, side_usage=side_usage
+    # The changeup leads vs this hand, so its row sorts first at 70%.
+    assert markup.index("Changeup") < markup.index("4-Seam Fastball")
+    assert ">70.0%<" in markup
+    assert ">30.0%<" in markup
+    assert ">45.0%<" not in markup
+    # Every other number stays the season board's.
+    assert "<td>100</td>" in markup
+    assert ">.310<" in markup
+    # The threshold dims on the shown basis: past 30%, the fastball dims
+    # even though its season usage is 45%.
+    markup_high = streamlit_app._arsenal_breakup_html(
+        pitcher,
+        (),
+        threshold=0.45,
+        side_filter=frozenset({"FF", "CH"}),
+        side_usage=side_usage,
+        window_label="last month",
+        throws_text="right",
     )
-    assert styles_high.at[1, "Usage%"] == streamlit_app._BELOW_MIX_CSS
+    assert markup_high.count('class="gm-dim"') == 1
+    dimmed = markup_high.split('class="gm-dim"', 1)[1].split("</tr>", 1)[0]
+    assert "4-Seam Fastball" in dimmed
+
+
+def test_breakup_side_filter_drops_rows_and_can_empty_the_table() -> None:
+    """D-105/D-106: the side filter lists only the pitches he threw to this
+    side; when none of them made his arsenal board the builder returns "" so
+    the surface names the reason instead of rendering a blank grid."""
+    from types import SimpleNamespace
+
+    import streamlit_app
+
+    pitcher = SimpleNamespace(season_lines=(_season_line(),))
+    markup = streamlit_app._arsenal_breakup_html(
+        pitcher,
+        (),
+        threshold=0.15,
+        side_filter=frozenset({"FF"}),
+        side_usage=None,
+        window_label="last month",
+        throws_text="right",
+    )
+    assert "4-Seam Fastball" in markup
+    empty = streamlit_app._arsenal_breakup_html(
+        pitcher,
+        (),
+        threshold=0.15,
+        side_filter=frozenset({"SL"}),  # thrown to this side, never on his board
+        side_usage=None,
+        window_label="last month",
+        throws_text="right",
+    )
+    assert empty == ""
 
 
 def test_arsenal_side_note_names_a_no_op_filter() -> None:
@@ -1028,22 +1037,28 @@ def test_backtest_excludes_a_day_the_source_has_not_indexed(
     assert summary[0]["Batters"].tolist() == ["0", "0", "0", "0", "0"]
 
 
-def test_arsenal_frames_empty_when_the_side_record_matches_no_board_pitch() -> None:
-    """D-105: a side filter can name pitch types his arsenal board lacks
-    (thrown against this side in the window, never qualifying season-long) —
-    the frame comes back empty and the render path names the reason instead
-    of showing a blank grid."""
+def test_breakup_builder_escapes_pitch_names() -> None:
+    """D-106: the table renders through raw HTML, so a pitch name carrying
+    markup characters arrives escaped — a data string never becomes page
+    structure."""
     from types import SimpleNamespace
 
     import streamlit_app
 
     pitcher = SimpleNamespace(
-        season_lines=(_season_line(),),
-        pitches_vs_left=frozenset({"FF", "SL"}),
-        pitches_vs_right=frozenset({"SL"}),
+        season_lines=(_season_line(pitch_name="<b>Fastball</b>"),),
     )
-    texts, styles = streamlit_app._arsenal_frames(
-        pitcher, threshold=0.15, side_filter=pitcher.pitches_vs_right
+    markup = streamlit_app._arsenal_breakup_html(
+        pitcher,
+        (),
+        threshold=0.15,
+        side_filter=None,
+        side_usage=None,
+        window_label="last month",
+        throws_text=None,
     )
-    assert texts.empty
-    assert styles.empty
+    assert "<b>Fastball</b>" not in markup
+    assert "&lt;b&gt;Fastball&lt;/b&gt;" in markup
+    # No throwing side on the board: the header names the generic scope
+    # (html.escape quotes the apostrophe — the header text is escaped too).
+    assert "vs the starter&#x27;s side" in markup

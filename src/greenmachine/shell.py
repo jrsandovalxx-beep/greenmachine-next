@@ -6,11 +6,17 @@ image, stylesheet, script or CDN: the module is importable data so tests can
 assert both rules directly, and the composition root only has to inject it.
 
 Four pieces: the dark-emerald geometric net behind the page, the glowing
-baseball-seamed orb beside the title, the neon blade styling that turns the
+orb beside the title, the neon blade styling that turns the
 four live-board tabs into the console's menu bars, and the rotary menu
 motion (D-083): the tabs ride a drawn ring, and switching tabs rotates the
 chosen one into the front slot — pure CSS, ``:has()`` reading which tab is
 selected, no script and no copied artwork.
+
+The orb itself is the D-107 mark: an ouroboros ringed around a glowing
+baseball — original artwork generated for this project, shipped as a repo
+asset and injected by the composition root as a data URI, so the page still
+makes no remote request. The hand-drawn seam orb below stands in when the
+asset is absent.
 """
 
 from __future__ import annotations
@@ -69,6 +75,9 @@ SHELL_CSS = (
     " border-top-color: transparent; transform: rotate(24deg); }\n"
     ".gm-orb-seam.gm-right { right: 8px; border-left-color: transparent;"
     " border-bottom-color: transparent; transform: rotate(24deg); }\n"
+    "/* the D-107 mark: the painted gradient gives way to the asset — the\n"
+    "   circle clip and the pulsing glow stay */\n"
+    ".gm-orb-img { display: block; background: none; object-fit: cover; }\n"
     "\n"
     "/* title and status line */\n"
     ".gm-title {\n"
@@ -115,6 +124,23 @@ ORB_HTML = (
     '<div class="gm-orb-seam gm-right"></div>'
     "</div></div>"
 )
+
+
+def orb_html(logo_data_uri: str | None) -> str:
+    """The header orb (D-107). With the logo asset's data URI the orb is the
+    ouroboros-baseball mark riding the same circle clip and pulse; without
+    it the hand-drawn seam orb stands in. Either way the page makes no
+    remote request — the URI is inline data, never a fetch.
+    """
+    if logo_data_uri is None:
+        return ORB_HTML
+    return (
+        '<div class="gm-orb-wrap">'
+        f'<img class="gm-orb gm-orb-img" src="{logo_data_uri}" '
+        'alt="GreenMachine logo — an ouroboros around a glowing baseball">'
+        "</div>"
+    )
+
 
 TITLE_HTML = '<div class="gm-title">GreenMachine</div>'
 

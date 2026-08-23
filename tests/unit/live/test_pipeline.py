@@ -617,29 +617,48 @@ def test_pitcher_side_usage_is_each_sides_share_of_the_window() -> None:
     assert pitcher.usage_vs_right == {"FF": Decimal(1)}
 
 
-def test_batter_matchup_lines_are_side_scoped_over_the_window() -> None:
-    """D-088: the matchup table counts only pitches from the opposing
-    starter's side inside the matchup window — same-side pitching and older
-    pitches never enter a denominator. With no probable named there is no
-    scope and the card carries no lines."""
+def test_batter_matchup_lines_are_side_scoped_over_each_window() -> None:
+    """D-106: the arsenal breakup's batter half is precomputed at each reach
+    in MATCHUP_LINE_WINDOWS_DAYS — one line per pitch in the starter's season
+    arsenal, in his usage order, carrying HIS usage share; the batter's own
+    figures keep the window's scope. Same-side pitching and pitches older
+    than the reach never enter a denominator, a pitch the batter has not
+    seen keeps zeroed counts and empty rates, and with no probable named
+    there is no scope and the card carries no lines."""
     events = (
         _window_event(pitch_type="FF", pitcher_throws="R"),
         _window_event(pitch_type="FF", pitcher_throws="R"),
         _window_event(pitch_type="SL", pitcher_throws="L"),  # wrong side
         _window_event(
             pitch_type="CU", pitcher_throws="R", game_date="2026-07-10"
-        ),  # outside the window
+        ),  # outside every reach
     )
-    board = _build(_FakeApi(), _FakeSavant(), events=events)
+    savant = _FakeSavant(
+        pitcher_arsenal=(
+            _arsenal_row(PITCHER_ID, "FF", "0.55", "0.300", "0.25", "0.20"),
+            _arsenal_row(PITCHER_ID, "SL", "0.25", "0.280", "0.22", "0.18"),
+        ),
+    )
+    board = _build(_FakeApi(), savant, events=events)
     assert not isinstance(board, FetchFailure)
     game = board.games[0]
     # The away lineup faces the home probable, a right-hander.
     away = game.away_batters[0]
-    assert [line.pitch_type for line in away.pitch_lines] == ["FF"]
-    assert away.pitch_lines[0].pitches == 2
-    assert away.pitch_lines[0].usage_share == Decimal(1)
+    assert set(away.matchup_lines_by_window) == {7, 14, 21, 28, 30}
+    lines = away.matchup_lines_by_window[30]
+    assert [line.pitch_type for line in lines] == ["FF", "SL"]
+    fastball = lines[0]
+    assert fastball.pitches == 2
+    # Usage is the starter's season share, never the batter's seen share.
+    assert fastball.usage_share == Decimal("0.55")
+    sweeper = lines[1]
+    assert sweeper.pitches == 0
+    assert sweeper.usage_share == Decimal("0.25")
+    assert sweeper.batting_average is None
+    # Each shorter reach precomputes the same join.
+    assert [line.pitch_type for line in away.matchup_lines_by_window[7]] == ["FF", "SL"]
     # The home lineup has no named opposing starter: no scope, no lines.
-    assert game.home_batters[0].pitch_lines == ()
+    assert game.home_batters[0].matchup_lines_by_window == {}
 
 
 def test_mix_line_counts_only_the_qualifying_mix_pitches() -> None:
