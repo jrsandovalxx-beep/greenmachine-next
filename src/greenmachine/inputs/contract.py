@@ -732,9 +732,10 @@ class BatterInputs:
         if not self.name:
             raise InputContractError("batter name must be non-empty")
         seen = [metrics.window for metrics in self.windows]
-        if len(seen) != len(set(seen)):
+        present = set(seen)
+        if len(seen) != len(present):
             raise InputContractError(f"batter {self.batter_id!r} repeats a window")
-        omitted = [window.value for window in Window if window not in set(seen)]
+        omitted = [window.value for window in Window if window not in present]
         if omitted:
             raise InputContractError(
                 f"batter {self.batter_id!r} omits named window(s) {omitted}: the "
@@ -742,9 +743,10 @@ class BatterInputs:
                 "absent fields, never as a missing entry"
             )
         split_windows = [windowed.window for windowed in self.pitch_type_splits]
-        if len(split_windows) != len(set(split_windows)):
+        split_present = set(split_windows)
+        if len(split_windows) != len(split_present):
             raise InputContractError(f"batter {self.batter_id!r} repeats a split window")
-        split_omitted = [window.value for window in Window if window not in set(split_windows)]
+        split_omitted = [window.value for window in Window if window not in split_present]
         if split_omitted:
             raise InputContractError(
                 f"batter {self.batter_id!r} omits pitch-type splits for named "

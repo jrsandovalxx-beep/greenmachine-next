@@ -262,13 +262,14 @@ def _raise_schema_error(
     exc: ValidationError, document: dict[str, Any], file_path: str | None
 ) -> None:
     """Translate Pydantic's report into one typed, located failure."""
-    first = exc.errors()[0]
+    problems = exc.errors()
+    first = problems[0]
     location = first.get("loc", ())
     key_path = _normalize_key_path(location, document)
     message = first.get("msg", "invalid value")
     detail = f"{key_path_text(key_path)}: {message}"
-    if len(exc.errors()) > 1:
-        detail += f" (and {len(exc.errors()) - 1} further schema problem(s))"
+    if len(problems) > 1:
+        detail += f" (and {len(problems) - 1} further schema problem(s))"
 
     metric, window_profile = _subject_from_document(document, key_path)
     raise ConfigSchemaError(

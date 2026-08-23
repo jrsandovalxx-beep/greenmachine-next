@@ -39,11 +39,6 @@ _UTC_OFFSET = timedelta(0)
 # free-form string.
 _SHA256_HEX = re.compile(r"[0-9a-f]{64}")
 
-# A stable machine identifier: lowercase, starts with a letter, then letters,
-# digits, and underscores. The one spelling a reason code may take, so it cannot
-# drift into free prose (matches the configuration override-reason grammar).
-_STABLE_CODE = re.compile(r"[a-z][a-z0-9_]*")
-
 T = TypeVar("T")
 
 
@@ -110,22 +105,6 @@ def ensure_sha256_hex(value: object, field: str) -> str:
         raise DomainValidationError(
             f"{field} must be exactly 64 lowercase hexadecimal characters "
             f"(a SHA-256 digest), got {value!r}"
-        )
-    return value
-
-
-def ensure_stable_code(value: object, field: str) -> str:
-    """Reject ``value`` unless it is a non-blank lowercase stable identifier.
-
-    ``[a-z][a-z0-9_]*`` — a machine code, not free prose, so a stored reason can
-    be matched and compared rather than reworded.
-    """
-    if not isinstance(value, str):
-        raise DomainValidationError(f"{field} must be a string, got {type(value).__name__}")
-    if _STABLE_CODE.fullmatch(value) is None:
-        raise DomainValidationError(
-            f"{field} must be a stable code (lowercase, starting with a letter, then letters, "
-            f"digits, or underscores), got {value!r}"
         )
     return value
 

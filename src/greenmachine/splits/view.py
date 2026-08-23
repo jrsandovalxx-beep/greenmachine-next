@@ -312,10 +312,11 @@ def provenance_notes(screen: SplitScreen) -> tuple[str, ...]:
     an explicit complement, not an implied one.
     """
     notes: list[str] = []
+    rows = screen_rows(screen)
     for column in METRIC_COLUMNS:
         derived: list[tuple[str, str]] = []
         sourced: list[str] = []
-        for pitch_type, fields_by_column in screen_rows(screen):
+        for pitch_type, fields_by_column in rows:
             derivation = fields_by_column[column].derivation
             if derivation is None:
                 sourced.append(pitch_type)

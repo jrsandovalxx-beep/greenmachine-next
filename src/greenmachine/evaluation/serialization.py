@@ -531,6 +531,22 @@ def _sha256(value: object, ctx: str) -> Sha256Digest:
     return _read_wrapper_value(Sha256Digest, value, ctx)
 
 
+def _measurement_id(value: object, ctx: str) -> MeasurementId:
+    return _enum(MeasurementId, value, ctx)
+
+
+def _component_id(value: object, ctx: str) -> ComponentId:
+    return _enum(ComponentId, value, ctx)
+
+
+def _provider_id(value: object, ctx: str) -> ProviderId:
+    return _enum(ProviderId, value, ctx)
+
+
+def _category(value: object, ctx: str) -> Category:
+    return _enum(Category, value, ctx)
+
+
 def _venue(value: object, ctx: str) -> Venue:
     data = _object(value, frozenset({"venue_id", "name", "timezone"}), ctx)
     return _build(
@@ -663,7 +679,7 @@ def _metric_observation(value: object, ctx: str) -> MetricObservation:
         ctx,
         component_id=_enum(ComponentId, _field(data, "component_id", ctx), f"{ctx}.component_id"),
         measurement_id=_optional(
-            lambda v, c: _enum(MeasurementId, v, c),
+            _measurement_id,
             _field(data, "measurement_id", ctx),
             f"{ctx}.measurement_id",
         ),
@@ -721,7 +737,7 @@ def _missing_observation(value: object, ctx: str) -> MissingObservation:
         ctx,
         component_id=_enum(ComponentId, _field(data, "component_id", ctx), f"{ctx}.component_id"),
         measurement_id=_optional(
-            lambda v, c: _enum(MeasurementId, v, c),
+            _measurement_id,
             _field(data, "measurement_id", ctx),
             f"{ctx}.measurement_id",
         ),
@@ -733,7 +749,7 @@ def _missing_observation(value: object, ctx: str) -> MissingObservation:
         as_of=_datetime(_field(data, "as_of", ctx), f"{ctx}.as_of"),
         sample_type=_enum(SampleType, _field(data, "sample_type", ctx), f"{ctx}.sample_type"),
         provider_id=_optional(
-            lambda v, c: _enum(ProviderId, v, c),
+            _provider_id,
             _field(data, "provider_id", ctx),
             f"{ctx}.provider_id",
         ),
@@ -768,7 +784,7 @@ def _component_score(value: object, ctx: str) -> ComponentScore:
         ctx,
         component_id=_enum(ComponentId, _field(data, "component_id", ctx), f"{ctx}.component_id"),
         measurement_id=_optional(
-            lambda v, c: _enum(MeasurementId, v, c),
+            _measurement_id,
             _field(data, "measurement_id", ctx),
             f"{ctx}.measurement_id",
         ),
@@ -799,7 +815,7 @@ def _validation_finding(value: object, ctx: str) -> ValidationFinding:
         input_id=_enum(ValidationInputId, _field(data, "input_id", ctx), f"{ctx}.input_id"),
         message=_str(_field(data, "message", ctx), f"{ctx}.message"),
         component_id=_optional(
-            lambda v, c: _enum(ComponentId, v, c),
+            _component_id,
             _field(data, "component_id", ctx),
             f"{ctx}.component_id",
         ),
@@ -814,7 +830,7 @@ def _validation_input_record(value: object, ctx: str) -> ValidationInputRecord:
         input_id=_enum(ValidationInputId, _field(data, "input_id", ctx), f"{ctx}.input_id"),
         summary=_str(_field(data, "summary", ctx), f"{ctx}.summary"),
         component_id=_optional(
-            lambda v, c: _enum(ComponentId, v, c),
+            _component_id,
             _field(data, "component_id", ctx),
             f"{ctx}.component_id",
         ),
@@ -845,13 +861,11 @@ def _audit_entry(value: object, ctx: str) -> AuditEntry:
         output_summary=_str(_field(data, "output_summary", ctx), f"{ctx}.output_summary"),
         explanation=_str(_field(data, "explanation", ctx), f"{ctx}.explanation"),
         component_id=_optional(
-            lambda v, c: _enum(ComponentId, v, c),
+            _component_id,
             _field(data, "component_id", ctx),
             f"{ctx}.component_id",
         ),
-        category=_optional(
-            lambda v, c: _enum(Category, v, c), _field(data, "category", ctx), f"{ctx}.category"
-        ),
+        category=_optional(_category, _field(data, "category", ctx), f"{ctx}.category"),
     )
 
 
@@ -871,7 +885,7 @@ def _unavailable_required_input(value: object, ctx: str) -> UnavailableRequiredI
         ctx,
         component_id=_enum(ComponentId, _field(data, "component_id", ctx), f"{ctx}.component_id"),
         measurement_id=_optional(
-            lambda v, c: _enum(MeasurementId, v, c),
+            _measurement_id,
             _field(data, "measurement_id", ctx),
             f"{ctx}.measurement_id",
         ),
@@ -911,12 +925,12 @@ def _provenance_entry(value: object, ctx: str) -> ProvenanceEntry:
         source_as_of=_datetime(_field(data, "source_as_of", ctx), f"{ctx}.source_as_of"),
         retrieved_at=_datetime(_field(data, "retrieved_at", ctx), f"{ctx}.retrieved_at"),
         component_id=_optional(
-            lambda v, c: _enum(ComponentId, v, c),
+            _component_id,
             _field(data, "component_id", ctx),
             f"{ctx}.component_id",
         ),
         measurement_id=_optional(
-            lambda v, c: _enum(MeasurementId, v, c),
+            _measurement_id,
             _field(data, "measurement_id", ctx),
             f"{ctx}.measurement_id",
         ),
