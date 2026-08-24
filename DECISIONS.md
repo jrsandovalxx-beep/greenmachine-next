@@ -2593,3 +2593,28 @@ the 2026-08-24 slate: no shortlist batter aligned (spray shares present
 but no boost-side factor, or an insufficient record, or a roof), and no
 tag fired — the computed expectation, confirmed against the served
 board.
+
+## D-121 - the Conditions tab weather surface
+
+**(v2.2 weather/environment — shipped.)** The Conditions tab now carries
+the full weather reading, not just a bare temperature. Each game shows
+the **temperature band** its reading lands in from the ratified v2.2 set
+(ratified 2026-08-23): <45 → 0 (cold suppression) · 45-64 → 0.25 ·
+65-74 → 0.5 · 75-84 → 1 · 85-89 → 1.25 · ≥90 humidity-supported → 1.5 —
+the edges printed on the surface per D-079, with the award's cap at the
+component max 1.0 named on the hot bands (the PO's 2026-08-24 "cap for
+now" ruling, already in the config since D-116: the 85+ bands grade 1,
+and the labels keep the raw band values visible). The ≥90 max band's
+humidity support has no ratified line, so it is reported, never
+resolved. **Humidity** joins as a plain percentage column — the v2.2
+secondary modifier, never a standalone badge. **Wind** joins as the raw
+forecast reading (speed and compass); the resolved assist/kill reads
+stay on the Sluggers tags where the batter context lives (D-119). A
+roofed venue's cell now reads "72°F assumed" in the muted reason style —
+the assumption labelled in the cell itself, never dressed as a forecast
+(the grading layer has fed that constant since D-116); a missing
+open-air reading names the source gap, and a roofed venue's
+humidity/wind read "roofed — not sourced", because the pipeline sources
+neither indoors. Live-verified on the 2026-08-24 slate: eight games
+banded from real readings (0.25 to 1), two named their NWS gap, three
+roofed venues carried the labelled assumption.

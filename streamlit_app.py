@@ -90,7 +90,7 @@ from greenmachine.live.backtest import (
     tally_grades,
 )
 from greenmachine.live.form import FormSection, FormValue
-from greenmachine.live.grading import QUALIFYING_USAGE_SHARE
+from greenmachine.live.grading import QUALIFYING_USAGE_SHARE, ROOFED_VENUE_NEUTRAL_FAHRENHEIT
 from greenmachine.live.mlb_api import FetchFailure, GameLogEntry, MlbStatsApi
 from greenmachine.live.pipeline import (
     SEASON_IDS_PER_REQUEST,
@@ -2488,36 +2488,57 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
     return selected
 
 
+# v2.2 ratified temperature bands (2026-08-23), mirrored from the weather
+# component's config buckets so the Conditions tab can print the edges per
+# D-079: <45 → 0 (cold suppression) · 45-64 → 0.25 · 65-74 → 0.5 ·
+# 75-84 → 1 · 85-89 → 1.25 · ≥90 humidity-supported → 1.5. The award is
+# capped at the component max 1.0 (the PO's 2026-08-24 "cap for now"
+# ruling), so the 85+ bands grade 1 — the labels keep the raw band values
+# visible with the cap named. The ≥90 band's humidity support has no
+# ratified line; it is reported, never resolved.
+_TEMP_BANDS: tuple[tuple[Decimal, str, str], ...] = (
+    (Decimal("45"), "<45", "0"),
+    (Decimal("65"), "45-64", "0.25"),
+    (Decimal("75"), "65-74", "0.5"),
+    (Decimal("85"), "75-84", "1"),
+    (Decimal("90"), "85-89", "1.25"),
+    (Decimal("1000"), "≥90", "1.5"),
+)
+
+
+def _temp_band(temp_f: Decimal) -> str:
+    """The v2.2 temperature-band label for one reading — '{edges} → {raw}',
+    with the cap named when the raw band exceeds the component max."""
+    _, edges, raw = next(band for band in _TEMP_BANDS if temp_f < band[0])
+    return f"{edges} → {raw}" + (" · capped at 1" if Decimal(raw) > 1 else "")
+
+
 def _render_conditions(board: SlateBoard) -> None:
     st.caption(
-        "Parks and conditions. A roofed venue grades at the assumed neutral "
-        "indoor value — an assumption, labelled, not a measurement. A park "
-        "factor carries its plate-appearance sample beside it (D-014)."
+        "Parks and conditions. A park factor carries its plate-appearance "
+        "sample beside it (D-014). Temperature bands (v2.2, ratified "
+        "2026-08-23): <45°F → 0 (cold suppression) · 45-64 → 0.25 · "
+        "65-74 → 0.5 · 75-84 → 1 · 85-89 → 1.25 · ≥90°F humidity-supported "
+        "→ 1.5 — the award is capped at the component max 1.0, so the 85+ "
+        "bands grade 1 and the raw band values read as labels; the ≥90 "
+        "band's humidity support has no ratified line and is not resolved. "
+        "Humidity is a secondary modifier, never a standalone badge. Wind "
+        "is the raw forecast reading — the resolved assist/kill reads live "
+        "on the Sluggers tags. A roofed venue grades at an assumed 72°F — "
+        "an assumption, labelled, never a forecast."
     )
     text_rows: list[dict[str, str]] = []
     style_rows: list[dict[str, str]] = []
-    numeric_columns = ("HR factor (LHB)", "n", "HR factor (RHB)", "n ", "Temp °F")
+    numeric_columns = ("HR factor (LHB)", "n", "HR factor (RHB)", "n ")
     for game in board.games:
         left = game.home_run_factor_left
         right = game.home_run_factor_right
-        temp_absent = (
-            "roofed — neutral value"
-            if game.venue_type is not VenueType.OPEN_AIR
-            else "source unavailable"
-        )
+        roofed = game.venue_type is not VenueType.OPEN_AIR
         values: dict[str, tuple[float | int | None, str]] = {
             "HR factor (LHB)": (float(left.factor) if left else None, "not covered"),
             "n": (left.plate_appearances if left else None, "not covered"),
             "HR factor (RHB)": (float(right.factor) if right else None, "not covered"),
             "n ": (right.plate_appearances if right else None, "not covered"),
-            "Temp °F": (
-                (
-                    float(game.temperature_fahrenheit)
-                    if game.temperature_fahrenheit is not None
-                    else None
-                ),
-                temp_absent,
-            ),
         }
         texts: dict[str, str] = {
             "Game": f"{game.away_team} at {game.home_team}",
@@ -2533,6 +2554,41 @@ def _render_conditions(board: SlateBoard) -> None:
                 styles[column] = _REASON_CSS
             else:
                 texts[column] = f"{float(value):.0f}"
+        # The weather cells (v2.2, D-121): the reading, the band it lands
+        # in, and the secondary modifiers. A roof feeds the assumed 72°F —
+        # labelled in the cell, never dressed as a forecast; a missing
+        # open-air reading names the source gap.
+        temp = game.temperature_fahrenheit
+        if roofed:
+            texts["Temp °F"] = f"{float(ROOFED_VENUE_NEUTRAL_FAHRENHEIT):.0f}°F assumed"
+            styles["Temp °F"] = _REASON_CSS
+            texts["Temp band"] = _temp_band(ROOFED_VENUE_NEUTRAL_FAHRENHEIT)
+            styles["Temp band"] = _REASON_CSS
+        elif temp is not None:
+            texts["Temp °F"] = f"{float(temp):.0f}"
+            texts["Temp band"] = _temp_band(temp)
+        else:
+            texts["Temp °F"] = "source unavailable"
+            styles["Temp °F"] = _REASON_CSS
+            texts["Temp band"] = "source unavailable"
+            styles["Temp band"] = _REASON_CSS
+        humidity = game.relative_humidity_percent
+        if humidity is not None:
+            texts["Humidity"] = f"{float(humidity):.0f}%"
+        else:
+            texts["Humidity"] = "roofed — not sourced" if roofed else "source unavailable"
+            styles["Humidity"] = _REASON_CSS
+        wind_speed = game.wind_speed_mph
+        if wind_speed is not None:
+            direction = game.wind_direction
+            texts["Wind"] = (
+                f"{float(wind_speed):.0f} mph {direction}"
+                if direction
+                else f"{float(wind_speed):.0f} mph"
+            )
+        else:
+            texts["Wind"] = "roofed — not sourced" if roofed else "source unavailable"
+            styles["Wind"] = _REASON_CSS
         text_rows.append(texts)
         style_rows.append(styles)
     st.dataframe(
