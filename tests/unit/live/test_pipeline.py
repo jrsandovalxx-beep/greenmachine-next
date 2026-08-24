@@ -829,11 +829,11 @@ def test_mix_falls_back_to_last_season_when_no_current_record() -> None:
     assert line.at_bats == 1
 
 
-def test_distance_350_counts_long_balls_in_any_direction() -> None:
-    """D-090/D-097: the +350 ft count tallies batted balls at or past the
-    distance floor in any direction — short balls and non-batted pitches
-    never enter the tally."""
-    pull_x, oppo_x = Decimal("100"), Decimal("150")  # L batter: spray < 0 pulls
+def test_robbed_hr_counts_375_plus_balls_that_stayed_in_the_park_over_l7() -> None:
+    """PO 2026-08-24 (replacing D-090's +350 ft column): the robbed-HR
+    count tallies projected-375+ ft balls that did not leave the park —
+    a home run was robbed of nothing — over the last 7 days of kept
+    events, a raw count and never a rate."""
     base = {
         "pitch_type": "FF",
         "launch_speed": Decimal("100"),
@@ -841,15 +841,26 @@ def test_distance_350_counts_long_balls_in_any_direction() -> None:
         "event": "fly_out",
     }
     events = (
-        _window_event(bb_type="fly_ball", hc_x=pull_x, hit_distance=Decimal("380"), **base),
-        _window_event(bb_type="fly_ball", hc_x=pull_x, hit_distance=Decimal("320"), **base),
-        _window_event(bb_type="fly_ball", hc_x=oppo_x, hit_distance=Decimal("390"), **base),
-        _window_event(bb_type="ground_ball", hc_x=pull_x, hit_distance=Decimal("400"), **base),
-        _window_event(
+        _window_event(bb_type="fly_ball", hit_distance=Decimal("380"), **base),  # robbed
+        _window_event(bb_type="fly_ball", hit_distance=Decimal("374"), **base),  # short
+        _window_event(bb_type="fly_ball", hit_distance=Decimal("390"), **base),  # robbed
+        _window_event(  # 410 ft but OUT of the park: robbed of nothing
+            event="home_run",
+            bb_type="fly_ball",
+            hit_distance=Decimal("410"),
+            pitch_type="FF",
+            launch_speed=Decimal("105"),
+            hc_y=Decimal("150"),
+        ),
+        _window_event(  # 395 ft but eight-plus days old: outside the window
+            bb_type="fly_ball", hit_distance=Decimal("395"), game_date="2026-08-01", **base
+        ),
+        _window_event(  # no measured distance: never tallied
             event="",
             launch_speed=None,
             launch_angle=None,
             launch_speed_angle=None,
+            hit_distance=None,
             description="ball",
         ),
     )
@@ -857,9 +868,7 @@ def test_distance_350_counts_long_balls_in_any_direction() -> None:
     assert not isinstance(board, FetchFailure)
     line = board.games[0].away_batters[0].mix_line
     assert line is not None
-    assert line.batted_balls == 4
-    # 380 pull, 390 oppo, and the 400-ft grounder all count: distance only.
-    assert line.distance_350_count == 3
+    assert line.robbed_hr_count == 2
 
 
 def test_pull_air_share_mirrors_the_form_section() -> None:
@@ -891,14 +900,15 @@ def test_pull_air_share_mirrors_the_form_section() -> None:
     # both counts); distance plays no part — the pulls are 290 and 310 ft.
     assert line.pull_air_share is not None
     assert line.pull_air_share.quantize(Decimal("0.001")) == Decimal("0.667")
-    assert line.distance_350_count == 2  # the 390 and 380: distance only
+    assert line.robbed_hr_count == 2  # the 390 and 380: distance only
 
 
 def test_season_grid_line_composes_the_season_sources() -> None:
     """D-079's toggle target: the season line reads the hitting line
     (AVG/SLG/ISO from total bases), the statcast board (EV, barrels,
     hard-hit), and the arsenal board (PA-weighted xwOBA, pitch-weighted
-    Swing-Str). No season source publishes a 350-foot pull-air read."""
+    Swing-Str). The season scope has no per-event record, so the robbed
+    count and the pull-air read stay None."""
     hitting = {
         BATTER_ID: SeasonHittingLine(
             player_id=BATTER_ID,
@@ -937,7 +947,7 @@ def test_season_grid_line_composes_the_season_sources() -> None:
     assert line.hard_hit_share == Decimal("0.5")
     assert line.expected_woba == Decimal("0.35")
     assert line.whiff_share == Decimal("0.20")
-    assert line.distance_350_count is None
+    assert line.robbed_hr_count is None
     assert line.pull_air_share is None
 
 

@@ -764,7 +764,7 @@ def _grid_line(**overrides: object) -> object:
         "batting_average": Decimal("0.4"),
         "slugging": Decimal("1.0"),
         "iso": Decimal("0.6"),
-        "distance_350_count": 1,
+        "robbed_hr_count": 1,
         "pull_air_share": Decimal("0.4"),
         "oppo_air_share": Decimal("0.25"),
         "expected_woba": Decimal("0.45"),
@@ -793,7 +793,7 @@ def test_grid_line_cells_render_rates_and_named_absences() -> None:
         "AVG",
         "SLG",
         "ISO",
-        "+350 ft",
+        "Robbed HR",
         "Pull Air %",
         "Oppo Air %",
         "xwOBA",
@@ -805,20 +805,21 @@ def test_grid_line_cells_render_rates_and_named_absences() -> None:
     assert texts["AB"] == "5"
     assert texts["EV"] == "95.5"
     assert texts["AVG"] == ".400"
-    # D-097: a count of 350+ ft balls, not a rate.
-    assert texts["+350 ft"] == "1"
+    # PO 2026-08-24: robbed HRs — 375+ ft balls that stayed in the park,
+    # last 7 days — a raw count, not a rate.
+    assert texts["Robbed HR"] == "1"
     assert texts["Pull Air %"] == "40.0%"
     assert texts["Oppo Air %"] == "25.0%"
     assert texts["xwOBA"] == ".450"
     assert styles == {}
 
     texts, styles = streamlit_app._grid_line_cells(
-        _grid_line(distance_350_count=None, pull_air_share=None, oppo_air_share=None)
+        _grid_line(robbed_hr_count=None, pull_air_share=None, oppo_air_share=None)
     )
-    assert texts["+350 ft"] == "—"
+    assert texts["Robbed HR"] == "—"
     assert texts["Pull Air %"] == "—"
     assert texts["Oppo Air %"] == "—"
-    assert styles["+350 ft"] == streamlit_app._REASON_CSS
+    assert styles["Robbed HR"] == streamlit_app._REASON_CSS
     assert styles["Pull Air %"] == streamlit_app._REASON_CSS
 
 
@@ -1015,7 +1016,7 @@ def _board_with_grid_lines() -> SlateBoard:
         hits=121,
         home_runs=33,
         exit_velocity=Decimal("91.5"),
-        distance_350_count=None,
+        robbed_hr_count=None,
         pull_air_share=None,
     )
 
@@ -1055,13 +1056,13 @@ def test_matchups_grid_has_the_d079_columns_and_a_named_window(
         frames = []
         for element in at.dataframe:
             frame = _display_values(element).astype(str)
-            if "+350 ft" in frame.columns:
+            if "Robbed HR" in frame.columns:
                 frames.append(frame)
         return frames
 
     grids = grid_frames()
     assert grids, "the matchups grids rendered"
-    # D-096/D-097/D-098: no BIP, no Form column; +350 ft is a count.
+    # D-096/D-097/D-098: no BIP, no Form column; Robbed HR is a count.
     expected = {
         "AB",
         "H",
@@ -1073,7 +1074,7 @@ def test_matchups_grid_has_the_d079_columns_and_a_named_window(
         "AVG",
         "SLG",
         "ISO",
-        "+350 ft",
+        "Robbed HR",
         "Pull Air %",
         "xwOBA",
         "Swing-Str %",
@@ -1095,7 +1096,7 @@ def test_matchups_grid_has_the_d079_columns_and_a_named_window(
     assert not at.exception, [str(e.value) for e in at.exception]
     grids = grid_frames()
     assert set(grids[0]["AB"]) == {"440"}  # the season scope
-    assert set(grids[0]["+350 ft"]) == {"—"}  # no season source (D-081/D-090)
+    assert set(grids[0]["Robbed HR"]) == {"—"}  # no season source (D-081/D-090)
     assert set(grids[0]["Pull Air %"]) == {"—"}
     assert grids[0]["Grade"].tolist() == away_grades  # the grade stays L30
 

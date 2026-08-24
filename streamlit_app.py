@@ -1654,7 +1654,7 @@ def _grid_line_cells(
             "AVG": "—",
             "SLG": "—",
             "ISO": "—",
-            "+350 ft": "—",
+            "Robbed HR": "—",
             "Pull Air %": "—",
             "Oppo Air %": "—",
             "xwOBA": "—",
@@ -1687,17 +1687,16 @@ def _grid_line_cells(
             "H": str(line.hits),
             "Barrels": str(line.barrels) if line.barrels is not None else "—",
             "HR": str(line.home_runs),
-            # D-097: a count of balls hit 350+ feet, not a rate — the PO reads
-            # counting numbers (AB, H, barrels, HR, 350+ balls), not BIP shares.
-            "+350 ft": (
-                str(line.distance_350_count) if line.distance_350_count is not None else "—"
-            ),
+            # D-097's counting number, redefined by the PO 2026-08-24:
+            # robbed HRs — 375+ ft balls that stayed in the park, last 7
+            # days — a raw count, never a rate.
+            "Robbed HR": (str(line.robbed_hr_count) if line.robbed_hr_count is not None else "—"),
         }
         styles = {}
         if line.barrels is None:
             styles["Barrels"] = _REASON_CSS
-        if line.distance_350_count is None:
-            styles["+350 ft"] = _REASON_CSS
+        if line.robbed_hr_count is None:
+            styles["Robbed HR"] = _REASON_CSS
         for column, text in rate_texts.items():
             if text is None:
                 texts[column] = "—"
@@ -1920,9 +1919,9 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
         value=False,
         key="matchups_season_view",
         help=(
-            "D-079's toggle. Season +350 ft, Pull Air % and Oppo Air % have "
-            "no published source, so those cells name the absence. This view "
-            "alone carries the D-110 regression gaps, xISO-ISO and "
+            "D-079's toggle. Season Robbed HR, Pull Air % and Oppo Air % "
+            "have no published source, so those cells name the absence. This "
+            "view alone carries the D-110 regression gaps, xISO-ISO and "
             "xwOBA-wOBA — expected minus actual, both sides off the same "
             "expected-statistics board so the denominators match."
         ),
@@ -1984,7 +1983,9 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
                             if season_view
                             else (
                                 "Columns read the batter's last 30 days "
-                                "against that mix's qualifying pitches."
+                                "against that mix's qualifying pitches — "
+                                "except Robbed HR: 375+ ft balls that "
+                                "stayed in the park, last 7 days."
                             )
                         )
                     )
