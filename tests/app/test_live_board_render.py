@@ -1981,6 +1981,26 @@ def test_card_tags_carry_the_spray_alignment_reads() -> None:
     assert "pull-air" not in tags[1] and "oppo-air" not in tags[1]
 
 
+def test_temp_band_labels_follow_the_ratified_edges() -> None:
+    """v2.2 (D-121): the Conditions tab's temperature bands — <45 → 0,
+    45-64 → 0.25, 65-74 → 0.5, 75-84 → 1, 85-89 → 1.25, ≥90 → 1.5 — with
+    the cap named on the hot bands, lower-inclusive at every edge."""
+    import streamlit_app
+
+    assert streamlit_app._temp_band(Decimal("44.9")) == "<45 → 0"
+    assert streamlit_app._temp_band(Decimal("20")) == "<45 → 0"
+    assert streamlit_app._temp_band(Decimal("45")) == "45-64 → 0.25"
+    assert streamlit_app._temp_band(Decimal("64.9")) == "45-64 → 0.25"
+    assert streamlit_app._temp_band(Decimal("65")) == "65-74 → 0.5"
+    assert streamlit_app._temp_band(Decimal("72")) == "65-74 → 0.5"
+    assert streamlit_app._temp_band(Decimal("75")) == "75-84 → 1"
+    assert streamlit_app._temp_band(Decimal("84.9")) == "75-84 → 1"
+    assert streamlit_app._temp_band(Decimal("85")) == "85-89 → 1.25 · capped at 1"
+    assert streamlit_app._temp_band(Decimal("89.9")) == "85-89 → 1.25 · capped at 1"
+    assert streamlit_app._temp_band(Decimal("90")) == "≥90 → 1.5 · capped at 1"
+    assert streamlit_app._temp_band(Decimal("104")) == "≥90 → 1.5 · capped at 1"
+
+
 def test_ordinal_never_says_1th() -> None:
     import streamlit_app
 
