@@ -32,6 +32,7 @@ from greenmachine.domain.enums import PitcherRole
 from greenmachine.domain.grade_result import EvaluatedGradeResult, NotEvaluableGradeResult
 from greenmachine.domain.values import GameId, PlayerId, SourceCaptureId, VenueId
 from greenmachine.inputs.contract import Handedness, ParkFactor, ParkVenue, VenueType
+from greenmachine.inputs.park_orientation import PARK_ORIENTATION
 from greenmachine.inputs.park_reference import PARK_VENUES
 from greenmachine.live.form import (
     AIR_BALL_TYPES,
@@ -73,6 +74,7 @@ from greenmachine.live.savant import (
     StatcastBatterRow,
     StatcastPitcherRow,
 )
+from greenmachine.live.wind import wind_from_degrees as _parse_wind_from
 
 FORM_REACH_DAYS = 14
 FORM_SHORT_DAYS = 7
@@ -558,6 +560,13 @@ class GameCard:
     # surfaces — None for a roofed venue or an unpublished reading, never an
     # invented number.
     relative_humidity_percent: Decimal | None = None
+    # SP-4 (D-119): the venue's home-to-center-field axis (degrees true)
+    # from PARK_ORIENTATION, and the forecast wind's from-direction parsed
+    # to degrees true. Both None for a roofed venue, an unmeasured park, or
+    # an unparseable compass reading — the wind tags stay silent rather than
+    # resolve against an invented bearing.
+    park_orientation_degrees: Decimal | None = None
+    wind_from_degrees: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -1790,6 +1799,16 @@ def build_board(
                 home_run_factor_left=factor_left,
                 home_run_factor_right=factor_right,
                 relative_humidity_percent=humidity,
+                # SP-4 (D-119): the park axis and the parsed wind direction.
+                # A roofed venue carries neither, matching the wind reading
+                # itself; an unmapped venue or an unparseable compass text
+                # degrades to None, never a guessed bearing.
+                park_orientation_degrees=(
+                    PARK_ORIENTATION.get(venue.venue_id)
+                    if venue is not None and not roofed
+                    else None
+                ),
+                wind_from_degrees=(_parse_wind_from(wind[1]) if wind is not None else None),
             )
         )
 

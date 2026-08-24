@@ -1701,6 +1701,10 @@ def test_card_tags_carry_the_v22_park_and_weather_reads() -> None:
                 handedness=Handedness.RIGHT,
                 plate_appearances=30000,
             ),
+            park_orientation_degrees=None,
+            wind_from_degrees=None,
+            wind_speed_mph=None,
+            wind_direction=None,
         )
 
     # The park reads fire off the batter's resolved side, with the strong
@@ -1743,6 +1747,123 @@ def test_card_tags_carry_the_v22_park_and_weather_reads() -> None:
     tags = streamlit_app._card_tags(batter(), None)
     assert "park" not in tags[1] and "heat" not in tags[1]
     assert "park" not in tags[2] and "cold" not in tags[2]
+
+
+def test_card_tags_resolve_the_wind_against_the_dominant_air_field() -> None:
+    """SP-4 (D-119): the wind assist at ≥ 8 mph resolved out toward the
+    batter's dominant air field (strong ≥ 12), the wind kill at ≥ 10 mph
+    resolved in from it or ≥ 8 mph resolved out to the opposite corner,
+    and the severe cold suppress below 38°F with an in-wind ≥ 5 mph along
+    the axis. A roof, an unmeasured axis, an unparseable compass reading,
+    or an insufficient spray record keeps the wind tags silent."""
+    from types import SimpleNamespace
+
+    import streamlit_app
+
+    from greenmachine.inputs.contract import VenueType
+    from greenmachine.live.form import FormValue
+
+    def spray(pull: str, oppo: str, *, sufficient: bool = True) -> SimpleNamespace:
+        return SimpleNamespace(
+            pull_air_pct=FormValue(
+                value=Decimal(pull), sample=10, window_days=7, sufficient=sufficient
+            ),
+            oppo_air_pct=FormValue(
+                value=Decimal(oppo), sample=10, window_days=7, sufficient=sufficient
+            ),
+        )
+
+    base = dict(
+        result=SimpleNamespace(present_observations=[], missing_observations=[]),
+        order_position=None,
+        lineup_is_estimate=False,
+        season_k_share=None,
+        season=None,
+        season_gaps=None,
+        squared_up_share=None,
+        squared_up_swings=0,
+        squared_up_bat_speed=None,
+        statcast=None,
+        sprint_speed_fps=None,
+        batting_side="L",
+        mix_line=None,
+        form=spray("45", "20"),  # pull 45 / center 35 / oppo 20 — pull-dominant
+    )
+
+    def batter(**over: object) -> SimpleNamespace:
+        return SimpleNamespace(**{**base, **over})
+
+    def game(
+        wind_from: str | None,
+        speed: str | None,
+        compass: str | None = "SSW",
+        temp: str = "72",
+        axis: str | None = "0",
+        venue: VenueType = VenueType.OPEN_AIR,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            venue_type=venue,
+            temperature_fahrenheit=Decimal(temp),
+            home_run_factor_left=None,
+            home_run_factor_right=None,
+            park_orientation_degrees=Decimal(axis) if axis is not None else None,
+            wind_from_degrees=Decimal(wind_from) if wind_from is not None else None,
+            wind_speed_mph=Decimal(speed) if speed is not None else None,
+            wind_direction=compass,
+        )
+
+    # The assist resolves the forecast toward his field: a LHB's pull is
+    # right field at axis+30, so a wind FROM 210 blows straight out there.
+    _, boosters, _ = streamlit_app._card_tags(batter(), None, game=game("210", "9"))
+    assert "wind assist: 9 mph out to right (SSW 9 mph)" in boosters
+    _, boosters, _ = streamlit_app._card_tags(batter(), None, game=game("210", "13"))
+    assert "wind assist: strong 13 mph out to right (SSW 13 mph)" in boosters
+    # A right-hander's pull is left field — the name mirrors, and the
+    # bearing does too (axis-30 = 330, out wind FROM 150).
+    _, boosters, _ = streamlit_app._card_tags(batter(batting_side="R"), None, game=game("150", "9"))
+    assert "wind assist: 9 mph out to left (SSW 9 mph)" in boosters
+    # The kill: ≥ 10 mph resolved in from his field (wind FROM 30).
+    _, _, vetoes = streamlit_app._card_tags(batter(), None, game=game("30", "11", compass="NNE"))
+    assert "wind kill: 11 mph in from right (NNE 11 mph)" in vetoes
+    # ... or ≥ 8 mph resolved out to the opposite corner while doing
+    # neither toward his own (FROM 150: 4.5 mph toward his field at 30°,
+    # a straight 9 mph out to left at 330°).
+    _, _, vetoes = streamlit_app._card_tags(batter(), None, game=game("150", "9"))
+    assert "wind kill: 9 mph out to left, away from his air field (SSW 9 mph)" in vetoes
+    # Between the lines nothing fires: 6 mph out is under the assist line.
+    tags = streamlit_app._card_tags(batter(), None, game=game("210", "6"))
+    assert "wind" not in tags[1] and "wind" not in tags[2]
+    # A center-dominant spray has no opposite corner — a crosswind that
+    # resolves nowhere near his field stays silent.
+    tags = streamlit_app._card_tags(batter(form=spray("30", "30")), None, game=game("150", "9"))
+    assert "wind" not in tags[1] and "wind" not in tags[2]
+    # The severe cold suppress needs the in-wind along the axis and never
+    # reads the spray record; the plain cold read survives a calm night.
+    _, _, vetoes = streamlit_app._card_tags(
+        batter(form=None), None, game=game("0", "6", compass="N", temp="35")
+    )
+    assert "cold suppress: severe 35°F + wind in 6 mph" in vetoes
+    _, _, vetoes = streamlit_app._card_tags(batter(), None, game=game(None, None, temp="41"))
+    assert "cold suppress: 41°F" in vetoes
+    _, _, vetoes = streamlit_app._card_tags(batter(), None, game=game("0", "3", temp="35"))
+    assert "cold suppress: 35°F" in vetoes
+    assert "severe" not in vetoes
+    # Silence: a roof, an unmeasured axis, an unparseable compass reading,
+    # or a spray record under the floors.
+    tags = streamlit_app._card_tags(
+        batter(), None, game=game("210", "13", venue=VenueType.RETRACTABLE_ROOF)
+    )
+    assert "wind" not in tags[1] and "wind" not in tags[2]
+    tags = streamlit_app._card_tags(batter(), None, game=game("210", "13", axis=None))
+    assert "wind" not in tags[1] and "wind" not in tags[2]
+    tags = streamlit_app._card_tags(batter(), None, game=game(None, "13", compass="Variable"))
+    assert "wind" not in tags[1] and "wind" not in tags[2]
+    tags = streamlit_app._card_tags(
+        batter(form=spray("45", "20", sufficient=False)), None, game=game("210", "13")
+    )
+    assert "wind" not in tags[1] and "wind" not in tags[2]
+    tags = streamlit_app._card_tags(batter(form=None), None, game=game("210", "13"))
+    assert "wind" not in tags[1] and "wind" not in tags[2]
 
 
 def test_ordinal_never_says_1th() -> None:
