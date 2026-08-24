@@ -43,6 +43,7 @@ from greenmachine.inputs.contract import (
 from greenmachine.inputs.errors import InputContractError
 from greenmachine.inputs.park_orientation import PARK_ORIENTATION
 from greenmachine.inputs.park_reference import PARK_VENUES
+from greenmachine.inputs.wind_receptiveness import WindReceptiveness, read_receptiveness
 
 __all__ = [
     "PARK_ORIENTATION",
@@ -78,7 +79,9 @@ __all__ = [
     "VenueType",
     "WeatherForecast",
     "WhiffRate",
+    "WindReceptiveness",
     "Window",
     "WindowedBatterMetrics",
     "WindowedPitchTypeSplits",
+    "read_receptiveness",
 ]

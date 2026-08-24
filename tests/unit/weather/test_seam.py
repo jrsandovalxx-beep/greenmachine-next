@@ -97,9 +97,16 @@ def test_the_seam_module_contains_no_provider_and_no_client() -> None:
 
 def test_no_ballpark_pal_or_seamheads_anywhere_in_the_tree() -> None:
     """Criterion 5 and D-057 boundary 2, as a whole-source sweep rather than an
-    attestation: excluded sources are excluded by absence, not by promise."""
+    attestation: excluded sources are excluded by absence, not by promise.
+
+    D-122 admits exactly one exception: the pinned wind-receptiveness
+    reader, which carries the capture's SourceRecord and digest gate per
+    the reference document's own terms. Everywhere else stays banned.
+    """
     hits: list[str] = []
     for path in SRC.rglob("*.py"):
+        if path.name == "wind_receptiveness.py":
+            continue
         lowered = path.read_text(encoding="utf-8").lower()
         for banned in ("ballpark pal", "ballparkpal", "seamheads"):
             if banned in lowered:

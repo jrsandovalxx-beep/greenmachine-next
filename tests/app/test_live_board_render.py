@@ -2001,6 +2001,47 @@ def test_temp_band_labels_follow_the_ratified_edges() -> None:
     assert streamlit_app._temp_band(Decimal("104")) == "≥90 → 1.5 · capped at 1"
 
 
+def test_wind_effect_css_colours_only_receptive_aligned_wind() -> None:
+    """D-122 (D-082's colour rule): green when the current-direction wind
+    helps at a wind-receptive park, red when it hurts — direction-specific,
+    because the model's signs differ by direction at the same park — and
+    neutral when calm, barely-affected, or unread."""
+    import streamlit_app
+
+    from greenmachine.inputs.wind_receptiveness import WindReceptiveness
+
+    wrigley = WindReceptiveness(
+        recept_in=Decimal("4.72"), recept_out=Decimal("4.43"), recept_overall=Decimal("9.15")
+    )
+    angel = WindReceptiveness(
+        recept_in=Decimal("3.32"), recept_out=Decimal("-2.36"), recept_overall=Decimal("0.96")
+    )
+    daikin = WindReceptiveness(
+        recept_in=Decimal("-3.21"), recept_out=Decimal("1.83"), recept_overall=Decimal("-1.38")
+    )
+    quiet = WindReceptiveness(
+        recept_in=Decimal("0.62"), recept_out=Decimal("0.40"), recept_overall=Decimal("0.50")
+    )
+
+    # Wrigley's modelled receptiveness is positive in BOTH directions —
+    # the colour follows the direction-specific figure, not intuition
+    # about what an in-wind "should" do.
+    assert streamlit_app._wind_effect_css(wrigley, Decimal("7")) == streamlit_app._HIGHLIGHT
+    assert streamlit_app._wind_effect_css(wrigley, Decimal("-7")) == streamlit_app._HIGHLIGHT
+    # Angel's out-wind suppresses the HR environment even though its
+    # in-wind helps — the overall figure would mislead.
+    assert streamlit_app._wind_effect_css(angel, Decimal("7")) == streamlit_app._VETO_CSS
+    assert streamlit_app._wind_effect_css(angel, Decimal("-7")) == streamlit_app._HIGHLIGHT
+    # Daikin's in-wind suppresses while its out-wind helps.
+    assert streamlit_app._wind_effect_css(daikin, Decimal("-7")) == streamlit_app._VETO_CSS
+    assert streamlit_app._wind_effect_css(daikin, Decimal("7")) == streamlit_app._HIGHLIGHT
+    # Calm, barely-affected, and unread all stay neutral.
+    assert streamlit_app._wind_effect_css(wrigley, Decimal("3.9")) == ""
+    assert streamlit_app._wind_effect_css(quiet, Decimal("9")) == ""
+    assert streamlit_app._wind_effect_css(None, Decimal("9")) == ""
+    assert streamlit_app._wind_effect_css(wrigley, None) == ""
+
+
 def test_ordinal_never_says_1th() -> None:
     import streamlit_app
 

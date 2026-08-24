@@ -478,6 +478,16 @@ def test_open_air_card_carries_the_park_axis_and_parsed_wind() -> None:
     assert game.wind_from_degrees == Decimal("247.5")
 
 
+def test_open_air_card_carries_the_venue_slug() -> None:
+    """D-122: the park reference's venue slug rides the card so the
+    conditions surface joins the pinned wind-receptiveness snapshot by it.
+    The Coors fixture joins, so the slug is present; an unjoined venue
+    would carry None and the receptiveness cell would read as absent."""
+    board = _build_with_wind(_OpenAirApi(), lambda venue: (Decimal("9"), "WSW"))
+    assert not isinstance(board, FetchFailure)
+    assert board.games[0].venue_id == "coors-field"
+
+
 def test_roofed_card_carries_neither_axis_nor_wind_bearing() -> None:
     """A roofed venue's axis is a designed absence (D-073/D-119): no wind
     reaches the field, so no bearing may resolve."""
