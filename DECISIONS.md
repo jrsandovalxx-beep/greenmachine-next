@@ -2558,3 +2558,38 @@ tags quote the resolved wind and the field, never a verdict
 anywhere — the computed expectation, confirmed against the served
 board — while the axis geometry resolved correctly on real sprays (an
 oppo-dominant right-hander read as "right field" at Comerica).
+
+## D-120 - the spray-alignment shortlist tags
+
+**(v2.2 tag dictionary, SP-4 — shipped.)** Two reads join the shortlist's
+green column, fired where the batter's air contact actually goes and the
+park actually boosts. **Pull-air match** at a pull-air share ≥ 40% with
+the same-side home-run factor at the park-boost line (≥ 110) — his air
+balls go where the park helps his own side. **Oppo-air match** at an
+oppo-air share strictly over 20% read against the OPPOSITE-side factor —
+the v2.2 dictionary's Walker exception: an oppo-power bat reads as the
+other hand for the park, because his damaging air contact goes to that
+field, so a right-hander with oppo power is checked against the LHB
+factor, never the RHB one. A `wind {x} mph out to {field}` rider joins
+either tag when the forecast also resolves out to the matching field at
+the wind-assist line (D-119's geometry, reused). The spray record is the
+form section's floored pull/oppo shares, as for the wind reads; an
+insufficient record, a neutral factor, or a missing game is a silent
+tag, never an invented one (absence first). The tags quote the share,
+its sample and window, the factor, and the wind — never a verdict
+(D-015/D-017); every firing line prints in the Sluggers caption (D-079).
+
+One convention, stated plainly because it shapes what the numbers mean:
+the shipped pull/oppo air shares are D-071's **signed halves** over
+measurable air balls (a dead-center ball claims no direction), the same
+metrics the v2.2 glossary defines — so the 40/20 lines apply to halves,
+and the park-factor gate does the selective work (a 40% pull half is
+common; a ≥ 110 factor is not). A true pull/straight/oppo thirds record
+would be a change to ratified surfaces, and it is not implied by the
+v2.2 documents. D-119's caption language is corrected along the way:
+the wind read resolves against the larger **half** of his measurable
+air balls, not a "third" the record does not publish. Live-verified on
+the 2026-08-24 slate: no shortlist batter aligned (spray shares present
+but no boost-side factor, or an insufficient record, or a roof), and no
+tag fired — the computed expectation, confirmed against the served
+board.

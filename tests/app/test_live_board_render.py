@@ -1682,6 +1682,7 @@ def test_card_tags_carry_the_v22_park_and_weather_reads() -> None:
         sprint_speed_fps=None,
         batting_side="L",
         mix_line=None,
+        form=None,
     )
 
     def batter(**over: object) -> SimpleNamespace:
@@ -1864,6 +1865,120 @@ def test_card_tags_resolve_the_wind_against_the_dominant_air_field() -> None:
     assert "wind" not in tags[1] and "wind" not in tags[2]
     tags = streamlit_app._card_tags(batter(form=None), None, game=game("210", "13"))
     assert "wind" not in tags[1] and "wind" not in tags[2]
+
+
+def test_card_tags_carry_the_spray_alignment_reads() -> None:
+    """v2.2 (D-120): the pull-air match at a pull share ≥ 40% with the
+    same-side HR factor ≥ 110, and the oppo-air match at an oppo share
+    strictly over 20% against the OPPOSITE-side factor (the Walker
+    exception — an oppo-power bat reads as the other hand for the park).
+    The "+ wind" rider joins when the forecast resolves out to the
+    matching field at ≥ 8 mph. An insufficient spray record or a neutral
+    factor keeps the tags silent."""
+    from types import SimpleNamespace
+
+    import streamlit_app
+
+    from greenmachine.inputs.contract import VenueType
+    from greenmachine.live.form import FormValue
+
+    def spray(pull: str, oppo: str, *, sufficient: bool = True) -> SimpleNamespace:
+        return SimpleNamespace(
+            pull_air_pct=FormValue(
+                value=Decimal(pull), sample=10, window_days=7, sufficient=sufficient
+            ),
+            oppo_air_pct=FormValue(
+                value=Decimal(oppo), sample=10, window_days=7, sufficient=sufficient
+            ),
+        )
+
+    base = dict(
+        result=SimpleNamespace(present_observations=[], missing_observations=[]),
+        order_position=None,
+        lineup_is_estimate=False,
+        season_k_share=None,
+        season=None,
+        season_gaps=None,
+        squared_up_share=None,
+        squared_up_swings=0,
+        squared_up_bat_speed=None,
+        statcast=None,
+        sprint_speed_fps=None,
+        batting_side="L",
+        mix_line=None,
+        form=spray("45", "18"),
+    )
+
+    def batter(**over: object) -> SimpleNamespace:
+        return SimpleNamespace(**{**base, **over})
+
+    def game(
+        factor_l: str,
+        factor_r: str,
+        wind_from: str | None = None,
+        speed: str | None = None,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            venue_type=VenueType.OPEN_AIR,
+            temperature_fahrenheit=Decimal("72"),
+            home_run_factor_left=ParkFactor(
+                factor=Decimal(factor_l),
+                handedness=Handedness.LEFT,
+                plate_appearances=30000,
+            ),
+            home_run_factor_right=ParkFactor(
+                factor=Decimal(factor_r),
+                handedness=Handedness.RIGHT,
+                plate_appearances=30000,
+            ),
+            park_orientation_degrees=Decimal("0"),
+            wind_from_degrees=Decimal(wind_from) if wind_from is not None else None,
+            wind_speed_mph=Decimal(speed) if speed is not None else None,
+            wind_direction="SSW",
+        )
+
+    # The pull match: his side's factor at the boost line, pull share
+    # over 40 — the tag quotes the floored form sample.
+    _, boosters, _ = streamlit_app._card_tags(batter(), None, game=game("112", "100"))
+    assert "pull-air match: 45% pull air (10 air balls L7), LHB factor 112" in boosters
+    # The wind rider: FROM 210 blows straight out to his pull field at 30°.
+    _, boosters, _ = streamlit_app._card_tags(
+        batter(), None, game=game("112", "100", wind_from="210", speed="9")
+    )
+    assert "LHB factor 112, wind 9 mph out to right" in boosters
+    # A neutral park or a pull share under the line stays silent.
+    tags = streamlit_app._card_tags(batter(), None, game=game("100", "100"))
+    assert "pull-air" not in tags[1]
+    tags = streamlit_app._card_tags(batter(form=spray("39", "18")), None, game=game("112", "100"))
+    assert "pull-air" not in tags[1]
+    # The oppo match reads the OTHER side's factor — a right-hander with
+    # oppo power reads as a left-hander for the park.
+    _, boosters, _ = streamlit_app._card_tags(
+        batter(batting_side="R", form=spray("30", "24")), None, game=game("115", "98")
+    )
+    assert "oppo-air match: 24% oppo air (10 air balls L7), reads as LHB: factor 115" in boosters
+    # ... strictly over 20, and silent against a neutral opposite side.
+    tags = streamlit_app._card_tags(
+        batter(batting_side="R", form=spray("30", "20")), None, game=game("115", "98")
+    )
+    assert "oppo-air" not in tags[1]
+    tags = streamlit_app._card_tags(
+        batter(batting_side="R", form=spray("30", "24")), None, game=game("100", "112")
+    )
+    assert "oppo-air" not in tags[1]
+    # The oppo wind rider: his oppo field sits at axis+30, so FROM 210
+    # blows straight out there.
+    _, boosters, _ = streamlit_app._card_tags(
+        batter(batting_side="R", form=spray("30", "24")),
+        None,
+        game=game("115", "98", wind_from="210", speed="9"),
+    )
+    assert "factor 115, wind 9 mph out to right" in boosters
+    # An insufficient spray record silences both reads.
+    tags = streamlit_app._card_tags(
+        batter(form=spray("45", "24", sufficient=False)), None, game=game("115", "112")
+    )
+    assert "pull-air" not in tags[1] and "oppo-air" not in tags[1]
 
 
 def test_ordinal_never_says_1th() -> None:

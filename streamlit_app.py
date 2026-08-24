@@ -712,6 +712,18 @@ _WIND_KILL_IN_LINE = Decimal("10")
 _SEVERE_COLD_LINE = Decimal("38")
 _SEVERE_COLD_WIND_IN_LINE = Decimal("5")
 
+# v2.2 spray-alignment reads (SP-4, D-120): PULL_AIR_MATCH at a pull-air
+# share ≥ 40% with the same-side HR factor at the park-boost line — his air
+# contact goes where the park boosts his side; OPPO_AIR_MATCH at an
+# oppo-air share strictly over 20% read against the OPPOSITE-side factor —
+# the Walker exception: an oppo-power bat reads as the other hand for the
+# park, because his damaging air contact goes to that field. The "+ wind"
+# rider joins when the forecast also resolves out to the matching field at
+# the wind-assist line. The spray record is the form section's floored
+# shares, as for the wind reads; an insufficient record is a silent tag.
+_PULL_AIR_SHARE_LINE = Decimal("40")
+_OPPO_AIR_SHARE_LINE = Decimal("20")
+
 # The ratified pitch-type sample floor (10 BBE) for the breakup table's
 # per-pitch EV and Air% — below it the INSUFFICIENT treatment, never hidden.
 _MIN_BBE_PITCH_TYPE = 10
@@ -754,12 +766,12 @@ def _air_field(card: BatterCard) -> tuple[str, str] | None:
 
     The spray record is the form section's pull/oppo air shares — L7 falling
     back to L14 under the ratified floors (8 air balls L7, 15 at L14+) —
-    because the season view publishes no spray read (D-116). "Dominant" is
-    the largest of the three thirds (pull, center, oppo); center is the
-    remainder of the two published shares over the identical denominator,
-    so an absent oppo share is a real zero, not an invention. The field is
-    "pull", "center", or "oppo" for `spray_field_bearing`; the name is the
-    field as the batter faces it — a right-hander's pull is "left", a
+    because the season view publishes no spray read (D-116). Those shares
+    are D-071's signed halves over measurable air balls (a dead-center ball
+    claims no direction), so "dominant" is the larger of pull, oppo, and
+    the dead-center remainder — in practice a pull or oppo side. The field
+    is "pull", "center", or "oppo" for `spray_field_bearing`; the name is
+    the field as the batter faces it — a right-hander's pull is "left", a
     left-hander's "right". None when the side, the form section, or a
     sufficient spray record is absent: the wind tags stay silent rather
     than resolve against an invented field.
@@ -781,13 +793,37 @@ def _air_field(card: BatterCard) -> tuple[str, str] | None:
         field = "oppo"
     else:
         field = "center"
+    return field, _field_name(side, field)
+
+
+def _field_name(side: str, field: str) -> str:
+    """The spray third as the batter faces it: a right-hander's pull is
+    "left", a left-hander's "right"; center rides the axis."""
     if field == "center":
-        name = "center"
-    elif (field == "pull") == (side == "R"):
-        name = "left"
-    else:
-        name = "right"
-    return field, name
+        return "center"
+    return "left" if (field == "pull") == (side == "R") else "right"
+
+
+def _wind_rider_text(game: GameCard, side: str, match_field: str) -> str:
+    """', wind {x} mph out to {field}' when the forecast resolves out to
+    the matching spray third at the assist line — else nothing, and the
+    tag simply fires without the rider (D-120)."""
+    axis = game.park_orientation_degrees
+    wind_from = game.wind_from_degrees
+    wind_speed = game.wind_speed_mph
+    if not (
+        game.venue_type is VenueType.OPEN_AIR
+        and axis is not None
+        and wind_from is not None
+        and wind_speed is not None
+    ):
+        return ""
+    resolved = resolved_wind_mph(
+        wind_speed, wind_from, spray_field_bearing(axis, side, match_field)
+    )
+    if resolved < _WIND_ASSIST_LINE:
+        return ""
+    return f", wind {float(resolved):.0f} mph out to {_field_name(side, match_field)}"
 
 
 def _card_tags(
@@ -1029,6 +1065,49 @@ def _card_tags(
                             f"wind kill: {float(opposing_resolved):.0f} mph out to "
                             f"{opposing_name}, away from his air field ({raw})"
                         )
+        # Spray-alignment reads (v2.2, D-120): his air contact going where
+        # the park boosts. Pull-air match on the same-side factor;
+        # oppo-air match on the OPPOSITE-side factor (the Walker
+        # exception). The spray record is the form section's floored
+        # shares; an insufficient record or a neutral factor is silent.
+        # (A side outside L/R reads a None factor and stays silent.)
+        side = card.batting_side
+        form = card.form
+        if side is not None and form is not None:
+            pull_v = form.pull_air_pct
+            oppo_v = form.oppo_air_pct
+            if (
+                pull_v.sufficient
+                and pull_v.value is not None
+                and oppo_v is not None
+                and oppo_v.sufficient
+                and oppo_v.value is not None
+            ):
+                sample_text = f"{pull_v.sample} air balls L{pull_v.window_days}"
+                factor = _side_factor(game, side)
+                if (
+                    pull_v.value >= _PULL_AIR_SHARE_LINE
+                    and factor is not None
+                    and factor.factor >= _PARK_BOOST_LINE
+                ):
+                    boosters.append(
+                        f"pull-air match: {float(pull_v.value):.0f}% pull air "
+                        f"({sample_text}), {side}HB factor {float(factor.factor):.0f}"
+                        f"{_wind_rider_text(game, side, 'pull')}"
+                    )
+                other = "L" if side == "R" else "R"
+                other_factor = _side_factor(game, other)
+                if (
+                    oppo_v.value > _OPPO_AIR_SHARE_LINE
+                    and other_factor is not None
+                    and other_factor.factor >= _PARK_BOOST_LINE
+                ):
+                    boosters.append(
+                        f"oppo-air match: {float(oppo_v.value):.0f}% oppo air "
+                        f"({sample_text}), reads as {other}HB: factor "
+                        f"{float(other_factor.factor):.0f}"
+                        f"{_wind_rider_text(game, side, 'oppo')}"
+                    )
     return " · ".join(advisories), " · ".join(boosters), " · ".join(vetoes)
 
 
@@ -1758,15 +1837,25 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "and the cold suppress below 45°F, open-air venues only — a "
         "roofed stadium is the indoor neutral value. "
         "Wind reads (D-119): the forecast resolved against the batter's "
-        "dominant air field — the largest spray third in his form record "
-        "(8 air balls L7 / 15 at L14+) on the measured park axis. The "
+        "dominant air field — pull or oppo, the larger half of his "
+        "measurable air balls in the form record (8 air balls L7 / 15 at "
+        "L14+) — on the measured park axis. The "
         "wind assist at ≥ 8 mph resolved out toward his field (strong "
         "≥ 12), the wind kill at ≥ 10 mph resolved in from it or ≥ 8 mph "
         "resolved out to the opposite corner (the v2.2 table names no "
         "number for the opposing case, so it borrows the assist line), "
         "and the severe cold suppress below 38°F with an in-wind ≥ 5 mph "
         "along the axis. A roofed venue or an insufficient spray record "
-        "carries no wind read."
+        "carries no wind read. "
+        "Spray-alignment reads (D-120): the pull-air match at a pull "
+        "share ≥ 40% of measurable air balls (the same signed halves as "
+        "the wind reads) with the same-side HR factor at the "
+        "boost line (≥ 110), and the oppo-air match at an oppo share "
+        "over 20% read against the OPPOSITE-side factor — an oppo-power "
+        "bat reads as the other hand for the park, because his damaging "
+        'air contact goes to that field; a "wind … out to" rider joins '
+        "when the forecast also resolves out to the matching field at "
+        "≥ 8 mph."
     )
     texts, styles, cards = _slugger_frames(board)
     if texts.empty:
