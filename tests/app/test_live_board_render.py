@@ -145,6 +145,7 @@ class _OutageSavant:
                 barrel_count=30,
                 barrel_share=Decimal("0.1"),
                 sweet_spot_share=Decimal("0.33"),
+                avg_launch_angle=Decimal("16.4"),
             )
         }
 
@@ -373,7 +374,9 @@ def test_parks_snapshot_declares_a_live_weather_source() -> None:
 def test_shortlist_keeps_only_a_and_s_with_the_d084_columns() -> None:
     """D-084: the Sluggers tab is the shortlist — grades A and S only, and
     exactly the shortlist columns; every cell is display text (D-076), the
-    grade is lit, and the cards stay row-aligned for selection (GMF-007)."""
+    grade is lit, and the cards stay row-aligned for selection (GMF-007).
+    D-124: the Form Score placeholder holds the dash, reason-styled, until
+    a rollup formula is ratified."""
     import streamlit_app
 
     texts, styles, cards = streamlit_app._slugger_frames(_graded_board())
@@ -383,12 +386,15 @@ def test_shortlist_keeps_only_a_and_s_with_the_d084_columns() -> None:
         "Team",
         "Versus",
         "Grade",
+        "Form Score",
         "Park factor",
         "Weather",
         "For HR",
         "Against HR",
         "Tags",
     ]
+    assert set(texts["Form Score"]) == {"—"}
+    assert styles["Form Score"].tolist() == [streamlit_app._REASON_CSS] * 2
     # D-094: the outage board fetched no events, so no batter has a last
     # game day at all and the money-tag column stays blank — never a guess.
     assert texts["HR"].tolist() == ["", ""]
@@ -626,7 +632,8 @@ def test_breakup_table_dashes_a_pitch_the_batter_has_not_seen() -> None:
     assert "Batter — last 2 weeks" in markup
     changeup_row = markup.split("Changeup", 1)[1].split("</tr>", 1)[0]
     assert '<td class="gm-half-boundary">0</td>' in changeup_row
-    assert changeup_row.count("<td>—</td>") == 10
+    # Eleven dashed batter cells — D-124's LA joined the batter half.
+    assert changeup_row.count("<td>—</td>") == 11
 
 
 def test_breakup_side_toggle_switches_usage_to_the_hitter_hand_basis() -> None:
@@ -784,7 +791,9 @@ def _grid_line(**overrides: object) -> object:
 def test_grid_line_cells_render_rates_and_named_absences() -> None:
     """D-079/D-081: a present line renders every column in its display
     shape; a scope missing at every reach states 'no data available', and a
-    rate with no denominator is a styled dash — never an invented zero."""
+    rate with no denominator is a styled dash — never an invented zero.
+    D-124: the L30 view stars the two spray shares, whose metrics carry
+    ratified v2.2 firing lines."""
     import streamlit_app
 
     texts, styles = streamlit_app._grid_line_cells(None)
@@ -801,8 +810,8 @@ def test_grid_line_cells_render_rates_and_named_absences() -> None:
         "SLG",
         "ISO",
         "Robbed HR",
-        "Pull Air %",
-        "Oppo Air %",
+        "Pull Air % ★",
+        "Oppo Air % ★",
         "xwOBA",
         "Swing-Str %",
     }
@@ -815,8 +824,8 @@ def test_grid_line_cells_render_rates_and_named_absences() -> None:
     # PO 2026-08-24: robbed HRs — 375+ ft balls that stayed in the park,
     # last 7 days — a raw count, not a rate.
     assert texts["Robbed HR"] == "1"
-    assert texts["Pull Air %"] == "40.0%"
-    assert texts["Oppo Air %"] == "25.0%"
+    assert texts["Pull Air % ★"] == "40.0%"
+    assert texts["Oppo Air % ★"] == "25.0%"
     assert texts["xwOBA"] == ".450"
     assert styles == {}
 
@@ -824,10 +833,10 @@ def test_grid_line_cells_render_rates_and_named_absences() -> None:
         _grid_line(robbed_hr_count=None, pull_air_share=None, oppo_air_share=None)
     )
     assert texts["Robbed HR"] == "—"
-    assert texts["Pull Air %"] == "—"
-    assert texts["Oppo Air %"] == "—"
+    assert texts["Pull Air % ★"] == "—"
+    assert texts["Oppo Air % ★"] == "—"
     assert styles["Robbed HR"] == streamlit_app._REASON_CSS
-    assert styles["Pull Air %"] == streamlit_app._REASON_CSS
+    assert styles["Pull Air % ★"] == streamlit_app._REASON_CSS
 
 
 def _sp_reads() -> PitcherSeasonReads:
@@ -1036,7 +1045,10 @@ def test_arms_metrics_mirror_the_card_rules_on_both_scopes() -> None:
 def test_grid_line_cells_add_the_gaps_on_the_season_view_only() -> None:
     """D-110: the season view alone carries xISO-ISO and xwOBA-wOBA, each
     signed with its PA sample, placed beside its sibling column, and
-    reason-styled when the expected-stats board has no row for him."""
+    reason-styled when the expected-stats board has no row for him.
+    D-124: the season view stars the power-profile EV and the two gaps,
+    and carries the season average launch angle after EV — unstarred
+    context, never a firing line."""
     import streamlit_app
 
     from greenmachine.live.pipeline import RegressionGaps
@@ -1046,30 +1058,62 @@ def test_grid_line_cells_add_the_gaps_on_the_season_view_only() -> None:
         xwoba_minus_woba=Decimal("-0.012"),
         plate_appearances=412,
     )
-    texts, styles = streamlit_app._grid_line_cells(_grid_line(gaps=gaps), include_gaps=True)
+    texts, styles = streamlit_app._grid_line_cells(
+        _grid_line(gaps=gaps, avg_launch_angle=Decimal("16.4")), include_gaps=True
+    )
     columns = list(texts)
-    assert columns.index("xISO-ISO") == columns.index("ISO") + 1
-    assert columns.index("xwOBA-wOBA") == columns.index("xwOBA") + 1
-    assert texts["xISO-ISO"] == "+.041 (412 PA)"
-    assert texts["xwOBA-wOBA"] == "-.012 (412 PA)"
-    assert "xISO-ISO" not in styles  # a value cell carries no reason style
+    assert columns.index("xISO-ISO ★") == columns.index("ISO") + 1
+    assert columns.index("xwOBA-wOBA ★") == columns.index("xwOBA") + 1
+    assert columns.index("LA") == columns.index("EV ★") + 1
+    assert texts["xISO-ISO ★"] == "+.041 (412 PA)"
+    assert texts["xwOBA-wOBA ★"] == "-.012 (412 PA)"
+    assert texts["LA"] == "16.4°"
+    assert "xISO-ISO ★" not in styles  # a value cell carries no reason style
+    assert "LA" not in styles
     # The L30 view (the default) never shows the columns, even with data.
-    texts, _ = streamlit_app._grid_line_cells(_grid_line(gaps=gaps))
+    texts, _ = streamlit_app._grid_line_cells(
+        _grid_line(gaps=gaps, avg_launch_angle=Decimal("16.4"))
+    )
     assert "xISO-ISO" not in texts
+    assert "xISO-ISO ★" not in texts
     assert "xwOBA-wOBA" not in texts
+    assert "LA" not in texts
     # No board row: the season view names the absence on both columns.
     texts, styles = streamlit_app._grid_line_cells(_grid_line(), include_gaps=True)
-    assert texts["xISO-ISO"] == "—"
-    assert texts["xwOBA-wOBA"] == "—"
-    assert styles["xISO-ISO"] == streamlit_app._REASON_CSS
-    assert styles["xwOBA-wOBA"] == streamlit_app._REASON_CSS
+    assert texts["xISO-ISO ★"] == "—"
+    assert texts["xwOBA-wOBA ★"] == "—"
+    assert texts["LA"] == "—"
+    assert styles["xISO-ISO ★"] == streamlit_app._REASON_CSS
+    assert styles["xwOBA-wOBA ★"] == streamlit_app._REASON_CSS
+    assert styles["LA"] == streamlit_app._REASON_CSS
     # A scope missing at every reach still reads 'no data available' and
     # still gains the two gap columns as styled dashes.
     texts, styles = streamlit_app._grid_line_cells(None, include_gaps=True)
     assert texts["AB"] == "no data available"
-    assert texts["xISO-ISO"] == "—"
-    assert styles["xISO-ISO"] == streamlit_app._REASON_CSS
+    assert texts["xISO-ISO ★"] == "—"
+    assert styles["xISO-ISO ★"] == streamlit_app._REASON_CSS
     assert styles["Oppo Air %"] == streamlit_app._REASON_CSS
+
+
+def test_column_help_renames_with_the_grid_stars_and_drops_absent_columns() -> None:
+    """D-124: every header carries its one-line definition on hover; the
+    star rename matches the grid's own, and a definition naming a column
+    the view does not carry drops out rather than confusing the grid."""
+    import streamlit_app
+
+    config = streamlit_app._column_help(
+        ["Batter", "EV ★", "LA"],
+        streamlit_app._MATCHUPS_HELP,
+        streamlit_app._GRID_STARS_SEASON,
+    )
+    assert set(config) == {"Batter", "EV ★", "LA"}
+    # The window view stars the spray shares instead; EV keeps its base name.
+    window = streamlit_app._column_help(
+        ["EV", "Pull Air % ★"],
+        streamlit_app._MATCHUPS_HELP,
+        streamlit_app._GRID_STARS_WINDOW,
+    )
+    assert set(window) == {"EV", "Pull Air % ★"}
 
 
 def _board_with_grid_lines() -> SlateBoard:
@@ -1090,6 +1134,7 @@ def _board_with_grid_lines() -> SlateBoard:
         exit_velocity=Decimal("91.5"),
         robbed_hr_count=None,
         pull_air_share=None,
+        avg_launch_angle=Decimal("12.8"),
     )
 
     def attach(cards: tuple[_BatterCard, ...]) -> tuple[_BatterCard, ...]:
@@ -1135,6 +1180,7 @@ def test_matchups_grid_has_the_d079_columns_and_a_named_window(
     grids = grid_frames()
     assert grids, "the matchups grids rendered"
     # D-096/D-097/D-098: no BIP, no Form column; Robbed HR is a count.
+    # D-124: the L30 view stars the spray shares (ratified v2.2 lines).
     expected = {
         "AB",
         "H",
@@ -1147,7 +1193,8 @@ def test_matchups_grid_has_the_d079_columns_and_a_named_window(
         "SLG",
         "ISO",
         "Robbed HR",
-        "Pull Air %",
+        "Pull Air % ★",
+        "Oppo Air % ★",
         "xwOBA",
         "Swing-Str %",
         "Grade",
@@ -1170,7 +1217,51 @@ def test_matchups_grid_has_the_d079_columns_and_a_named_window(
     assert set(grids[0]["AB"]) == {"440"}  # the season scope
     assert set(grids[0]["Robbed HR"]) == {"—"}  # no season source (D-081/D-090)
     assert set(grids[0]["Pull Air %"]) == {"—"}
+    # D-124: the season view stars EV, carries the season average launch
+    # angle after it as unstarred context.
+    assert set(grids[0]["LA"]) == {"12.8°"}
+    assert "EV ★" in grids[0].columns
     assert grids[0]["Grade"].tolist() == away_grades  # the grade stays L30
+
+
+def test_grid_headers_carry_their_hover_definitions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-124: every batter-grid header carries its one-line definition as
+    column help — starred under the view's own rename, absent columns
+    dropped. The L30 view stars the spray shares; the season view stars EV
+    and the gaps and adds LA."""
+    import json
+
+    import streamlit as st
+
+    import greenmachine.live.pipeline as pipeline
+
+    monkeypatch.setattr(pipeline, "build_board", lambda **kwargs: _board_with_grid_lines())
+    monkeypatch.setenv("GM_ENVIRONMENT", "staging")
+    st.cache_data.clear()
+    at = AppTest.from_file(str(_APP_PATH), default_timeout=_TIMEOUT)
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+
+    def helps() -> set[str]:
+        names: set[str] = set()
+        for element in at.dataframe:
+            for name, config in json.loads(element.proto.columns).items():
+                if config.get("help"):
+                    names.add(name)
+        return names
+
+    l30 = helps()
+    assert "Pull Air % ★" in l30
+    assert "Oppo Air % ★" in l30
+    assert "LA" not in l30  # a season-view column — no entry on the L30 grids
+    assert "EV ★" not in l30
+
+    toggles = [toggle for toggle in at.toggle if toggle.key == "matchups_season_view"]
+    toggles[0].set_value(True)
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    season = helps()
+    assert {"LA", "EV ★", "xISO-ISO ★", "xwOBA-wOBA ★"} <= season
 
 
 def test_slate_today_reads_the_viewers_arizona_day() -> None:
@@ -1329,7 +1420,8 @@ def test_backtest_excludes_a_day_the_source_has_not_indexed(
 def test_breakup_batter_half_carries_contact_shape_with_the_pitch_type_floor() -> None:
     """D-109: the batter half's EV and Air% read the window line — below
     the ratified 10-BBE pitch-type floor the value keeps its exact sample
-    with an INSUFFICIENT marker; an empty denominator dashes."""
+    with an INSUFFICIENT marker; an empty denominator dashes. D-124: the
+    window record's per-pitch mean launch angle sits between them."""
     from types import SimpleNamespace
 
     import streamlit_app
@@ -1342,6 +1434,7 @@ def test_breakup_batter_half_carries_contact_shape_with_the_pitch_type_floor() -
                 batted_balls=7,
                 mean_launch_speed=Decimal("91.23"),
                 air_ball_share=Decimal("0.5"),
+                mean_launch_angle=Decimal("23.4"),
             ),
         ),
         threshold=0.15,
@@ -1351,8 +1444,10 @@ def test_breakup_batter_half_carries_contact_shape_with_the_pitch_type_floor() -
         throws_text="right",
     )
     assert ">EV</th>" in markup
+    assert ">LA</th>" in markup
     assert ">Air%</th>" in markup
     assert "91.2 · n=7 · INSUFFICIENT" in markup
+    assert "23.4° · n=7 · INSUFFICIENT" in markup
     assert "50.0% · n=7 · INSUFFICIENT" in markup
     # A full sample shows the plain values, no marker.
     markup_full = streamlit_app._arsenal_breakup_html(
@@ -1362,6 +1457,7 @@ def test_breakup_batter_half_carries_contact_shape_with_the_pitch_type_floor() -
                 batted_balls=12,
                 mean_launch_speed=Decimal("91.23"),
                 air_ball_share=Decimal("0.5"),
+                mean_launch_angle=Decimal("23.4"),
             ),
         ),
         threshold=0.15,
@@ -1371,6 +1467,7 @@ def test_breakup_batter_half_carries_contact_shape_with_the_pitch_type_floor() -
         throws_text="right",
     )
     assert ">91.2</td>" in markup_full
+    assert ">23.4°</td>" in markup_full
     assert ">50.0%</td>" in markup_full
     assert "INSUFFICIENT" not in markup_full
     # No classified contact at all: dashes, never an invented zero.
@@ -1385,6 +1482,19 @@ def test_breakup_batter_half_carries_contact_shape_with_the_pitch_type_floor() -
     )
     row = markup_empty.split("4-Seam Fastball", 1)[1].split("</tr>", 1)[0]
     assert row.count("<td>—</td>") >= 2
+    # A pitch the batter never faced: eleven dashed batter cells, so the
+    # halves keep their column counts (D-124's LA joins the batter half).
+    markup_unseen = streamlit_app._arsenal_breakup_html(
+        pitcher,
+        (),
+        threshold=0.15,
+        side_filter=None,
+        side_usage=None,
+        window_label="last month",
+        throws_text="right",
+    )
+    unseen_row = markup_unseen.split("4-Seam Fastball", 1)[1].split("</tr>", 1)[0]
+    assert unseen_row.count("<td>—</td>") == 11
 
 
 def test_card_tags_carry_the_slot_and_the_v22_k_reads() -> None:

@@ -48,12 +48,13 @@ import base64
 import html
 import os
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from functools import lru_cache
 from importlib import metadata
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pandas as pd
@@ -1147,6 +1148,10 @@ def _slugger_frames(board: SlateBoard) -> tuple[pd.DataFrame, pd.DataFrame, list
                     "Team": card.team,
                     "Versus": opposing.full_name if opposing else "TBD",
                     "Grade": card.result.grade.value,
+                    # D-124: the Form Score placeholder — v2.2 ratifies the
+                    # form reads but no rollup formula, so the column holds
+                    # the dash (never an invented number) until one is.
+                    "Form Score": "—",
                     "Park factor": (
                         f"{float(factor.factor):.0f}" if factor is not None else "not covered"
                     ),
@@ -1155,7 +1160,7 @@ def _slugger_frames(board: SlateBoard) -> tuple[pd.DataFrame, pd.DataFrame, list
                     "Against HR": vetoes,
                     "Tags": advisories,
                 }
-                styles = {"Grade": _HIGHLIGHT}
+                styles = {"Grade": _HIGHLIGHT, "Form Score": _REASON_CSS}
                 if card.homered_on_last_game_day:
                     styles["HR"] = _MONEY_CSS
                 if factor is None:
@@ -1453,18 +1458,24 @@ def _arsenal_breakup_html(
         )
         batter = batter_by_type.get(season.pitch_type)
         if batter is None:
-            batter_cells = ["<td>0</td>"] + ["<td>—</td>"] * 10
+            batter_cells = ["<td>0</td>"] + ["<td>—</td>"] * 11
         else:
             # Per-pitch contact shape (D-109): the ratified 10-BBE
             # pitch-type floor — below it the value keeps its exact sample
             # with an INSUFFICIENT marker; an empty denominator dashes.
             ev_text = "—"
+            la_text = "—"
             air_text = "—"
             insufficient_note = ""
             if 0 < batter.batted_balls < _MIN_BBE_PITCH_TYPE:
                 insufficient_note = f" · n={batter.batted_balls} · INSUFFICIENT"
             if batter.mean_launch_speed is not None:
                 ev_text = f"{float(batter.mean_launch_speed):.1f}" + insufficient_note
+            # D-124: the window record's per-pitch mean launch angle, the
+            # same measured-event base EV reads — the arsenal board
+            # publishes no per-pitch LA, so the pitcher half has none.
+            if batter.mean_launch_angle is not None:
+                la_text = f"{float(batter.mean_launch_angle):.1f}°" + insufficient_note
             if batter.air_ball_share is not None:
                 air_text = _pct_text(batter.air_ball_share) + insufficient_note
             batter_cells = [
@@ -1478,6 +1489,7 @@ def _arsenal_breakup_html(
                 f"<td>{_avg_text(batter.expected_woba)}</td>",
                 f"<td>{_pct_text(batter.whiff_share)}</td>",
                 f"<td>{ev_text}</td>",
+                f"<td>{la_text}</td>",
                 f"<td>{air_text}</td>",
             ]
         batter_cells[0] = batter_cells[0].replace("<td>", '<td class="gm-half-boundary">', 1)
@@ -1504,14 +1516,14 @@ def _arsenal_breakup_html(
     header = (
         '<tr class="gm-halves"><th colspan="2"></th>'
         '<th colspan="9" class="gm-half">Pitcher — season</th>'
-        f'<th colspan="11" class="gm-half gm-half-boundary">Batter — '
+        f'<th colspan="12" class="gm-half gm-half-boundary">Batter — '
         f"{html.escape(window_label)} vs {html.escape(side_clause)}</th></tr>"
         '<tr class="gm-cols"><th>Pitch</th><th>Usage%</th>'
         "<th>PA</th><th>AVG</th><th>SLG</th><th>ISO</th><th>wOBA</th><th>xwOBA</th>"
         "<th>Whiff%</th><th>K%</th><th>Hard-Hit%</th>"
         '<th class="gm-half-boundary">PA</th><th>AVG</th><th>SLG</th><th>ISO</th><th>HR</th>'
         "<th>Barrel%</th><th>Hard-Hit%</th><th>xwOBA</th><th>Swing-Str%</th>"
-        "<th>EV</th><th>Air%</th></tr>"
+        "<th>EV</th><th>LA</th><th>Air%</th></tr>"
     )
     return (
         '<div class="gm-breakup-wrap"><table class="gm-breakup"><thead>'
@@ -1750,6 +1762,15 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
             )
         else:
             st.markdown(_BREAKUP_CSS + table_html, unsafe_allow_html=True)
+            st.caption(
+                "LA (D-124): the batter's mean launch angle against that "
+                "pitch over the window record — the arsenal board publishes "
+                "no per-pitch LA, so the pitcher half has none. v2.2 reads "
+                "23°+ against a pitch as strong, 30° elite, and 18° as the "
+                "HR launch floor (below it, home runs need ~115 mph EV) — "
+                "an average is context for those reads, never a firing "
+                "line itself."
+            )
         if side_usage is not None:
             st.caption(
                 f"Usage% is his share of pitches to {side_text}-handed "
@@ -1888,7 +1909,10 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "bat reads as the other hand for the park, because his damaging "
         'air contact goes to that field; a "wind … out to" rider joins '
         "when the forecast also resolves out to the matching field at "
-        "≥ 8 mph."
+        "≥ 8 mph. **Form Score** is a placeholder column (D-124): v2.2 "
+        "ratifies the form reads but no rollup formula, so the dash holds "
+        "until one is — never an invented number. Hover any column header "
+        "for its one-line definition."
     )
     texts, styles, cards = _slugger_frames(board)
     if texts.empty:
@@ -1900,6 +1924,7 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         height=frame_height("Roomy", len(texts)),
         on_select="rerun",
         selection_mode="single-row",
+        column_config=_column_help(texts.columns, _SLUGGERS_HELP),
         key=f"live_sluggers_{board.official_date}_{_selection_epoch()}",
     )
     selected_rows = event.selection.rows
@@ -2161,6 +2186,100 @@ def _insert_after(texts: dict[str, str], after: str, additions: dict[str, str]) 
     return out
 
 
+# D-124: the star marks a metric carrying a ratified v2.2 firing line — the
+# season view stars the power-profile EV and the two regression gaps, the
+# L30 mix view stars the two spray shares. One source of truth: the grid's
+# own rename and the hover-help config both read these maps.
+_GRID_STARS_SEASON = {"EV": "EV ★", "xISO-ISO": "xISO-ISO ★", "xwOBA-wOBA": "xwOBA-wOBA ★"}
+_GRID_STARS_WINDOW = {"Pull Air %": "Pull Air % ★", "Oppo Air %": "Oppo Air % ★"}
+
+# D-124: every batter-grid column's one-line definition, shown on header
+# hover. Unstarred keys — the view's star rename maps them to the headers
+# actually showing.
+_MATCHUPS_HELP: dict[str, str] = {
+    "#": "Confirmed lineup slot.",
+    "Batter": "The batter's name.",
+    "Bats": "Batting side.",
+    "AB": "At-bats over the scope.",
+    "H": "Hits over the scope.",
+    "Barrels": "Barrel count — ideal exit-velocity-plus-launch-angle contact.",
+    "HR": "Home runs over the scope.",
+    "EV": (
+        "Average exit velocity in mph. The v2.2 power profile reads "
+        "≥ 91 mph with a bat speed ≥ 73 mph."
+    ),
+    "LA": (
+        "Season average launch angle — context, not a firing line: v2.2 "
+        "reads the share of contact above the 18° HR floor, never the average."
+    ),
+    "Barrel/PA %": "Barrels per plate appearance over the scope.",
+    "Hard-Hit %": "Share of batted balls at 95+ mph.",
+    "AVG": "Batting average over the scope.",
+    "SLG": "Slugging over the scope.",
+    "ISO": "Isolated power — slugging minus batting average — over the scope.",
+    "xISO-ISO": (
+        "Expected minus actual ISO, season scope — ≥ +.050 flags under-performance (v2.2)."
+    ),
+    "Robbed HR": (
+        "375+ ft balls that stayed in the park, last 7 days — a raw count, never a rate."
+    ),
+    "Pull Air %": (
+        "Share of measurable air balls pulled — ≥ 40% with a boosting "
+        "same-side park factor reads the pull-air match (v2.2)."
+    ),
+    "Oppo Air %": (
+        "Share of measurable air balls to the opposite field — over 20% "
+        "reads against the opposite-side factor (v2.2)."
+    ),
+    "xwOBA": "Expected wOBA from contact quality over the scope.",
+    "xwOBA-wOBA": (
+        "Expected minus actual wOBA, season scope — ≥ +.015 flags under-performance (v2.2)."
+    ),
+    "Swing-Str %": "Whiffs per swing over the scope.",
+    "Grade": "The provisional v1 grade — always the L30 computation, whichever view shows.",
+    "Total": "The provisional v1 model's total score.",
+    "Lineup": "'est.' marks an estimated lineup.",
+}
+
+_SLUGGERS_HELP: dict[str, str] = {
+    "Batter": "The batter's name.",
+    "HR": (
+        "A neon $ marks a batter who homered in his most recent game day "
+        "on or before this slate (D-094)."
+    ),
+    "Team": "His club on this slate.",
+    "Versus": "The expected opposing starter — TBD until probables post.",
+    "Grade": "The provisional v1 grade — only A and S make this shortlist (D-084).",
+    "Form Score": (
+        "A placeholder: v2.2 ratifies the form reads but no rollup formula, "
+        "so the dash holds until one is (D-124)."
+    ),
+    "Park factor": (
+        "The batter-side home-run factor: 100 is neutral, ≥ 110 boosts, ≤ 90 suppresses (v2.2)."
+    ),
+    "Weather": "The venue reading — a roofed stadium reads the indoor neutral value.",
+    "For HR": "The reads arguing FOR the home run (v2.2), green when present.",
+    "Against HR": "The reads arguing AGAINST the home run (v2.2), red when present.",
+    "Tags": (
+        "Neutral advisories — low samples, missing components, estimated "
+        "lineups, the lineup slot — plus the regression-gap and "
+        "contact-first context reads (D-110)."
+    ),
+}
+
+
+def _column_help(
+    columns: Iterable[str], help_map: dict[str, str], stars: dict[str, str] | None = None
+) -> dict[str, Any]:
+    """st.column_config help entries for one grid (D-124): every header
+    carries its one-line definition. The star rename matches the grid's own;
+    entries naming columns the frame does not carry drop out."""
+    renamed = {(stars or {}).get(name, name): text for name, text in help_map.items()}
+    return {
+        name: st.column_config.TextColumn(help=renamed[name]) for name in columns if name in renamed
+    }
+
+
 def _grid_line_cells(
     line: BatterGridLine | None, *, include_gaps: bool = False
 ) -> tuple[dict[str, str], dict[str, str]]:
@@ -2168,7 +2287,9 @@ def _grid_line_cells(
     scope or a None rate renders as a named absence, never an invented
     zero; a scope missing at every reach states 'no data available'
     (D-081). ``include_gaps`` is the season view's alone: the D-110
-    regression-gap columns appear only there, each with its PA sample."""
+    regression-gap columns appear only there, each with its PA sample, and
+    the season average launch angle rides after EV (D-124). Starred headers
+    mark the metrics carrying a ratified v2.2 firing line (D-124)."""
     if line is None:
         texts = {
             "AB": "no data available",
@@ -2231,6 +2352,15 @@ def _grid_line_cells(
             else:
                 texts[column] = text
     if include_gaps:
+        # D-124: the season Statcast board's average launch angle, after EV.
+        # Context, never a firing line — v2.2 reads the share of contact
+        # above the HR launch floor, which the season boards do not publish.
+        launch_angle = line.avg_launch_angle if line is not None else None
+        if launch_angle is None:
+            texts = _insert_after(texts, "EV", {"LA": "—"})
+            styles["LA"] = _REASON_CSS
+        else:
+            texts = _insert_after(texts, "EV", {"LA": f"{float(launch_angle):.1f}°"})
         gaps = line.gaps if line is not None else None
         gap_cells = {
             "xISO-ISO": gaps.xiso_minus_iso if gaps is not None else None,
@@ -2246,6 +2376,12 @@ def _grid_line_cells(
                 texts = _insert_after(
                     texts, anchor, {name: f"{_signed_avg_text(value)} ({sample} PA)"}
                 )
+    # D-124: a star on the header marks a metric that carries a ratified
+    # v2.2 firing line (each line prints in the tab caption). LA stays
+    # unstarred — an average carries no line.
+    stars = _GRID_STARS_SEASON if include_gaps else _GRID_STARS_WINDOW
+    texts = {stars.get(column, column): text for column, text in texts.items()}
+    styles = {stars.get(column, column): css for column, css in styles.items()}
     return texts, styles
 
 
@@ -2448,7 +2584,18 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
         "or above a 14% usage share over the named window (D-079). Every "
         "column is computed over that scope; the grade is always the L30 "
         "computation, whichever view is showing. Select a batter row to "
-        "open their recent-form detail."
+        "open their recent-form detail. Hover any column header for its "
+        "one-line definition. A **★** on a header marks a metric carrying "
+        "a ratified v2.2 firing line (D-124) — L30 view: Pull Air % at "
+        "≥ 40% of measurable air balls with a boosting same-side park "
+        "factor reads the pull-air match, Oppo Air % over 20% reads "
+        "against the opposite-side factor (D-120); season view: EV at "
+        "≥ 91 mph with a bat speed ≥ 73 mph reads the power profile, and "
+        "xISO-ISO ≥ +.050 or xwOBA-wOBA ≥ +.015 flags under-performance "
+        "(D-115). The season view's LA is the batter's season average "
+        "launch angle — context, deliberately unstarred: v2.2 reads the "
+        "share of contact above the 18° HR launch floor, never the "
+        "average, and the season boards publish no share."
     )
     season_view = st.toggle(
         "Season view — every column reads the season sources; the grade stays L30",
@@ -2549,11 +2696,17 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
                     if not evaluated:
                         styles["Total"] = _REASON_CSS
                     style_rows.append(styles)
+                frame = pd.DataFrame(text_rows)
                 event = st.dataframe(
-                    styled_text_frame(pd.DataFrame(text_rows), pd.DataFrame(style_rows)),
+                    styled_text_frame(frame, pd.DataFrame(style_rows)),
                     hide_index=True,
                     on_select="rerun",
                     selection_mode="single-row",
+                    column_config=_column_help(
+                        frame.columns,
+                        _MATCHUPS_HELP,
+                        _GRID_STARS_SEASON if season_view else _GRID_STARS_WINDOW,
+                    ),
                     key=(
                         f"matchups_{board.official_date}_{game.game_pk}_"
                         f"{label.lower()}_{_selection_epoch()}"

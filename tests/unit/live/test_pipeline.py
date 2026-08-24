@@ -88,6 +88,7 @@ def _statcast_row(player_id: int) -> StatcastBatterRow:
         barrel_count=30,
         barrel_share=Decimal("0.1"),
         sweet_spot_share=Decimal("0.33"),
+        avg_launch_angle=Decimal("16.4"),
     )
 
 
@@ -226,6 +227,7 @@ class _FakeSavant:
         squared: dict[int, SquaredUpRow] | FetchFailure | None = None,
         pitcher_expected: dict[int, ExpectedStatsRow] | FetchFailure | None = None,
         pitcher_statcast: dict[int, StatcastPitcherRow] | FetchFailure | None = None,
+        statcast: dict[int, StatcastBatterRow] | FetchFailure | None = None,
     ) -> None:
         self._batter_arsenal = batter_arsenal
         self._pitcher_arsenal = pitcher_arsenal
@@ -234,6 +236,7 @@ class _FakeSavant:
         self._squared = squared
         self._pitcher_expected = pitcher_expected
         self._pitcher_statcast = pitcher_statcast
+        self._statcast = statcast
 
     def fetch_pitch_arsenal(
         self, *, kind: str, year: int
@@ -242,7 +245,9 @@ class _FakeSavant:
 
     def fetch_statcast_batters(
         self, *, year: int, minimum: int = 0
-    ) -> dict[int, StatcastBatterRow]:
+    ) -> dict[int, StatcastBatterRow] | FetchFailure:
+        if self._statcast is not None:
+            return self._statcast
         return {BATTER_ID: _statcast_row(BATTER_ID)}
 
     def fetch_bat_tracking(
@@ -763,6 +768,9 @@ def test_pitch_lines_derive_every_rate_from_the_given_scope() -> None:
     assert fastball.hard_hit_share == Decimal(1) / Decimal(2)
     assert fastball.expected_woba == Decimal("2.2") / Decimal(2)
     assert fastball.whiff_share == Decimal(1) / Decimal(3)
+    # D-124: the per-pitch mean launch angle reads the pitches with a
+    # measured angle — the same measured-event base EV reads.
+    assert fastball.mean_launch_angle == Decimal("20")
     slider = lines["SL"]
     assert slider.usage_share == Decimal(1) / Decimal(4)
     # A pitch thrown but never put in play carries named absences, not zeros.
@@ -770,6 +778,7 @@ def test_pitch_lines_derive_every_rate_from_the_given_scope() -> None:
     assert slider.batting_average is None
     assert slider.barrel_share is None
     assert slider.whiff_share is None
+    assert slider.mean_launch_angle is None
 
 
 def test_pitch_lines_sort_by_usage_and_empty_scope_is_absent() -> None:
@@ -1151,6 +1160,34 @@ def test_season_grid_line_composes_the_season_sources() -> None:
     assert line.whiff_share == Decimal("0.20")
     assert line.robbed_hr_count is None
     assert line.pull_air_share is None
+    # D-124: the season average launch angle rides the season line off the
+    # Statcast board — context only, never a firing line.
+    assert line.avg_launch_angle == Decimal("16.4")
+
+
+def test_the_season_line_leaves_launch_angle_none_without_a_statcast_row() -> None:
+    """D-124: no Statcast board row, no season LA — the surface names the
+    absence, never an invented average."""
+    hitting = {
+        BATTER_ID: SeasonHittingLine(
+            player_id=BATTER_ID,
+            full_name="Covered Batter",
+            bats="L",
+            games=120,
+            plate_appearances=500,
+            at_bats=440,
+            hits=121,
+            home_runs=33,
+            strikeouts=130,
+            total_bases=204,
+        )
+    }
+    savant = _FakeSavant(statcast={})
+    board = _build(_FakeApi(hitting=hitting), savant)
+    assert not isinstance(board, FetchFailure)
+    line = board.games[0].away_batters[0].season_line
+    assert line is not None
+    assert line.avg_launch_angle is None
 
 
 def _log_entry(date: str, home_runs: int, plate_appearances: int = 4) -> GameLogEntry:

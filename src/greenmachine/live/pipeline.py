@@ -221,6 +221,11 @@ class PitchLine:
     mean_launch_speed: Decimal | None = None
     air_ball_share: Decimal | None = None
     strikeout_share: Decimal | None = None  # the arsenal board's K% (season scopes)
+    # D-124: mean launch angle over the scope's pitches with a measured
+    # angle — the window record's per-pitch LA for the breakup's batter
+    # half. The arsenal board publishes no per-pitch LA, so season-scope
+    # lines leave this None and the pitcher half never shows it.
+    mean_launch_angle: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -299,6 +304,11 @@ class BatterGridLine:
     # scope's line; the L30 line leaves this None and the surface omits the
     # columns there.
     gaps: RegressionGaps | None = None
+    # D-124: the season Statcast board's average launch angle — season scope
+    # only (the L30 mix scope computes no batter-level LA; the dialog reads
+    # the window's per-pitch LA). Context, never a firing line: v2.2 reads
+    # the share of contact above the HR launch floor, not the average.
+    avg_launch_angle: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -789,6 +799,12 @@ def _pitch_lines(events: Sequence[PitchEvent]) -> tuple[PitchLine, ...]:
                 (event.launch_speed for event in batted if event.launch_speed is not None),
                 Decimal(0),
             ) / Decimal(len(batted))
+        # Per-pitch LA (D-124): over the pitches with a measured angle, the
+        # same measured-event base EV reads.
+        angles = [event.launch_angle for event in group if event.launch_angle is not None]
+        mean_angle: Decimal | None = None
+        if angles:
+            mean_angle = sum(angles, Decimal(0)) / Decimal(len(angles))
         lines.append(
             PitchLine(
                 pitch_type=pitch_type,
@@ -807,6 +823,7 @@ def _pitch_lines(events: Sequence[PitchEvent]) -> tuple[PitchLine, ...]:
                 batted_balls=len(bbe),
                 mean_launch_speed=mean_speed,
                 air_ball_share=Decimal(air_balls) / Decimal(len(bbe)) if bbe else None,
+                mean_launch_angle=mean_angle,
             )
         )
     lines.sort(key=lambda line: line.usage_share, reverse=True)
@@ -1024,6 +1041,7 @@ def _season_grid_line(
         expected_woba=(woba_total / Decimal(woba_pa)) if woba_pa else None,
         whiff_share=(whiff_total / Decimal(whiff_pitches)) if whiff_pitches else None,
         gaps=gaps,
+        avg_launch_angle=statcast.avg_launch_angle if statcast else None,
     )
 
 
