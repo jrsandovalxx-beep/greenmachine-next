@@ -49,10 +49,11 @@ import html
 import os
 import subprocess
 from collections.abc import Callable
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from importlib import metadata
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pandas as pd
 import streamlit as st
@@ -187,6 +188,24 @@ def resolve_environment() -> str:
     when nothing is configured the page says ``local`` rather than guessing.
     """
     return os.environ.get("GM_ENVIRONMENT", "").strip() or "local"
+
+
+_SLATE_ZONE = "America/Phoenix"
+
+
+def slate_today() -> date:
+    """The viewer's "today", not the server's (D-112).
+
+    The cloud host runs on UTC, so a bare ``date.today()`` rolls the slate
+    to tomorrow in the early evening for every US viewer. The slate's day
+    is read in the PO's home zone — Arizona, UTC-7 year-round (no daylight
+    saving), one switch away from any other US zone. If the host lacks the
+    tz database, the fixed -7 offset is exactly Arizona's rule.
+    """
+    try:
+        return datetime.now(ZoneInfo(_SLATE_ZONE)).date()
+    except ZoneInfoNotFoundError:
+        return datetime.now(timezone(timedelta(hours=-7))).date()
 
 
 def resolve_version() -> str:
@@ -2119,7 +2138,8 @@ def render_live_board() -> None:
     # knowledge cutoff (lineup estimates, form windows) stays anchored to
     # now. The picker is bounded to a month back and a week ahead: beyond
     # that the sources cannot answer the slate's questions honestly.
-    today = date.today()
+    # D-112: "today" is the viewer's Arizona day, never the server's UTC day.
+    today = slate_today()
     title_col, nav_col = st.columns([3, 2])
     with nav_col:
         chosen = st.date_input(
@@ -2128,6 +2148,7 @@ def render_live_board() -> None:
             min_value=today - timedelta(days=30),
             max_value=today + timedelta(days=7),
             key="slate_date_choice",
+            help="Slate dates run on Arizona time (MST, UTC-7 year-round).",
         )
     slate_date = chosen if isinstance(chosen, date) else today
     relative = {
@@ -2385,7 +2406,9 @@ def _render_backtest() -> None:
             help="Your own entry — +N pays N/100 per unit, -N pays 100/N, 0 is even.",
         )
     days = _BACKTEST_RANGES[range_label or "Last 7 days"]
-    dates = [date.today() - timedelta(days=d) for d in range(1, days + 1)]
+    # D-112: the backtest's "last N days" counts back from the viewer's
+    # Arizona day too, so an evening run never skips a finished slate.
+    dates = [slate_today() - timedelta(days=d) for d in range(1, days + 1)]
     blot = st.empty()
     blot.markdown(BLOT_HTML, unsafe_allow_html=True)
     per_day: dict[str, tuple[BacktestRow, ...]] = {}
