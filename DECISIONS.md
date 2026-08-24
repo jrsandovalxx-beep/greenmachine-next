@@ -2618,3 +2618,44 @@ humidity/wind read "roofed — not sourced", because the pipeline sources
 neither indoors. Live-verified on the 2026-08-24 slate: eight games
 banded from real readings (0.25 to 1), two named their NWS gap, three
 roofed venues carried the labelled assumption.
+
+## D-122 - wind receptiveness on the Conditions tab
+
+**(D-082's colour rule, shipped as a display read.)** The Conditions
+tab gains a **Wind recept.** column and a coloured Wind cell, from the
+Ballpark Pal wind-receptiveness capture the PO supplied (model years
+2023-2025, adjusted for yearly ball changes; printout captured
+2026-08-21 and committed at docs/reference/ballpark-pal-park-factors.md).
+The capture doc's own gate for entering the tree was "a DECISIONS.md
+entry and a SourceRecord first" — this entry is the former; the module
+ships the latter (MANUAL_EXPORT, digest-pinned 30-row CSV keyed by
+venue slug, verified byte count and sha256 before any row is read, the
+same pattern as the Savant park-factor snapshot). The seam guard that
+bans the source's name anywhere under src/ is amended to exempt
+exactly that one module — the provenance record cannot name its source
+otherwise — with the amendment recorded in the test itself.
+
+The read: the column quotes the park's **Overall** figure; the Wind
+cell's colour is **direction-specific** — an out-wind judges the
+park's out receptiveness, an in-wind the in figure — because the
+model's signs differ by direction at the same park (Angel Stadium:
+out -2.36, in +3.32; Wrigley: both positive). D-082's rule: green
+when the wind in its current direction helps the HR environment at a
+wind-receptive park, red when it hurts, neutral when the park barely
+notices wind or the breeze is calm. **Neither cut has a ratified
+number**, so the build lines are chosen and disclosed on the surface
+(D-079): |directional receptiveness| at or past **1** (the capture runs
+-3.2 to 9.2; under 1 is the barely-affected band) and **≥ 4 mph**
+resolved along the park axis (the source's own calmest speed bucket
+is 0-3). Display only — receptiveness never grades; the caption says so
+in as many words. The game card now carries the venue slug so the view
+joins the snapshot without re-deriving it. Absence semantics hold
+throughout: an uncovered venue reads "not covered", a missing wind
+reading names the source gap, and an unresolved breeze colours nothing.
+
+Live-verified on the 2026-08-24 slate: all ten games render the column
+from the pinned snapshot, and every Wind cell stays honestly neutral —
+Comerica's 13 mph west wind resolves 8.2 mph out along the axis,
+but its out receptiveness is 0.36, under the line despite an Overall of
+5.05: the direction-specific read working as intended, where the
+Overall figure alone would have coloured it.

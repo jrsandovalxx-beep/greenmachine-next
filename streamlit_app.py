@@ -51,6 +51,7 @@ import subprocess
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
+from functools import lru_cache
 from importlib import metadata
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -82,6 +83,7 @@ from greenmachine.grid import (
 from greenmachine.inputs import InputSnapshot, WeatherForecast, Window
 from greenmachine.inputs.contract import Handedness, ParkFactor, ParkVenue, VenueType
 from greenmachine.inputs.savant_park_factors import basis_statement, read_factors
+from greenmachine.inputs.wind_receptiveness import WindReceptiveness, read_receptiveness
 from greenmachine.live.backtest import (
     BacktestRow,
     outcomes_for_day,
@@ -2513,6 +2515,38 @@ def _temp_band(temp_f: Decimal) -> str:
     return f"{edges} → {raw}" + (" · capped at 1" if Decimal(raw) > 1 else "")
 
 
+# Wind receptiveness (D-082's parked colour rule, shipped as D-122): the
+# Conditions wind cell goes green when the wind in its current direction
+# helps the HR environment at a wind-receptive park, red when it hurts,
+# and stays neutral when the park barely notices wind or the breeze is
+# calm. Neither cut has a ratified number, so the build lines are chosen
+# and disclosed: |receptiveness| ≥ 1 (the capture runs -3.2 to 9.2; under
+# 1 is the barely-affected band) and ≥ 4 mph resolved along the park axis
+# (Ballpark Pal's own calmest speed bucket is 0-3 mph).
+_WIND_RECEPTIVE_LINE = Decimal("1")
+_WIND_CALM_LINE = Decimal("4")
+
+
+@lru_cache(maxsize=1)
+def _wind_receptiveness() -> dict[str, WindReceptiveness]:
+    """The pinned Ballpark Pal receptiveness table, read once per process."""
+    return read_receptiveness()
+
+
+def _wind_effect_css(receptiveness: WindReceptiveness | None, resolved: Decimal | None) -> str:
+    """The D-082 wind-cell colour: green when the wind in its current
+    direction helps this park's HR environment, red when it hurts, ""
+    for neutral. The read is direction-specific — an out-wind judges
+    ``recept_out``, an in-wind ``recept_in`` — because the model's signs
+    differ by direction at the same park."""
+    if receptiveness is None or resolved is None:
+        return ""
+    directional = receptiveness.recept_out if resolved > 0 else receptiveness.recept_in
+    if abs(directional) < _WIND_RECEPTIVE_LINE or abs(resolved) < _WIND_CALM_LINE:
+        return ""
+    return _HIGHLIGHT if directional > 0 else _VETO_CSS
+
+
 def _render_conditions(board: SlateBoard) -> None:
     st.caption(
         "Parks and conditions. A park factor carries its plate-appearance "
@@ -2525,7 +2559,14 @@ def _render_conditions(board: SlateBoard) -> None:
         "Humidity is a secondary modifier, never a standalone badge. Wind "
         "is the raw forecast reading — the resolved assist/kill reads live "
         "on the Sluggers tags. A roofed venue grades at an assumed 72°F — "
-        "an assumption, labelled, never a forecast."
+        "an assumption, labelled, never a forecast. "
+        "Wind receptiveness (Ballpark Pal, model years 2023-2025, captured "
+        "2026-08-21 — display only, it never grades): the modelled "
+        "HR-effect sensitivity to wind, quoted Overall and read per "
+        "direction — the Wind cell goes green when the current wind helps "
+        "at a wind-receptive park (receptiveness at or past ±1) and red "
+        "when it hurts, only with ≥ 4 mph resolved along the park axis; "
+        "under either line it stays neutral."
     )
     text_rows: list[dict[str, str]] = []
     style_rows: list[dict[str, str]] = []
@@ -2534,6 +2575,7 @@ def _render_conditions(board: SlateBoard) -> None:
         left = game.home_run_factor_left
         right = game.home_run_factor_right
         roofed = game.venue_type is not VenueType.OPEN_AIR
+        receptiveness = _wind_receptiveness().get(game.venue_id)
         values: dict[str, tuple[float | int | None, str]] = {
             "HR factor (LHB)": (float(left.factor) if left else None, "not covered"),
             "n": (left.plate_appearances if left else None, "not covered"),
@@ -2586,9 +2628,26 @@ def _render_conditions(board: SlateBoard) -> None:
                 if direction
                 else f"{float(wind_speed):.0f} mph"
             )
+            # D-122's colour rule: the forecast resolved along the park
+            # axis, judged by the direction-specific receptiveness.
+            axis = game.park_orientation_degrees
+            wind_from = game.wind_from_degrees
+            resolved = (
+                resolved_wind_mph(wind_speed, wind_from, axis)
+                if axis is not None and wind_from is not None
+                else None
+            )
+            effect = _wind_effect_css(receptiveness, resolved)
+            if effect:
+                styles["Wind"] = effect
         else:
             texts["Wind"] = "roofed — not sourced" if roofed else "source unavailable"
             styles["Wind"] = _REASON_CSS
+        if receptiveness is not None:
+            texts["Wind recept."] = f"{float(receptiveness.recept_overall):.2f}"
+        else:
+            texts["Wind recept."] = "not covered"
+            styles["Wind recept."] = _REASON_CSS
         text_rows.append(texts)
         style_rows.append(styles)
     st.dataframe(

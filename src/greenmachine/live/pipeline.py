@@ -567,6 +567,10 @@ class GameCard:
     # resolve against an invented bearing.
     park_orientation_degrees: Decimal | None = None
     wind_from_degrees: Decimal | None = None
+    # D-122: the park reference's venue slug, so the conditions surface can
+    # join the pinned wind-receptiveness snapshot. None for an unjoined
+    # venue — the receptiveness cell then reads as absent, never guessed.
+    venue_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1809,6 +1813,8 @@ def build_board(
                     else None
                 ),
                 wind_from_degrees=(_parse_wind_from(wind[1]) if wind is not None else None),
+                # D-122: the slug the wind-receptiveness snapshot keys on.
+                venue_id=venue.venue_id if venue is not None else None,
             )
         )
 
