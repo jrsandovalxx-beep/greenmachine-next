@@ -680,6 +680,23 @@ _SQUARED_UP_LINE = Decimal("0.35")
 _CONTACT_BAT_SPEED_LINE = Decimal("70")
 _TOP5_SLOT = 5
 
+# v2.2 (D-118): the park and weather tag lines. The park reads use the
+# hand-split home-run factor for the batter's resolved side (D-065) —
+# boost at ≥ 110 (strong ≥ 115), wrong-side at ≤ 90 (strong ≤ 85). The
+# weather reads fire only on open-air venues with a live temperature —
+# heat boost at ≥ 85°F (strong ≥ 90°F), cold suppress below 45°F. A
+# roofed stadium is the indoor neutral value and a missing reading is a
+# silent tag, never an invented one. COLD_SUPPRESS's severe variant
+# (< 38°F with the wind in) waits on the park-orientation table (SP-4):
+# there is no honest "wind in" without it.
+_PARK_BOOST_LINE = Decimal("110")
+_PARK_BOOST_STRONG_LINE = Decimal("115")
+_WRONG_SIDE_PARK_LINE = Decimal("90")
+_WRONG_SIDE_PARK_STRONG_LINE = Decimal("85")
+_HEAT_BOOST_LINE = Decimal("85")
+_HEAT_BOOST_STRONG_LINE = Decimal("90")
+_COLD_SUPPRESS_LINE = Decimal("45")
+
 # The ratified pitch-type sample floor (10 BBE) for the breakup table's
 # per-pitch EV and Air% — below it the INSUFFICIENT treatment, never hidden.
 _MIN_BBE_PITCH_TYPE = 10
@@ -717,12 +734,18 @@ def _ordinal(position: int) -> str:
     return f"{position}" + {1: "st", 2: "nd", 3: "rd"}.get(position % 10, "th")
 
 
-def _card_tags(card: BatterCard, opposing: PitcherCard | None) -> tuple[str, str, str]:
+def _card_tags(
+    card: BatterCard,
+    opposing: PitcherCard | None,
+    *,
+    game: GameCard | None = None,
+) -> tuple[str, str, str]:
     """(advisories, boosters, vetoes) for the shortlist's three tag columns
     (v2.2, D-114): the neutral advisories and absences, the reads that argue
     FOR the home run (green), and the reads that argue AGAINST it (red).
     Tags join with " · ", so no tag carries an interpunct inside itself —
-    commas inside, interpuncts between."""
+    commas inside, interpuncts between. The park and weather reads (D-118)
+    need the game; without one they stay silent."""
     advisories: list[str] = []
     boosters: list[str] = []
     vetoes: list[str] = []
@@ -863,6 +886,30 @@ def _card_tags(card: BatterCard, opposing: PitcherCard | None) -> tuple[str, str
             f"({card.squared_up_swings} swings), "
             f"bat speed {float(card.squared_up_bat_speed):.1f} mph"
         )
+    # v2.2 park & weather reads (D-118): the hand-split home-run factor for
+    # the batter's resolved side, and the open-air temperature. A roofed
+    # venue or a missing reading is a silent tag, never an invented one.
+    if game is not None:
+        factor = _side_factor(game, card.batting_side)
+        if factor is not None:
+            side_text = f"{card.batting_side}HB"
+            if factor.factor >= _PARK_BOOST_LINE:
+                strong = "strong " if factor.factor >= _PARK_BOOST_STRONG_LINE else ""
+                boosters.append(
+                    f"park boost: {strong}HR factor {float(factor.factor):.0f} ({side_text})"
+                )
+            elif factor.factor <= _WRONG_SIDE_PARK_LINE:
+                strong = "strong " if factor.factor <= _WRONG_SIDE_PARK_STRONG_LINE else ""
+                vetoes.append(
+                    f"wrong-side park: {strong}HR factor {float(factor.factor):.0f} ({side_text})"
+                )
+        temp = game.temperature_fahrenheit
+        if game.venue_type is VenueType.OPEN_AIR and temp is not None:
+            if temp >= _HEAT_BOOST_LINE:
+                strong = "strong " if temp >= _HEAT_BOOST_STRONG_LINE else ""
+                boosters.append(f"heat boost: {strong}{float(temp):.0f}°F")
+            elif temp < _COLD_SUPPRESS_LINE:
+                vetoes.append(f"cold suppress: {float(temp):.0f}°F")
     return " · ".join(advisories), " · ".join(boosters), " · ".join(vetoes)
 
 
@@ -892,7 +939,7 @@ def _slugger_frames(board: SlateBoard) -> tuple[pd.DataFrame, pd.DataFrame, list
                     continue
                 factor = _side_factor(game, card.batting_side)
                 weather, weather_absent = _weather_text(game)
-                advisories, boosters, vetoes = _card_tags(card, opposing)
+                advisories, boosters, vetoes = _card_tags(card, opposing, game=game)
                 texts = {
                     "Batter": card.full_name,
                     "HR": "$" if card.homered_on_last_game_day else "",
@@ -1585,7 +1632,12 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "Contact-first is a veto: squared-up ≥ 35% of competitive swings "
         "with a sub-70 mph bat speed — a contact profile, not power. "
         "Actual over expected (wOBA-xwOBA ≥ ~.040 with sprint ≥ 28 ft/s) "
-        "is context only — no automatic speed attribution."
+        "is context only — no automatic speed attribution. "
+        "Park & weather reads (v2.2, D-118): the park boost at a "
+        "batter-side HR factor ≥ 110 (strong ≥ 115), the wrong-side park "
+        "at ≤ 90 (strong ≤ 85); the heat boost at ≥ 85°F (strong ≥ 90°F) "
+        "and the cold suppress below 45°F, open-air venues only — a "
+        "roofed stadium is the indoor neutral value."
     )
     texts, styles, cards = _slugger_frames(board)
     if texts.empty:
