@@ -2409,3 +2409,36 @@ firing line rides in the Sluggers caption. Open items reported to the
 PO, not stopped for: the temperature component cap (config decision),
 the pulled-barrels raw-count display (doc says pending PO ratify), and
 the GMN pull-air league baseline (awaits the raw Savant export).
+
+## D-115 - v2.2 batch 2: the batter-side and situational tags
+
+**(PO directive 2026-08-23, v2.2 thresholds doc, batch 2 of the tag
+dictionary.)** The batter-side tags land with their v2.2 firing lines,
+each printed in the Sluggers caption. The x-gap flag becomes an
+under-performance read only — xISO-ISO >= +.050 or xwOBA-wOBA >= +.015,
+riding the green column — superseding D-110's .030 absolute-value
+neutral tag (D-110's text stands). Barrel elite: barrel% >= 15 over
+>= 50 season BBE, shipped as `barrel {x}% ({n} BBE)`. The power
+profile: season avg EV >= 91 mph AND bat speed >= 73 mph, both. The
+contact-first tag flips to v2.2's veto — squared-up >= 35% of
+competitive swings with a sub-70 mph bat speed is a contact profile,
+not power — superseding D-110's >= 72 mph context tag. A top-5 lineup
+slot is a booster (the 4-5 PA tier) and leadoff adds the extra-look
+tag; slots 6-9 stay neutral advisories. Platoon advantage reads the
+batter's resolved side against the starter's throwing hand; the
+caption carries the +28/+16 long-run averages and the 2025 anomaly
+caveat (LHP held RHB below league wOBA for the first time in 20+
+years, so it stays a contact-quality signal). The robbed tag aligns to
+D-113's column definition (375+ ft balls that stayed in the park,
+last 7 days — the PO's newer definition wins over the doc's
+385-409 ft band): a raw count, one or more fires it, zero stays
+silent. Actual-over-expected (wOBA-xwOBA >= ~.040 with sprint
+>= 28 ft/s) rides the NEUTRAL column, not the green one the doc's
+section heading implies: the doc's own text marks it context-only with
+no automatic speed attribution, and the green/red columns are reserved
+for reads that argue for or against the home run — logged here so the
+deviation is explicit. The power-badge eligibility gate follows the
+v2.2 rule (season scope, denominator-based): both power tags gate on
+>= 50 season BBE. Still queued: the park/weather tags (need the game
+passed into the tag builder), the pulled-barrels form count, and the
+MiLB call-up tag.

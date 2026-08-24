@@ -1337,13 +1337,22 @@ def test_card_tags_carry_the_slot_and_the_v22_k_reads() -> None:
         squared_up_share=None,
         squared_up_swings=0,
         squared_up_bat_speed=None,
+        statcast=None,
+        sprint_speed_fps=None,
+        batting_side=None,
+        mix_line=None,
     )
     arm = SimpleNamespace(
-        season_whiff_weighted=Decimal("0.20"), season_reads=None, recent_overall=None
+        season_whiff_weighted=Decimal("0.20"),
+        season_reads=None,
+        recent_overall=None,
+        throws=None,
     )
     advisories, boosters, vetoes = streamlit_app._card_tags(card, arm)
     assert "est. lineup" in advisories
-    assert "bats 1st (est.)" in advisories
+    # v2.2 (D-115): the leadoff slot is a booster and adds the extra look.
+    assert "bats 1st (est.)" in boosters
+    assert "extra look at the starter (4-5 PA tier)" in boosters
     assert "high-K bat vs low-whiff arm: K% 28.0 (402 PA), arsenal whiff 20.0%" in boosters
     assert "low-whiff arm: arsenal whiff 20.0% (season)" in boosters
     assert "high-K profile" not in vetoes  # the unlock tag supersedes it
@@ -1352,7 +1361,10 @@ def test_card_tags_carry_the_slot_and_the_v22_k_reads() -> None:
     _, boosters, vetoes = streamlit_app._card_tags(
         card,
         SimpleNamespace(
-            season_whiff_weighted=Decimal("0.25"), season_reads=None, recent_overall=None
+            season_whiff_weighted=Decimal("0.25"),
+            season_reads=None,
+            recent_overall=None,
+            throws=None,
         ),
     )
     assert "binary K profile: K% 28.0 (402 PA)" in vetoes
@@ -1360,7 +1372,10 @@ def test_card_tags_carry_the_slot_and_the_v22_k_reads() -> None:
     # ...and the high-K caution at 30%+.
     hot = SimpleNamespace(**{**vars(card), "season_k_share": Decimal("0.31")})
     _, _, vetoes = streamlit_app._card_tags(
-        hot, SimpleNamespace(season_whiff_weighted=None, season_reads=None, recent_overall=None)
+        hot,
+        SimpleNamespace(
+            season_whiff_weighted=None, season_reads=None, recent_overall=None, throws=None
+        ),
     )
     assert "high-K profile: K% 31.0 (402 PA)" in vetoes
     # The 22% unlock line: below it no K tag even against a low-whiff arm.
@@ -1393,6 +1408,10 @@ def test_card_tags_carry_the_v22_pitcher_side_reads() -> None:
         squared_up_share=None,
         squared_up_swings=0,
         squared_up_bat_speed=None,
+        statcast=None,
+        sprint_speed_fps=None,
+        batting_side=None,
+        mix_line=None,
     )
 
     def arm(hr9: str, la: str, gb: str | None, bbe: int = 148) -> SimpleNamespace:
@@ -1405,6 +1424,7 @@ def test_card_tags_carry_the_v22_pitcher_side_reads() -> None:
                 ground_ball_share=Decimal(gb) if gb is not None else None,
                 classified_batted_balls=bbe,
             ),
+            throws=None,
         )
 
     # GB profile off the L30 share, plain and extreme.
@@ -1432,10 +1452,12 @@ def test_card_tags_carry_the_v22_pitcher_side_reads() -> None:
     assert boosters == "" and vetoes == ""
 
 
-def test_card_tags_carry_the_x_gap_and_contact_first_reads() -> None:
-    """D-110: the x-gap tag fires when EITHER season gap's absolute value
-    reaches .030 — both values always shown with the PA sample; the
-    contact-first tag needs squared-up ≥ 35% AND bat speed ≥ 72 mph."""
+def test_card_tags_carry_the_v22_x_gap_and_contact_first_reads() -> None:
+    """v2.2 (D-115), superseding D-110: the x-gap flag is under-performance
+    evidence — the positive side only, xISO-ISO ≥ +.050 or xwOBA-wOBA
+    ≥ +.015, both values always shown with the PA sample, riding the green
+    column; contact-first flips to a veto — squared-up ≥ 35% of competitive
+    swings with a SUB-70 bat speed, a contact profile, not power."""
     from types import SimpleNamespace
 
     import streamlit_app
@@ -1452,59 +1474,170 @@ def test_card_tags_carry_the_x_gap_and_contact_first_reads() -> None:
         squared_up_share=None,
         squared_up_swings=0,
         squared_up_bat_speed=None,
+        statcast=None,
+        sprint_speed_fps=None,
+        batting_side=None,
+        mix_line=None,
     )
-    # Either gap trips the tag; the other value still prints.
+    # The xISO side trips the flag; the other value still prints.
     over = SimpleNamespace(
         **{
             **base,
             "season_gaps": RegressionGaps(
-                xiso_minus_iso=Decimal("0.041"),
+                xiso_minus_iso=Decimal("0.051"),
                 xwoba_minus_woba=Decimal("-0.012"),
                 plate_appearances=412,
             ),
         }
     )
-    advisories, _, _ = streamlit_app._card_tags(over, None)
-    assert "x-gap: xISO +.041, xwOBA -.012 (season, 412 PA)" in advisories
+    _, boosters, _ = streamlit_app._card_tags(over, None)
+    assert "x-gap: xISO +.051, xwOBA -.012 (season, 412 PA)" in boosters
+    # The xwOBA side trips it at its own, lighter line.
     flipped = SimpleNamespace(
         **{
             **base,
             "season_gaps": RegressionGaps(
                 xiso_minus_iso=Decimal("0.010"),
-                xwoba_minus_woba=Decimal("0.030"),
+                xwoba_minus_woba=Decimal("0.015"),
                 plate_appearances=88,
             ),
         }
     )
-    assert "x-gap" in streamlit_app._card_tags(flipped, None)[0]
-    # Under the line on both, and no board row: no tag.
+    assert "x-gap" in streamlit_app._card_tags(flipped, None)[1]
+    # A NEGATIVE gap (over-performance) is not the under-performance flag.
+    negative = SimpleNamespace(
+        **{
+            **base,
+            "season_gaps": RegressionGaps(
+                xiso_minus_iso=Decimal("-0.060"),
+                xwoba_minus_woba=Decimal("-0.020"),
+                plate_appearances=88,
+            ),
+        }
+    )
+    assert "x-gap" not in streamlit_app._card_tags(negative, None)[1]
+    # Under both lines, and no board row: no tag.
     under = SimpleNamespace(
         **{
             **base,
             "season_gaps": RegressionGaps(
-                xiso_minus_iso=Decimal("0.029"),
-                xwoba_minus_woba=Decimal("-0.029"),
+                xiso_minus_iso=Decimal("0.049"),
+                xwoba_minus_woba=Decimal("0.014"),
                 plate_appearances=88,
             ),
         }
     )
-    assert "x-gap" not in streamlit_app._card_tags(under, None)[0]
-    assert "x-gap" not in streamlit_app._card_tags(SimpleNamespace(**base), None)[0]
-    # Contact-first: both sides of the ratified line are required.
+    assert "x-gap" not in streamlit_app._card_tags(under, None)[1]
+    assert "x-gap" not in streamlit_app._card_tags(SimpleNamespace(**base), None)[1]
+    # Contact-first veto: squared-up high AND a sub-70 bat speed, both.
     contact = SimpleNamespace(
         **{
             **base,
             "squared_up_share": Decimal("0.362"),
             "squared_up_swings": 620,
-            "squared_up_bat_speed": Decimal("73.4"),
+            "squared_up_bat_speed": Decimal("68.4"),
         }
     )
-    advisories, _, _ = streamlit_app._card_tags(contact, None)
-    assert "contact-first profile: squared-up 36.2% (620 swings), bat speed 73.4 mph" in advisories
-    slow_bat = SimpleNamespace(**{**vars(contact), "squared_up_bat_speed": Decimal("71.9")})
-    assert "contact-first" not in streamlit_app._card_tags(slow_bat, None)[0]
+    _, _, vetoes = streamlit_app._card_tags(contact, None)
+    assert "contact-first profile: squared-up 36.2% (620 swings), bat speed 68.4 mph" in vetoes
+    fast_bat = SimpleNamespace(**{**vars(contact), "squared_up_bat_speed": Decimal("70.1")})
+    assert "contact-first" not in streamlit_app._card_tags(fast_bat, None)[2]
     low_squared = SimpleNamespace(**{**vars(contact), "squared_up_share": Decimal("0.349")})
-    assert "contact-first" not in streamlit_app._card_tags(low_squared, None)[0]
+    assert "contact-first" not in streamlit_app._card_tags(low_squared, None)[2]
+
+
+def test_card_tags_carry_the_v22_batter_boosters() -> None:
+    """v2.2 (D-115): barrel elite (≥ 15% over ≥ 50 season BBE), the power
+    profile (EV ≥ 91 + bat speed ≥ 73), the platoon advantage off the
+    resolved side, the robbed count from the D-113 column, and the top-5
+    slot — all riding the green column with their samples."""
+    from types import SimpleNamespace
+
+    import streamlit_app
+
+    from greenmachine.live.pipeline import RegressionGaps
+
+    base = dict(
+        result=SimpleNamespace(present_observations=[], missing_observations=[]),
+        order_position=None,
+        lineup_is_estimate=False,
+        season_k_share=None,
+        season=None,
+        season_gaps=None,
+        squared_up_share=None,
+        squared_up_swings=0,
+        squared_up_bat_speed=None,
+        statcast=None,
+        sprint_speed_fps=None,
+        batting_side=None,
+        mix_line=None,
+    )
+
+    def batter(**over: object) -> SimpleNamespace:
+        return SimpleNamespace(**{**base, **over})
+
+    def statcast(bbe: int, barrel: str, ev: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            batted_ball_events=bbe,
+            barrel_share=Decimal(barrel),
+            exit_velocity_avg=Decimal(ev),
+        )
+
+    arm = SimpleNamespace(
+        season_whiff_weighted=None, season_reads=None, recent_overall=None, throws="R"
+    )
+    # Barrel elite with the gate met; below the BBE gate it stays silent.
+    slugger = batter(statcast=statcast(320, "0.161", "90.2"), batting_side="L")
+    _, boosters, _ = streamlit_app._card_tags(slugger, arm)
+    assert "barrel 16.1% (320 BBE)" in boosters
+    thin = batter(statcast=statcast(49, "0.161", "90.2"))
+    assert "barrel" not in streamlit_app._card_tags(thin, arm)[1]
+    # The power profile needs BOTH sides of the line.
+    _, boosters, _ = streamlit_app._card_tags(
+        batter(statcast=statcast(320, "0.09", "91.4"), squared_up_bat_speed=Decimal("73.5")),
+        arm,
+    )
+    assert "power profile: EV 91.4 mph, bat speed 73.5 mph (season)" in boosters
+    _, boosters, _ = streamlit_app._card_tags(
+        batter(statcast=statcast(320, "0.09", "91.4"), squared_up_bat_speed=Decimal("72.9")),
+        arm,
+    )
+    assert "power profile" not in boosters
+    # Platoon advantage off the resolved side; same-side stays silent.
+    _, boosters, _ = streamlit_app._card_tags(batter(batting_side="L"), arm)
+    assert "platoon advantage: bats L vs RP" in boosters
+    _, boosters, _ = streamlit_app._card_tags(batter(batting_side="R"), arm)
+    assert "platoon" not in boosters
+    # Robbed rides the D-113 count — one or more, never a rate, 0 silent.
+    _, boosters, _ = streamlit_app._card_tags(
+        batter(mix_line=SimpleNamespace(robbed_hr_count=2)), arm
+    )
+    assert "robbed: 2 at 375+ ft stayed in the park (L7)" in boosters
+    _, boosters, _ = streamlit_app._card_tags(
+        batter(mix_line=SimpleNamespace(robbed_hr_count=0)), arm
+    )
+    assert "robbed" not in boosters
+    # Top-5 slot is a booster; the 7-hole stays an advisory.
+    _, boosters, _ = streamlit_app._card_tags(batter(order_position=4), arm)
+    assert "bats 4th" in boosters
+    advisories, boosters, _ = streamlit_app._card_tags(batter(order_position=7), arm)
+    assert "bats 7th" in advisories and "bats 7th" not in boosters
+    # Actual over expected: context only, on the neutral column.
+    context = batter(
+        season_gaps=RegressionGaps(
+            xiso_minus_iso=Decimal("-0.030"),
+            xwoba_minus_woba=Decimal("-0.042"),
+            plate_appearances=401,
+        ),
+        sprint_speed_fps=Decimal("28.4"),
+    )
+    advisories, _, _ = streamlit_app._card_tags(context, arm)
+    assert (
+        "actual over expected: wOBA +.042 over xwOBA (season, 401 PA), sprint 28.4 ft/s"
+        in advisories
+    )
+    slow = SimpleNamespace(**{**vars(context), "sprint_speed_fps": Decimal("27.1")})
+    assert "actual over expected" not in streamlit_app._card_tags(slow, arm)[0]
 
 
 def test_ordinal_never_says_1th() -> None:
