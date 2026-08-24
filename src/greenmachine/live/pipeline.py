@@ -90,9 +90,12 @@ GAME_LOG_LOOKBACK_DAYS = 5
 # D-081's reach: a starter whose mix has no pitches in the matchup window
 # extends the read to L45 before falling back to the season board.
 MIX_REACH_DAYS = 45
-# D-090's distance column counts batted balls at or past this distance,
-# any direction — it is its own metric, separate from Pull Air %.
-LONG_BALL_DISTANCE_FLOOR_FT = Decimal("350")
+# The robbed-HR column (PO 2026-08-24, replacing D-090's +350 ft column):
+# batted balls at or past this projected distance that STAYED IN THE PARK
+# (a ball that left was not robbed of anything), over the batter's last 7
+# days of kept events — homer-shaped contact the HR total hides.
+ROBBED_HR_DISTANCE_FLOOR_FT = Decimal("375")
+ROBBED_HR_WINDOW_DAYS = 7
 SEASON_WINDOW_MONTH = 3
 SEASON_WINDOW_DAY = 1
 SEASON_IDS_PER_REQUEST = 90
@@ -274,7 +277,11 @@ class BatterGridLine:
     batting_average: Decimal | None
     slugging: Decimal | None
     iso: Decimal | None
-    distance_350_count: int | None
+    # Robbed HRs: 375+ ft balls that stayed in the park over the last 7
+    # days of kept events — a different basis from the row's mix scope, so
+    # it is computed separately and injected, None when the event record
+    # itself failed (never an invented zero).
+    robbed_hr_count: int | None
     pull_air_share: Decimal | None
     # SP-1 (D-109): the pull mirror over the identical measurable-air
     # denominator — None on the season view, which publishes no spray read.
@@ -819,11 +826,30 @@ def _matchup_lines(
     return tuple(lines)
 
 
-def _batter_grid_line(events: Sequence[PitchEvent]) -> BatterGridLine | None:
+def _robbed_hr_count(events: Sequence[PitchEvent], cutoff: str) -> int:
+    """Robbed HRs over the batter's kept events at or after ``cutoff`` —
+    projected 375+ feet and STAYED IN THE PARK (the play's result was not
+    a home run). A raw count, never a rate: one robbed ball a week is a
+    regular's pace, and zero is a real observation, not a cold streak."""
+    return sum(
+        1
+        for event in events
+        if event.game_date >= cutoff
+        and event.hit_distance is not None
+        and event.hit_distance >= ROBBED_HR_DISTANCE_FLOOR_FT
+        and event.event != "home_run"
+    )
+
+
+def _batter_grid_line(
+    events: Sequence[PitchEvent], *, robbed_count: int | None
+) -> BatterGridLine | None:
     """The batter's grid line over one stated scope of pitch events — his
     L30 record against the starter's qualifying mix pitches (D-079). Every
     rate reads exactly these events; a scope with no events returns None so
-    the surface states 'no data available' (D-081)."""
+    the surface states 'no data available' (D-081). The robbed-HR count is
+    the one column off a different basis — the batter's whole last-7-days
+    event record, not this scope — so it arrives computed (PO 2026-08-24)."""
     if not events:
         return None
     outcomes = _plate_outcomes(events)
@@ -837,11 +863,6 @@ def _batter_grid_line(events: Sequence[PitchEvent]) -> BatterGridLine | None:
         1
         for event in batted
         if event.launch_speed is not None and event.launch_speed >= HARD_HIT_THRESHOLD_MPH
-    )
-    long_balls = sum(
-        1
-        for event in batted
-        if event.hit_distance is not None and event.hit_distance >= LONG_BALL_DISTANCE_FLOOR_FT
     )
     # Pull Air % mirrors the form section: pulled air balls over measurable
     # air balls — a ball without coordinates or a known side leaves both
@@ -867,7 +888,7 @@ def _batter_grid_line(events: Sequence[PitchEvent]) -> BatterGridLine | None:
         batting_average=outcomes.batting_average,
         slugging=outcomes.slugging,
         iso=outcomes.iso,
-        distance_350_count=long_balls,
+        robbed_hr_count=robbed_count,
         pull_air_share=(Decimal(pulls) / Decimal(len(measurable_air)) if measurable_air else None),
         oppo_air_share=(Decimal(oppos) / Decimal(len(measurable_air)) if measurable_air else None),
         expected_woba=outcomes.expected_woba,
@@ -884,8 +905,8 @@ def _season_grid_line(
     """The batter's season-view grid line (D-079's toggle target), composed
     from the season sources: the hitting line for AB/H/HR/AVG/SLG/ISO, the
     statcast board for EV/barrels/hard-hit, and the arsenal board for
-    PA-weighted xwOBA and pitch-weighted Swing-Str. No season source
-    publishes a 350-foot distance read or a pull-air read, so those cells
+    PA-weighted xwOBA and pitch-weighted Swing-Str. The season scope has
+    no per-event record, so the robbed-HR count and the pull-air reads
     stay None — the surface names the absence (D-081/D-090). The D-110
     regression gaps ride along when the expected-stats board covers him."""
     if line is None and statcast is None and not arsenal_rows:
@@ -922,7 +943,7 @@ def _season_grid_line(
         batting_average=average,
         slugging=slugging,
         iso=(slugging - average if average is not None and slugging is not None else None),
-        distance_350_count=None,
+        robbed_hr_count=None,
         pull_air_share=None,
         oppo_air_share=None,
         expected_woba=(woba_total / Decimal(woba_pa)) if woba_pa else None,
@@ -1689,7 +1710,20 @@ def build_board(
                             else {}
                         ),
                         mix_line=(
-                            _batter_grid_line(mix_scope_events)
+                            _batter_grid_line(
+                                mix_scope_events,
+                                # The robbed count reads the batter's whole
+                                # last-7-days record, not the mix scope —
+                                # None when the event record itself failed.
+                                robbed_count=(
+                                    _robbed_hr_count(
+                                        events_by_batter.get(player_id, ()),
+                                        window_cutoffs[ROBBED_HR_WINDOW_DAYS],
+                                    )
+                                    if form_source_available
+                                    else None
+                                ),
+                            )
                             if pitcher_entity is not None
                             else None
                         ),

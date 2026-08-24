@@ -2358,3 +2358,20 @@ fixed -7 offset is the exact fallback when a host lacks the tz
 database (ZoneInfoNotFoundError). The date picker's help names the
 zone. Moving the slate to another US zone is a one-word switch
 (_SLATE_ZONE).
+
+## D-113 - robbed-HR column replaces the +350 ft column
+
+**(PO directive 2026-08-24: swap the "+350 ft" grid column for "robbed
+home runs" — balls hit 375+ feet — based off the last 7 days. This
+supersedes D-090's distance read; D-090's text stands unchanged.)** A
+robbed HR is a projected-375+ ft batted ball that STAYED IN THE PARK —
+the play's result was not a home run, since a ball that left was robbed
+of nothing. The count reads the batter's whole last-7-days kept event
+record (the window the PO named), a deliberately different basis from
+the row's L30-versus-the-mix scope, so it is computed pipeline-side
+from the batter's full event pool and injected into the grid line; the
+matchups scope caption names the exception. It is a raw count, never a
+rate — one robbed ball a week is a regular's pace and zero is a real
+observation, not a cold streak — and it is None, a named absence, only
+when the event record itself failed. The season scope keeps the named
+absence it always had: no season source publishes per-event distances.
