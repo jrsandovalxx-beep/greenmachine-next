@@ -121,6 +121,11 @@ class _OutageApi:
     ) -> FetchFailure:
         return FetchFailure("game-logs: simulated outage")
 
+    def fetch_recent_pitching_logs(
+        self, player_ids: tuple[int, ...], start_mmddyyyy: str, end_mmddyyyy: str
+    ) -> FetchFailure:
+        return FetchFailure("pitching-game-logs: simulated outage")
+
 
 class _OutageSavant:
     """One batter covered, one not: the mix that turns a column float64 and
@@ -933,6 +938,58 @@ def test_sp_recent_row_at_the_floor_carries_no_advisory() -> None:
     row, styles = streamlit_app._sp_recent_row("vs R (L30)", line, vulnerability_floor=True)
     assert "INSUFFICIENT" not in row["Scope"]
     assert styles["wOBA"] == streamlit_app._HIGHLIGHT
+
+
+def test_workload_facts_one_wording_both_surfaces() -> None:
+    """D-123 (SP-3): the Arms columns and the dialog echo share the one
+    helper — raw facts, the ratified 100-pitch flag named, the absence in
+    words, never a cap claim."""
+    import streamlit_app
+
+    from greenmachine.live.pipeline import StarterWorkload
+
+    assert streamlit_app._workload_facts(None) == (
+        "no start record in the lookback window",
+        "—",
+    )
+    workload = StarterWorkload(
+        last_start_date="2026-08-18",
+        last_start_pitches=101,
+        days_since_last_start=1,
+        last_starts=(101, 88, 92),
+        starts_in_window=3,
+        workload_flag=True,
+        thin_sample=False,
+    )
+    last, last_three = streamlit_app._workload_facts(workload)
+    assert last == "101 pitches, 1 day ago · workload flag"
+    assert last_three == "101/88/92 pitches"
+    light = dataclasses.replace(
+        workload, last_start_pitches=87, days_since_last_start=4, workload_flag=False
+    )
+    last, _ = streamlit_app._workload_facts(light)
+    assert last == "87 pitches, 4 days ago"
+
+
+def test_arms_carries_the_workload_columns_with_their_absence_named(
+    _staged_app: SlateBoard,
+) -> None:
+    """D-123 (SP-3): the Arms tab carries the raw workload columns; on the
+    outage board the cells name the absence, never a blank or a None."""
+    at = AppTest.from_file(str(_APP_PATH), default_timeout=_TIMEOUT)
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    for element in at.dataframe:
+        display = _display_values(element).astype(str)
+        if "Last start" not in display.columns:
+            continue
+        last_start = display["Last start"].tolist()
+        assert "no start record in the lookback window" in last_start
+        assert "starter not announced" in last_start
+        pair = display[["Last start", "Last 3 starts"]]
+        assert not pair.isin(["None", "nan", ""]).any().any()
+        return
+    raise AssertionError("no dataframe carried the workload columns")
 
 
 def test_arms_metrics_mirror_the_card_rules_on_both_scopes() -> None:

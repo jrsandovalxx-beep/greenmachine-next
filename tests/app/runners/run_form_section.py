@@ -120,6 +120,9 @@ class _RunnerApi:
     ) -> dict[int, tuple[GameLogEntry, ...]]:
         return {}
 
+    def fetch_recent_pitching_logs(self, player_ids: tuple[int, ...], start: str, end: str) -> dict:
+        return {}
+
 
 class _RunnerSavant:
     def fetch_pitch_arsenal(self, *, kind: str, year: int) -> tuple:
