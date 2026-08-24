@@ -2442,3 +2442,31 @@ v2.2 rule (season scope, denominator-based): both power tags gate on
 >= 50 season BBE. Still queued: the park/weather tags (need the game
 passed into the tag builder), the pulled-barrels form count, and the
 MiLB call-up tag.
+
+## D-116 - temperature cap, GB% placement, and the pulled-barrels count
+
+**(PO rulings 2026-08-24, answering the three open v2.2 items.)**
+(1) **Temperature: "cap for now."** The weather component adopts the
+v2.2-ratified bucket edges (<45 / 45-64 / 65-74 / 75-84 / 85-89 / 90+)
+with the award capped at the old 1.0 component max — the 85+ bands are
+labels only at this cap; raising the max stays available as a config
+change whenever the PO wants it. (2) **GB% placement: "only in Arms,
+L30 only."** The GB% number appears exactly one place — the Arms tab's
+L30 starter-metrics view gains a GB % column (ground-ball share of the
+window's classified batted balls, with its own 15-BBE floor read on
+the classified count). The season scope does not carry the column at
+all, per the PO's pick — no season board publishes the split (D-111's
+live lesson). The shortlist's ground-ball-profile and gas tags keep
+their firing conditions (the share still decides) but never quote the
+GB% number — the profile tag reads "(L30 record)" or the season
+launch-angle line, the gas tag quotes HR/9 only. (3) **Pulled
+barrels**, ratified by the same message: a raw count, never a rate,
+shown in the batter detail popup's form table as `2 (41 BBE)` with the
+L14 fallback naming its window. A pulled barrel is a barrel (launch
+classification 6) whose spray points to the batter's pull side; 0 over
+a real week is a real observation (a regular averages ~1 barrel a
+week), and only a window pair with no measurable air ball reads the
+absence. The count's source is the pitch-by-pitch event log — the
+same record the form windows already read — and its use is wind/park
+alignment work: pulled barrels are the balls that leave yard most
+often, so they are the ones a pull-side wind or park factor speaks to.

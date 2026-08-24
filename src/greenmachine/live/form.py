@@ -61,6 +61,9 @@ class FormMetrics:
     pull_air_pct: Decimal | None  # per air ball, percent scale
     oppo_air_balls: int = 0
     oppo_air_pct: Decimal | None = None  # per air ball, percent scale
+    # v2.2 (D-116): barrels hit to the pull side — a raw count, never a
+    # rate (a regular averages ~1 barrel a week; 0 in a week is neutral).
+    pulled_barrels: int = 0
 
 
 def is_measurable_air(event: PitchEvent) -> bool:
@@ -143,6 +146,11 @@ def aggregate_form(events: tuple[PitchEvent, ...]) -> FormMetrics:
     measurable_air = [event for event in bbe if is_measurable_air(event)]
     pulls = sum(1 for event in measurable_air if is_pull_air(event))
     oppos = sum(1 for event in measurable_air if is_oppo_air(event))
+    pulled_barrels = sum(
+        1
+        for event in measurable_air
+        if is_pull_air(event) and event.launch_speed_angle == BARREL_CLASSIFICATION
+    )
     ev_avg: Decimal | None = None
     if speeds:
         ev_avg = sum(speeds) / Decimal(len(speeds))
@@ -158,6 +166,7 @@ def aggregate_form(events: tuple[PitchEvent, ...]) -> FormMetrics:
         pull_air_pct=_pct(pulls, len(measurable_air)),
         oppo_air_balls=oppos,
         oppo_air_pct=_pct(oppos, len(measurable_air)),
+        pulled_barrels=pulled_barrels,
     )
 
 
@@ -189,6 +198,11 @@ class FormSection:
     ideal_attack_angle_pct: FormValue
     bat_speed_mph: FormValue
     oppo_air_pct: FormValue | None = None
+    # v2.2 (D-116): pulled barrels as a raw count, never a rate — the value
+    # is the count, the sample is the chosen window's BBE. A regular
+    # averages ~1 barrel a week, so 0 is a real observation, not a cold
+    # streak; None only when neither window holds a measurable air ball.
+    pulled_barrels: FormValue | None = None
 
 
 def _pick(
@@ -219,6 +233,28 @@ def _pick(
         window_days=7 if sample_l7 >= sample_l14 else 14,
         sufficient=False,
     )
+
+
+def _pulled_barrels(recent: FormMetrics, extended: FormMetrics) -> FormValue:
+    """The pulled-barrel count's window resolution (v2.2, D-116): the L7
+    count when the L7 window holds a measurable air ball, else the L14
+    count, else a named absence. A raw count carries no sample floor —
+    the BBE sample rides beside it and 0 is a real observation."""
+    if recent.air_balls > 0:
+        return FormValue(
+            value=Decimal(recent.pulled_barrels),
+            sample=recent.batted_ball_events,
+            window_days=7,
+            sufficient=True,
+        )
+    if extended.air_balls > 0:
+        return FormValue(
+            value=Decimal(extended.pulled_barrels),
+            sample=extended.batted_ball_events,
+            window_days=14,
+            sufficient=True,
+        )
+    return FormValue(value=None, sample=0, window_days=7, sufficient=False)
 
 
 def _tracking_value(
@@ -328,4 +364,5 @@ def resolve_form_section(
             bs_sample_extended,
             MIN_COMPETITIVE_SWINGS_FORM,
         ),
+        pulled_barrels=_pulled_barrels(recent, extended),
     )
