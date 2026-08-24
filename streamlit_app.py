@@ -2689,6 +2689,25 @@ def _logo_data_uri() -> str | None:
     return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode("ascii")
 
 
+@st.cache_data(show_spinner=False)
+def _glossary_markdown() -> str:
+    """D-117: the glossary lives in GLOSSARY.md next to this app so the
+    plain-language wording can be revised without touching code. A missing
+    file is a named absence, not a crash."""
+    try:
+        return (Path(__file__).resolve().parent / "GLOSSARY.md").read_text(encoding="utf-8")
+    except OSError:
+        return "The glossary file is not available in this deployment."
+
+
+# D-117: every metric already states its own math on its surface (D-079); the
+# glossary answers the next question — what the metric means and why it
+# matters — from the "?" button beside Backtest (the PO's "back text").
+@st.dialog("Glossary", width="large")
+def _render_glossary() -> None:
+    st.markdown(_glossary_markdown())
+
+
 def main() -> None:
     st.set_page_config(page_title="GreenMachine", layout="wide")
     bridge_secrets_into_environment()
@@ -2696,7 +2715,7 @@ def main() -> None:
     st.markdown(DIAL_CSS, unsafe_allow_html=True)
     st.markdown(BLOT_CSS, unsafe_allow_html=True)
     st.markdown(FIELD_CSS, unsafe_allow_html=True)
-    orb, header, action = st.columns([1, 5, 1])
+    orb, header, action = st.columns([1, 5, 1.4])
     with orb:
         st.markdown(orb_html(_logo_data_uri()), unsafe_allow_html=True)
     with header:
@@ -2726,13 +2745,24 @@ def main() -> None:
         # st.rerun after the swap: the button itself is drawn from the view
         # state, so without a rerun the header would show the stale button
         # until the next interaction.
-        if st.session_state.get("view") == "backtest":
-            if st.button("← Board", key="view_board"):
-                st.session_state["view"] = "board"
+        view_button, glossary_button = st.columns([4, 1])
+        with view_button:
+            if st.session_state.get("view") == "backtest":
+                if st.button("← Board", key="view_board"):
+                    st.session_state["view"] = "board"
+                    st.rerun()
+            elif st.button("Backtest", key="view_backtest"):
+                st.session_state["view"] = "backtest"
                 st.rerun()
-        elif st.button("Backtest", key="view_backtest"):
-            st.session_state["view"] = "backtest"
-            st.rerun()
+        # D-117: the glossary sits beside the view button on both views — the
+        # "?" opens the plain-language metric glossary in a dialog.
+        with glossary_button:
+            if st.button(
+                "?",
+                key="open_glossary",
+                help="Glossary — every metric in plain terms",
+            ):
+                _render_glossary()
     if st.session_state.get("view") == "backtest":
         _render_backtest()
     else:

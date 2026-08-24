@@ -2470,3 +2470,22 @@ absence. The count's source is the pitch-by-pitch event log — the
 same record the form windows already read — and its use is wind/park
 alignment work: pulled barrels are the balls that leave yard most
 often, so they are the ones a pull-side wind or park factor speaks to.
+
+## D-117 - the glossary lives behind a "?" button beside Backtest
+
+**(PO directive 2026-08-24: "create a glossary that can be accessed
+through a question mark button next to back text" — the Backtest
+button in the header.)** The glossary itself is the PO-supplied
+Glossary v2.1 document, kept verbatim as `GLOSSARY.md` at the repo
+root so its plain-language wording can be revised without touching
+code (and so its typographic quotes never trip the repo's
+ambiguous-unicode lint). The app reads the file at runtime through a
+cached loader; a missing file degrades to a named absence ("The
+glossary file is not available in this deployment."), never a crash —
+absence first, as everywhere else. The header's action column splits
+into two: the view button (Backtest / ← Board) and a "?" button that
+opens the glossary in a wide dialog. The "?" rides on both views, so
+the metric meanings are reachable while auditing grades too. The
+glossary answers what the metric means and why it matters; the
+surfaces themselves still carry the firing math per D-079 — the two
+layers never duplicate each other's job.
