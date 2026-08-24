@@ -2344,3 +2344,17 @@ whose bb_type split is real. And the board parser now FAILS any board
 that cannot parse at least half its rows ("only N of M rows parsed"),
 so a changed payload can never shrink a board into silent absences
 again.
+
+## D-112 - slate "today" runs on the viewer's US timezone
+
+**(PO report 2026-08-24: at 7pm Arizona the landing page treated
+tomorrow as today and showed tomorrow's batters for the slate.)** The
+cloud host keeps UTC, so a bare date.today() rolls the slate forward in
+the early evening for every US viewer. The slate's "today" — the date
+picker's default and bounds, the today/yesterday/tomorrow labels, and
+the backtest's "last N days" — now reads America/Phoenix, the PO's
+home zone: MST, UTC-7 year-round with no daylight-saving rule, so a
+fixed -7 offset is the exact fallback when a host lacks the tz
+database (ZoneInfoNotFoundError). The date picker's help names the
+zone. Moving the slate to another US zone is a one-word switch
+(_SLATE_ZONE).

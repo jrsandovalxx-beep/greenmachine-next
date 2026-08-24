@@ -21,6 +21,7 @@ import dataclasses
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
@@ -1099,10 +1100,21 @@ def test_matchups_grid_has_the_d079_columns_and_a_named_window(
     assert grids[0]["Grade"].tolist() == away_grades  # the grade stays L30
 
 
+def test_slate_today_reads_the_viewers_arizona_day() -> None:
+    """D-112: the slate's "today" is computed in America/Phoenix (UTC-7
+    year-round, no daylight saving), so the server's UTC rollover never
+    shows tomorrow's slate as today's."""
+    import streamlit_app
+
+    phoenix_today = datetime.now(ZoneInfo("America/Phoenix")).date()
+    assert streamlit_app.slate_today() == phoenix_today
+
+
 def test_slate_nav_regrades_the_chosen_day(monkeypatch: pytest.MonkeyPatch) -> None:
     """D-101: the calendar date picker chooses the slate date the board
     builds — nothing else about the grading changes. Today, yesterday and
-    tomorrow carry their relative word; any other date stands alone."""
+    tomorrow carry their relative word; any other date stands alone.
+    D-112: "today" is the viewer's Arizona day, never the server's."""
     import streamlit as st
 
     import greenmachine.live.pipeline as pipeline
@@ -1113,6 +1125,8 @@ def test_slate_nav_regrades_the_chosen_day(monkeypatch: pytest.MonkeyPatch) -> N
         seen.append(kwargs["slate_date"].isoformat())  # type: ignore[attr-defined]
         return _board_with_grid_lines()
 
+    import streamlit_app
+
     monkeypatch.setattr(pipeline, "build_board", fake_build)
     monkeypatch.setenv("GM_ENVIRONMENT", "staging")
     st.cache_data.clear()
@@ -1120,7 +1134,7 @@ def test_slate_nav_regrades_the_chosen_day(monkeypatch: pytest.MonkeyPatch) -> N
     at.run()
     assert not at.exception, [str(e.value) for e in at.exception]
 
-    today = date.today()
+    today = streamlit_app.slate_today()
     assert seen == [today.isoformat()]
     assert any("today" in h.value for h in at.subheader)
 
