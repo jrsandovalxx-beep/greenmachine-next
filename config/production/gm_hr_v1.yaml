@@ -260,10 +260,18 @@ components:
       - window_profile: RECENT_7D
         minimum_sample_required: 1
         scoring:
+          # v2.2 ratified temperature bucket edges (2026-08-23), with the
+          # award capped at the component max per the PO's 2026-08-24 ruling
+          # ("cap for now") — the 85+ bands are labels only at this cap:
+          # <45 = cold suppression, 45-64, 65-74, 75-84 full, 85-89 and
+          # 90+ would read 1.25/1.5 uncapped.
           - method: bucketed
             domain_min: "0"
             domain_max: "120"
             buckets:
-              - { lower: "0", upper: "65", points: "0" }
+              - { lower: "0", upper: "45", points: "0" }
+              - { lower: "45", upper: "65", points: "0.25" }
               - { lower: "65", upper: "75", points: "0.5" }
-              - { lower: "75", upper: "120", points: "1" }
+              - { lower: "75", upper: "85", points: "1" }
+              - { lower: "85", upper: "90", points: "1" }
+              - { lower: "90", upper: "120", points: "1" }

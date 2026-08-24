@@ -897,6 +897,8 @@ def _sp_line() -> PitcherRecentLine:
         avg_launch_angle=Decimal("17.5"),
         air_ball_share=Decimal("0.55"),
         iso=Decimal("0.210"),
+        ground_ball_share=Decimal("0.38"),
+        classified_batted_balls=30,
     )
 
 
@@ -947,6 +949,9 @@ def test_arms_metrics_mirror_the_card_rules_on_both_scopes() -> None:
     # The season board publishes no air split — a named absence, L30 only.
     assert texts["Air %"] == "—"
     assert styles["Air %"] == streamlit_app._REASON_CSS
+    # D-116 (PO): GB% lives on the L30 view only — the season scope does
+    # not carry the column at all.
+    assert "GB %" not in texts
     assert styles["wOBA"] == streamlit_app._HIGHLIGHT
     assert styles["HR/9"] == streamlit_app._HIGHLIGHT
     texts, styles = streamlit_app._arms_recent_metrics(_sp_line())
@@ -956,11 +961,19 @@ def test_arms_metrics_mirror_the_card_rules_on_both_scopes() -> None:
     assert texts["HR/9"] == "—"
     assert texts["xISO"] == "—"
     assert texts["Air %"] == "55.0%"
+    assert texts["GB %"] == "38.0%"
     assert styles["wOBA"] == streamlit_app._HIGHLIGHT
+    # GB % reads its own denominator: below the 15-BBE floor on classified
+    # contact it keeps its value under the amber advisory.
+    thin = dataclasses.replace(_sp_line(), classified_batted_balls=12)
+    texts, styles = streamlit_app._arms_recent_metrics(thin)
+    assert texts["GB %"] == "38.0%"
+    assert styles["GB %"] == streamlit_app._INSUFFICIENT_CSS
     # No record at all: a fully named absence, never invented zeros.
     texts, styles = streamlit_app._arms_recent_metrics(None)
     assert all(text == "—" for text in texts.values())
     assert styles["wOBA"] == streamlit_app._REASON_CSS
+    assert "GB %" in texts  # the L30 column set carries it even on an empty scope
 
 
 def test_grid_line_cells_add_the_gaps_on_the_season_view_only() -> None:
@@ -1390,10 +1403,11 @@ def test_card_tags_carry_the_slot_and_the_v22_k_reads() -> None:
 
 
 def test_card_tags_carry_the_v22_pitcher_side_reads() -> None:
-    """v2.2 (D-114): the pitcher-side tags — the ground-ball profile off the
-    L30 event record (extreme ≥ 55%) or the season avg-LA line, the HR/9
-    suppressor, the gas profile (HR/9 ≥ 1.50 with the L30 GB share under
-    40%), and the fly-vulnerable flag at season avg LA ≥ 18°."""
+    """v2.2 (D-114, wording per D-116): the pitcher-side tags — the
+    ground-ball profile off the L30 event record (extreme ≥ 55%) or the
+    season avg-LA line, the HR/9 suppressor, the gas profile (HR/9 ≥ 1.50
+    with the L30 GB share under 40%), and the fly-vulnerable flag at
+    season avg LA ≥ 18°. The GB% number itself stays on the Arms tab."""
     from types import SimpleNamespace
 
     import streamlit_app
@@ -1427,11 +1441,13 @@ def test_card_tags_carry_the_v22_pitcher_side_reads() -> None:
             throws=None,
         )
 
-    # GB profile off the L30 share, plain and extreme.
+    # GB profile off the L30 share, plain and extreme — D-116 (PO): the
+    # tag fires on the share but never quotes the GB% number.
     _, _, vetoes = streamlit_app._card_tags(card, arm("1.10", "10.2", "0.52"))
-    assert "air allowed: low — ground-ball profile (GB 52.0% of 148 BBE, L30)" in vetoes
+    assert "air allowed: low — ground-ball profile (L30 record)" in vetoes
+    assert "52.0%" not in vetoes
     _, _, vetoes = streamlit_app._card_tags(card, arm("1.10", "10.2", "0.56"))
-    assert "extreme ground-ball profile" in vetoes
+    assert "extreme ground-ball profile (L30 record)" in vetoes
     # The season LA line carries it when the L30 share is unpublished.
     _, _, vetoes = streamlit_app._card_tags(card, arm("1.10", "7.8", None))
     assert "air allowed: low — ground-ball profile (avg LA 7.8°, season)" in vetoes
@@ -1439,7 +1455,8 @@ def test_card_tags_carry_the_v22_pitcher_side_reads() -> None:
     _, _, vetoes = streamlit_app._card_tags(card, arm("0.75", "11.0", "0.44"))
     assert "suppressor: HR/9 0.75 (season)" in vetoes
     _, boosters, _ = streamlit_app._card_tags(card, arm("1.62", "11.0", "0.35"))
-    assert "gas: HR/9 1.62 season, GB 35.0% of 148 BBE, L30" in boosters
+    assert "gas: HR/9 1.62 (season)" in boosters
+    assert "35.0%" not in boosters
     _, boosters, _ = streamlit_app._card_tags(card, arm("1.62", "11.0", "0.45"))
     assert "gas" not in boosters
     _, boosters, _ = streamlit_app._card_tags(card, arm("1.10", "18.4", "0.44"))

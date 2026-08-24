@@ -768,22 +768,18 @@ def _card_tags(card: BatterCard, opposing: PitcherCard | None) -> tuple[str, str
             vetoes.append(f"binary K profile: K% {float(k_share) * 100:.1f} ({pa} PA)")
     # v2.2 pitcher-side reads (D-114): HR/9 is a season-scope read (the L30
     # window publishes no innings); the ground-ball share reads the L30
-    # event record because the season boards publish no GB%.
+    # event record because the season boards publish no GB%. D-116 (PO):
+    # the GB% number itself lives on the Arms tab only — these tags keep
+    # their firing conditions but never quote the share.
     if opposing is not None:
         reads = opposing.season_reads
         hr9 = reads.home_run_per_nine if reads is not None else None
         season_la = reads.avg_launch_angle if reads is not None else None
         recent = opposing.recent_overall
         gb_share = recent.ground_ball_share if recent is not None else None
-        gb_bbe = recent.classified_batted_balls if recent is not None else 0
-        gb_text = (
-            f"GB {float(gb_share) * 100:.1f}% of {gb_bbe} BBE, L30"
-            if gb_share is not None
-            else None
-        )
         if gb_share is not None and gb_share >= _GB_PROFILE_SHARE_LINE:
             extreme = "extreme " if gb_share >= _GB_PROFILE_EXTREME_LINE else ""
-            vetoes.append(f"air allowed: low — {extreme}ground-ball profile ({gb_text})")
+            vetoes.append(f"air allowed: low — {extreme}ground-ball profile (L30 record)")
         elif season_la is not None and season_la <= _GB_PROFILE_LA_LINE:
             vetoes.append(
                 f"air allowed: low — ground-ball profile (avg LA {float(season_la):.1f}°, season)"
@@ -796,7 +792,7 @@ def _card_tags(card: BatterCard, opposing: PitcherCard | None) -> tuple[str, str
             and gb_share is not None
             and gb_share < _PITCHER_GAS_GB_CEILING
         ):
-            boosters.append(f"gas: HR/9 {float(hr9):.2f} season, {gb_text}")
+            boosters.append(f"gas: HR/9 {float(hr9):.2f} (season)")
         if season_la is not None and season_la >= _FB_VULNERABLE_LA_LINE:
             boosters.append(f"fly-ball vulnerable: avg LA {float(season_la):.1f}° (season)")
     # v2.2 (D-115): the x-gap flag — an under-performance read, so the
@@ -1011,6 +1007,16 @@ def _form_section_frames(form: FormSection) -> tuple[pd.DataFrame, pd.DataFrame]
             texts[column] = f"{value_text} · L14"
         else:
             texts[column] = value_text
+    # v2.2 (D-116): pulled barrels as a raw count with its BBE sample —
+    # never a rate, no sample floor (0 is a real observation, a regular
+    # averages ~1 barrel a week). The L14 fallback names its window.
+    pulled = form.pulled_barrels
+    if pulled is None or pulled.value is None:
+        texts["Pulled BRL"] = _FORM_ABSENT_TEXT
+        styles["Pulled BRL"] = _REASON_CSS
+    else:
+        count_text = f"{int(pulled.value)} ({pulled.sample} BBE)"
+        texts["Pulled BRL"] = count_text + (" · L14" if pulled.window_days == 14 else "")
     return pd.DataFrame([texts]), pd.DataFrame([styles])
 
 
@@ -1357,7 +1363,11 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
             "'not enough data available' (D-068). Oppo Air % = opposite-field "
             "share of measurable air balls (fly balls, line drives and popups "
             "with hit coordinates and a known batting side); Pull Air % uses "
-            "the same denominator."
+            "the same denominator. Pulled BRL counts barrels hit to the pull "
+            "side — a raw count with its BBE sample, never a rate: a regular "
+            "averages about one barrel a week, so 0 is neutral, not cold "
+            "(D-116). Its air-ball floor splits by window: 8 at L7, 15 at "
+            "L14 (v2.2)."
         )
 
     st.markdown("**Season profile**")
@@ -1560,7 +1570,8 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "the ground-ball profile at an L30 ground-ball share ≥ 50% "
         "(extreme ≥ 55%) or a season avg LA allowed ≤ 8°; the suppressor "
         "at season HR/9 ≤ 0.80. The season boards publish no ground-ball "
-        "share, so that read is L30-only. Batter reads (v2.2, D-115): the "
+        "share, so that read is L30-only — and the GB% value itself reads "
+        "on the Arms tab, L30 view only (D-116). Batter reads (v2.2, D-115): the "
         "x-gap flag is under-performance evidence — xISO-ISO ≥ +.050 or "
         "xwOBA-wOBA ≥ +.015, both sides of a gap off the same "
         "expected-statistics board; barrel elite at barrel% ≥ 15 over "
@@ -1620,6 +1631,12 @@ _ARMS_METRIC_COLUMNS = (
     "Air %",
 )
 
+# D-116 (PO): GB% lives on the Arms tab's L30 view only — the season scope
+# does not carry the column at all, since no season board publishes the
+# split. Air % stays on both scopes (season names its absence) because it
+# predates the ruling.
+_ARMS_RECENT_METRIC_COLUMNS = (*_ARMS_METRIC_COLUMNS, "GB %")
+
 
 def _arms_season_metrics(
     reads: PitcherSeasonReads | None,
@@ -1676,7 +1693,7 @@ def _arms_recent_metrics(
     absences and the HR count shows instead; amber contact reads below the
     ratified 15-BBE floor (D-068)."""
     if line is None:
-        dash = {column: "—" for column in _ARMS_METRIC_COLUMNS}
+        dash = {column: "—" for column in _ARMS_RECENT_METRIC_COLUMNS}
         return dash, {column: _REASON_CSS for column in dash}
     texts = {
         "PA": str(line.plate_appearances),
@@ -1692,6 +1709,7 @@ def _arms_recent_metrics(
         "ISO": _avg_text(line.iso),
         "xISO": "—",
         "Air %": _pct_text(line.air_ball_share),
+        "GB %": _pct_text(line.ground_ball_share),
     }
     styles = {column: _REASON_CSS for column, text in texts.items() if text == "—"}
     if line.woba is not None and line.expected_woba is not None and line.woba > line.expected_woba:
@@ -1700,6 +1718,10 @@ def _arms_recent_metrics(
         for column in ("BRL%", "LA"):
             if texts[column] != "—":
                 styles[column] = _INSUFFICIENT_CSS
+    # GB % shares over classified batted balls, so its floor reads the
+    # classified count, not the looser BBE sample.
+    if 0 < line.classified_batted_balls < _MIN_BBE_CONTACT and texts["GB %"] != "—":
+        styles["GB %"] = _INSUFFICIENT_CSS
     return texts, styles
 
 
@@ -1718,7 +1740,8 @@ def _render_arms(board: SlateBoard) -> None:
             "boards against plus the statsapi season line. L30 reads the "
             "window's kept pitch events: it publishes no innings (HR/9 stays "
             "a season read, the HR count shows) and no per-event expected "
-            "SLG (xISO stays a season read)."
+            "SLG (xISO stays a season read). The L30 view also adds the GB % "
+            "column (D-116)."
         ),
     )
     st.caption(
@@ -1729,7 +1752,10 @@ def _render_arms(board: SlateBoard) -> None:
         "rate's sample (D-014). Air % is the fly-ball-plus-line-drive share "
         "of the window's batted balls against — the ground-ball profile's "
         "air mirror; the season board publishes no air split, so the "
-        "season scope names the absence and Air % reads L30 only."
+        "season scope names the absence and Air % reads L30 only. GB % is "
+        "the ground-ball share of the window's classified batted balls "
+        "against — the ground-ball profile's own number; it reads L30 "
+        "only and the season scope does not carry the column (D-116)."
     )
     text_rows: list[dict[str, str]] = []
     style_rows: list[dict[str, str]] = []

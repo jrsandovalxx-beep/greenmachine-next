@@ -56,6 +56,8 @@ SHOWCASE_FORM = FormSection(
         value=Decimal("58.0"), sample=9, window_days=14, sufficient=False
     ),
     bat_speed_mph=FormValue(value=Decimal("74.2"), sample=40, window_days=7, sufficient=True),
+    # D-116: the pulled-barrels raw count with its BBE sample.
+    pulled_barrels=FormValue(value=Decimal(2), sample=22, window_days=7, sufficient=True),
 )
 
 

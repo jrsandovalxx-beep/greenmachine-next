@@ -38,13 +38,18 @@ def _form(**overrides: FormValue) -> FormSection:
         ideal_attack_angle_pct=overrides.get("ideal_attack_angle_pct", sufficient),
         bat_speed_mph=overrides.get("bat_speed_mph", sufficient),
         oppo_air_pct=overrides.get("oppo_air_pct", sufficient),
+        pulled_barrels=overrides.get(
+            "pulled_barrels",
+            FormValue(value=Decimal(2), sample=41, window_days=7, sufficient=True),
+        ),
     )
 
 
 def test_columns_are_the_d068_set_minus_xwoba_in_order() -> None:
     """D-102: xwOBA left the popup form grid; it stays on the Matchups main
     tables. D-109 amended the set: SwSp% — computed and graded from the
-    start — is displayed, and Oppo Air % mirrors Pull Air %."""
+    start — is displayed, and Oppo Air % mirrors Pull Air %. D-116 adds
+    the pulled-barrels raw count."""
     texts, _styles = streamlit_app._form_section_frames(_form())
     assert list(texts.columns) == [
         "Barrel%",
@@ -55,8 +60,29 @@ def test_columns_are_the_d068_set_minus_xwoba_in_order() -> None:
         "Pull Air %",
         "Oppo Air %",
         "Hard%",
+        "Pulled BRL",
     ]
     assert len(texts) == 1
+
+
+def test_pulled_barrels_is_a_raw_count_with_its_bbe_sample() -> None:
+    """v2.2 (D-116): the count with its window BBE, never a rate and no
+    INSUFFICIENT marker (0 is a real observation); the L14 fallback names
+    the window; no measurable air ball at either reach reads the absence."""
+    texts, styles = streamlit_app._form_section_frames(_form())
+    assert texts.at[0, "Pulled BRL"] == "2 (41 BBE)"
+    assert "Pulled BRL" not in styles.columns
+    texts, _ = streamlit_app._form_section_frames(
+        _form(
+            pulled_barrels=FormValue(value=Decimal(1), sample=63, window_days=14, sufficient=True)
+        )
+    )
+    assert texts.at[0, "Pulled BRL"] == "1 (63 BBE) · L14"
+    texts, styles = streamlit_app._form_section_frames(
+        _form(pulled_barrels=FormValue(value=None, sample=0, window_days=7, sufficient=False))
+    )
+    assert texts.at[0, "Pulled BRL"] == "not enough data available"
+    assert styles.at[0, "Pulled BRL"] == streamlit_app._REASON_CSS
 
 
 def test_present_and_sufficient_cell_is_the_plain_value() -> None:

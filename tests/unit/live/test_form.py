@@ -178,6 +178,62 @@ def test_the_l7_air_floor_is_eight_air_balls() -> None:
     assert not section.pull_air_pct.sufficient
 
 
+def test_pulled_barrels_count_only_barrels_hit_to_the_pull_side() -> None:
+    """v2.2 (D-116): a pulled barrel is a barrel (launch classification 6)
+    whose spray points to the batter's pull side — oppo barrels, non-barrel
+    pulls, and unmeasurable contact leave the count."""
+    pulled_barrel = _event(
+        launch_speed_angle=6, bb_type="fly_ball", hc_x="160", hc_y="160", batter_side="R"
+    )
+    oppo_barrel = _event(
+        launch_speed_angle=6, bb_type="fly_ball", hc_x="90", hc_y="160", batter_side="R"
+    )
+    pulled_non_barrel = _event(
+        launch_speed_angle=4, bb_type="fly_ball", hc_x="160", hc_y="160", batter_side="R"
+    )
+    unmeasurable_barrel = _event(launch_speed_angle=6, bb_type="fly_ball")
+    metrics = aggregate_form((pulled_barrel, oppo_barrel, pulled_non_barrel, unmeasurable_barrel))
+    assert metrics.barrels == 3
+    assert metrics.pulled_barrels == 1
+
+
+def test_pulled_barrels_resolves_l7_then_l14_then_a_named_absence() -> None:
+    """The count prefers the L7 window, falls back to L14 with its sample,
+    and only a window pair with no measurable air ball reads the absence —
+    0 over a real week is a real observation, never hidden."""
+    week = aggregate_form(
+        (
+            _event(
+                launch_speed_angle=6, bb_type="fly_ball", hc_x="160", hc_y="160", batter_side="R"
+            ),
+            _event(
+                launch_speed_angle=4, bb_type="fly_ball", hc_x="90", hc_y="160", batter_side="R"
+            ),
+        )
+    )
+    section = resolve_form_section(week, aggregate_form(()), (), ())
+    assert section.pulled_barrels is not None
+    assert section.pulled_barrels.value == Decimal(1)
+    assert section.pulled_barrels.window_days == 7
+    assert section.pulled_barrels.sample == 2
+    # An empty L7 falls back to the L14 count and names the window.
+    section = resolve_form_section(aggregate_form(()), week, (), ())
+    assert section.pulled_barrels is not None
+    assert section.pulled_barrels.window_days == 14
+    assert section.pulled_barrels.value == Decimal(1)
+    # Zero pulled barrels over a real week shows as 0, not an absence.
+    no_pull = aggregate_form(
+        (_event(launch_speed_angle=4, bb_type="fly_ball", hc_x="90", hc_y="160", batter_side="R"),)
+    )
+    section = resolve_form_section(no_pull, aggregate_form(()), (), ())
+    assert section.pulled_barrels is not None
+    assert section.pulled_barrels.value == Decimal(0)
+    # No measurable air ball at either reach: the named absence.
+    section = resolve_form_section(aggregate_form(()), aggregate_form(()), (), ())
+    assert section.pulled_barrels is not None
+    assert section.pulled_barrels.value is None
+
+
 def test_empty_windows_aggregate_to_nothing_without_error() -> None:
     metrics = aggregate_form(())
     assert metrics.batted_ball_events == 0
