@@ -1190,6 +1190,8 @@ def test_the_pitcher_l30_lines_read_the_kept_events_by_side() -> None:
     assert overall.barrel_share == Decimal(1)
     assert overall.avg_launch_angle == Decimal("20")
     assert overall.air_ball_share == Decimal(1)
+    assert overall.ground_ball_share == Decimal(0)  # D-114: all fly balls here
+    assert overall.classified_batted_balls == MIN_BBE_FORM
     assert overall.woba == Decimal("0.9")
     assert overall.expected_woba is None  # the events publish no expected wOBA here
     assert overall.iso == Decimal(0)
@@ -1197,6 +1199,29 @@ def test_the_pitcher_l30_lines_read_the_kept_events_by_side() -> None:
     assert left is not None
     assert left.plate_appearances == MIN_BBE_FORM
     assert card.recent_vs_right is None
+
+
+def test_the_l30_ground_ball_share_reads_classified_bbe() -> None:
+    """v2.2 (D-114): the ground-ball share is ground balls over classified
+    BBE (events with a bb_type), and the classified count rides along as the
+    share's true denominator — an unclassified ball leaves both counts."""
+    import dataclasses
+
+    from greenmachine.live.pipeline import _pitcher_recent_line
+
+    base = _recent_events()[0]
+    events = (
+        dataclasses.replace(base, bb_type="ground_ball"),
+        dataclasses.replace(base, bb_type="ground_ball"),
+        dataclasses.replace(base, bb_type="fly_ball"),
+        dataclasses.replace(base, bb_type="line_drive"),
+        dataclasses.replace(base, bb_type=None),
+    )
+    line = _pitcher_recent_line(events)
+    assert line is not None
+    assert line.ground_ball_share == Decimal("0.5")
+    assert line.classified_batted_balls == 4
+    assert line.air_ball_share == Decimal("0.5")
 
 
 def test_the_d111_pitcher_board_failures_degrade_to_named_absences() -> None:

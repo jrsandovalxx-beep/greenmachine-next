@@ -630,6 +630,11 @@ _REASON_CSS = "color: #7d8f84; font-style: italic"
 # reason as the highlight — an alpha background reads as a washed-out block.
 _INSUFFICIENT_CSS = "background-color: #7a5c14; color: #ffe9a8"
 
+# Opaque red for the shortlist's veto-side tags (v2.2, D-114): reads that
+# argue against the home run — the ground-ball profile, the suppressor, the
+# binary/high-K cautions. Green says good for the HR, red says bad for it.
+_VETO_CSS = "background-color: #a41616; color: #ffe9e9"
+
 # Neon-green money tag (D-094): a "$" beside a shortlist batter who homered
 # in his most recent game day on or before this slate. Text shadow gives the
 # neon glow; no background, so the cell keeps its theme fill.
@@ -646,11 +651,15 @@ def _weather_text(game: GameCard) -> tuple[str, bool]:
     return f"{float(game.temperature_fahrenheit):.0f}°F, open air", False
 
 
-# D-109: the shortlist tags' firing lines, ratified in the O-8 batch and
-# printed in the tab caption (the D-079 pattern — a surface prints every
-# emphasis line it uses).
-_HIGH_K_SHARE = Decimal("0.27")
-_LOW_WHIFF_SHARE = Decimal("0.22")
+# D-109 / v2.2 (D-114): the shortlist tags' firing lines, printed in the tab
+# caption (the D-079 pattern — a surface prints every emphasis line it
+# uses). v2.2 re-lined the K reads: the unlock needs K% ≥ 22% against a
+# low-whiff arm (whiff ≤ 20%); ≥ 28% without that matchup is the binary
+# profile; ≥ 30% is the high-K caution. These supersede the O-8 lines.
+_K_UNLOCK_SHARE = Decimal("0.22")
+_BINARY_K_SHARE = Decimal("0.28")
+_HIGH_K_SHARE = Decimal("0.30")
+_LOW_WHIFF_SHARE = Decimal("0.20")
 # D-110: the x-gap tag fires when either season gap's absolute value reaches
 # .030 (ratified O-8); contact-first needs squared-up ≥ 35% of competitive
 # swings AND bat speed ≥ 72 mph on the season contact board — both.
@@ -662,14 +671,27 @@ _CONTACT_BAT_SPEED_LINE = Decimal("72")
 # per-pitch EV and Air% — below it the INSUFFICIENT treatment, never hidden.
 _MIN_BBE_PITCH_TYPE = 10
 
-# D-111: the starter header cards' and Arms tab's emphasis and sample
-# lines, each printed on its surface (the D-079 pattern). Green marks the
-# digest's pitcher-vulnerability reads only: HR/9 at or above 1.4, and wOBA
-# above xwOBA — no invented bands. The L30 side rows carry the ratified
+# D-111 / v2.2 (D-114): the starter header cards' and Arms tab's emphasis
+# and sample lines, each printed on its surface (the D-079 pattern). Green
+# marks the digest's pitcher-vulnerability reads only: HR/9 at or above 1.5
+# (v2.2's season target, superseding the 1.4 line), and wOBA above xwOBA —
+# no invented bands. The L30 side rows carry the ratified
 # pitcher-vulnerability floor (80 batters faced / 40 batted balls); contact
 # reads carry the general 15-BBE floor. Below a floor the value stays
 # visible under the amber INSUFFICIENT advisory, never hidden (D-068).
-_HR9_LINE = Decimal("1.4")
+_HR9_LINE = Decimal("1.5")
+# v2.2 (D-114): the pitcher-side tag lines — the suppressor at HR/9 ≤ 0.80,
+# the ground-ball profile at season avg LA allowed ≤ 8° or an L30 ground-
+# ball share ≥ 50% of classified BBE (the season boards publish no GB%, so
+# the share reads the L30 event record), the fly-vulnerable flag at avg LA
+# allowed ≥ 18°, and the gas profile at HR/9 ≥ 1.5 with an L30 ground-ball
+# share under 40%.
+_HR9_SUPPRESSOR_LINE = Decimal("0.8")
+_GB_PROFILE_LA_LINE = Decimal("8")
+_GB_PROFILE_SHARE_LINE = Decimal("0.50")
+_GB_PROFILE_EXTREME_LINE = Decimal("0.55")
+_FB_VULNERABLE_LA_LINE = Decimal("18")
+_PITCHER_GAS_GB_CEILING = Decimal("0.40")
 _VULN_MIN_BF = 80
 _VULN_MIN_BBE = 40
 _MIN_BBE_CONTACT = 15
@@ -682,41 +704,86 @@ def _ordinal(position: int) -> str:
     return f"{position}" + {1: "st", 2: "nd", 3: "rd"}.get(position % 10, "th")
 
 
-def _card_tags(card: BatterCard, opposing: PitcherCard | None) -> str:
-    """The shortlist's tags box: advisories and absences as compact tags,
-    plus the D-109 context tags (lineup slot, high-K reads). Tags join with
-    " · ", so no tag carries an interpunct inside itself — commas inside,
-    interpuncts between."""
-    tags: list[str] = []
+def _card_tags(card: BatterCard, opposing: PitcherCard | None) -> tuple[str, str, str]:
+    """(advisories, boosters, vetoes) for the shortlist's three tag columns
+    (v2.2, D-114): the neutral advisories and absences, the reads that argue
+    FOR the home run (green), and the reads that argue AGAINST it (red).
+    Tags join with " · ", so no tag carries an interpunct inside itself —
+    commas inside, interpuncts between."""
+    advisories: list[str] = []
+    boosters: list[str] = []
+    vetoes: list[str] = []
     insufficient, missing = _component_flags(card)
     if insufficient:
-        tags.append(f"low sample: {insufficient}")
+        advisories.append(f"low sample: {insufficient}")
     if missing:
-        tags.append(f"missing: {missing}")
+        advisories.append(f"missing: {missing}")
     if card.lineup_is_estimate:
-        tags.append("est. lineup")
+        advisories.append("est. lineup")
     if card.order_position is not None:
         slot = f"bats {_ordinal(card.order_position)}"
-        tags.append(slot + (" (est.)" if card.lineup_is_estimate else ""))
+        advisories.append(slot + (" (est.)" if card.lineup_is_estimate else ""))
+    pa = card.season.plate_appearances if card.season is not None else 0
+    # v2.2 K reads (D-114): the unlock needs K% ≥ 22% AND a low-whiff arm
+    # (≤ 20%); without that matchup, ≥ 28% reads binary and ≥ 30% is the
+    # high-K caution. A missing whiff read is not a low-whiff arm.
     k_share = card.season_k_share
-    high_k = k_share is not None and k_share >= _HIGH_K_SHARE
     whiff = opposing.season_whiff_weighted if opposing is not None else None
-    if high_k and whiff is not None and whiff <= _LOW_WHIFF_SHARE:
-        pa = card.season.plate_appearances if card.season is not None else 0
-        tags.append(
-            f"high-K bat vs low-whiff arm: K% {float(k_share) * 100:.1f} "
-            f"({pa} PA), arsenal whiff {float(whiff) * 100:.1f}%"
+    low_whiff_arm = whiff is not None and whiff <= _LOW_WHIFF_SHARE
+    if low_whiff_arm:
+        assert whiff is not None  # narrowing for the f-string
+        boosters.append(f"low-whiff arm: arsenal whiff {float(whiff) * 100:.1f}% (season)")
+    if k_share is not None:
+        if k_share >= _K_UNLOCK_SHARE and low_whiff_arm:
+            assert whiff is not None
+            boosters.append(
+                f"high-K bat vs low-whiff arm: K% {float(k_share) * 100:.1f} "
+                f"({pa} PA), arsenal whiff {float(whiff) * 100:.1f}%"
+            )
+        elif k_share >= _HIGH_K_SHARE:
+            vetoes.append(f"high-K profile: K% {float(k_share) * 100:.1f} ({pa} PA)")
+        elif k_share >= _BINARY_K_SHARE:
+            vetoes.append(f"binary K profile: K% {float(k_share) * 100:.1f} ({pa} PA)")
+    # v2.2 pitcher-side reads (D-114): HR/9 is a season-scope read (the L30
+    # window publishes no innings); the ground-ball share reads the L30
+    # event record because the season boards publish no GB%.
+    if opposing is not None:
+        reads = opposing.season_reads
+        hr9 = reads.home_run_per_nine if reads is not None else None
+        season_la = reads.avg_launch_angle if reads is not None else None
+        recent = opposing.recent_overall
+        gb_share = recent.ground_ball_share if recent is not None else None
+        gb_bbe = recent.classified_batted_balls if recent is not None else 0
+        gb_text = (
+            f"GB {float(gb_share) * 100:.1f}% of {gb_bbe} BBE, L30"
+            if gb_share is not None
+            else None
         )
-    elif high_k:
-        pa = card.season.plate_appearances if card.season is not None else 0
-        tags.append(f"high-K profile: K% {float(k_share) * 100:.1f} ({pa} PA)")
+        if gb_share is not None and gb_share >= _GB_PROFILE_SHARE_LINE:
+            extreme = "extreme " if gb_share >= _GB_PROFILE_EXTREME_LINE else ""
+            vetoes.append(f"air allowed: low — {extreme}ground-ball profile ({gb_text})")
+        elif season_la is not None and season_la <= _GB_PROFILE_LA_LINE:
+            vetoes.append(
+                f"air allowed: low — ground-ball profile (avg LA {float(season_la):.1f}°, season)"
+            )
+        if hr9 is not None and hr9 <= _HR9_SUPPRESSOR_LINE:
+            vetoes.append(f"suppressor: HR/9 {float(hr9):.2f} (season)")
+        if (
+            hr9 is not None
+            and hr9 >= _HR9_LINE
+            and gb_share is not None
+            and gb_share < _PITCHER_GAS_GB_CEILING
+        ):
+            boosters.append(f"gas: HR/9 {float(hr9):.2f} season, {gb_text}")
+        if season_la is not None and season_la >= _FB_VULNERABLE_LA_LINE:
+            boosters.append(f"fly-ball vulnerable: avg LA {float(season_la):.1f}° (season)")
     # D-110: the regression-gap tag — both gaps always shown, fired by either
     # crossing the ratified line; no expected-stats row, no tag.
     gaps = card.season_gaps
     if gaps is not None and (
         abs(gaps.xiso_minus_iso) >= _X_GAP_LINE or abs(gaps.xwoba_minus_woba) >= _X_GAP_LINE
     ):
-        tags.append(
+        advisories.append(
             f"x-gap: xISO {_signed_avg_text(gaps.xiso_minus_iso)}, "
             f"xwOBA {_signed_avg_text(gaps.xwoba_minus_woba)} "
             f"(season, {gaps.plate_appearances} PA)"
@@ -728,12 +795,12 @@ def _card_tags(card: BatterCard, opposing: PitcherCard | None) -> str:
         and card.squared_up_bat_speed is not None
         and card.squared_up_bat_speed >= _CONTACT_BAT_SPEED_LINE
     ):
-        tags.append(
+        advisories.append(
             f"contact-first profile: squared-up {float(squared) * 100:.1f}% "
             f"({card.squared_up_swings} swings), "
             f"bat speed {float(card.squared_up_bat_speed):.1f} mph"
         )
-    return " · ".join(tags)
+    return " · ".join(advisories), " · ".join(boosters), " · ".join(vetoes)
 
 
 def _slugger_frames(board: SlateBoard) -> tuple[pd.DataFrame, pd.DataFrame, list[BatterCard]]:
@@ -741,7 +808,8 @@ def _slugger_frames(board: SlateBoard) -> tuple[pd.DataFrame, pd.DataFrame, list
 
     The shortlist is a reading list, not a metrics table: batter, team, the
     pitcher they face, the grade, the park factor for their batting side, the
-    weather, and a tags box carrying the advisories (low sample, missing
+    weather, and three tag columns (v2.2, D-114) — green For-HR boosters,
+    red Against-HR vetoes, and the neutral advisories (low sample, missing
     components, estimated lineup). Per-batter metrics moved into the batter
     detail popup (D-084). The third return is the card behind each row, in
     row order, so a grid selection resolves to a batter (GMF-007).
@@ -761,6 +829,7 @@ def _slugger_frames(board: SlateBoard) -> tuple[pd.DataFrame, pd.DataFrame, list
                     continue
                 factor = _side_factor(game, card.batting_side)
                 weather, weather_absent = _weather_text(game)
+                advisories, boosters, vetoes = _card_tags(card, opposing)
                 texts = {
                     "Batter": card.full_name,
                     "HR": "$" if card.homered_on_last_game_day else "",
@@ -771,7 +840,9 @@ def _slugger_frames(board: SlateBoard) -> tuple[pd.DataFrame, pd.DataFrame, list
                         f"{float(factor.factor):.0f}" if factor is not None else "not covered"
                     ),
                     "Weather": weather,
-                    "Tags": _card_tags(card, opposing),
+                    "For HR": boosters,
+                    "Against HR": vetoes,
+                    "Tags": advisories,
                 }
                 styles = {"Grade": _HIGHLIGHT}
                 if card.homered_on_last_game_day:
@@ -780,6 +851,12 @@ def _slugger_frames(board: SlateBoard) -> tuple[pd.DataFrame, pd.DataFrame, list
                     styles["Park factor"] = _REASON_CSS
                 if weather_absent:
                     styles["Weather"] = _REASON_CSS
+                # v2.2 (D-114): green marks the reads for the home run, red
+                # the reads against it — only when the column carries a tag.
+                if boosters:
+                    styles["For HR"] = _HIGHLIGHT
+                if vetoes:
+                    styles["Against HR"] = _VETO_CSS
                 text_rows.append(texts)
                 style_rows.append(styles)
                 cards.append(card)
@@ -1400,18 +1477,27 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
     st.caption(
         "The shortlist (D-084): only batters graded A or S under the provisional "
         "v1 model (D-071). Park factor is the batter-side home-run factor; "
-        "weather is the venue reading; the tags box carries advisories — low "
-        "samples, missing components, estimated lineups — plus context tags: "
-        "the lineup slot, the high-K reads (D-109), and the regression-gap "
-        "and contact-first reads (D-110). A neon **$** marks a "
-        "batter who homered in his most recent game day on or before this "
-        "slate (D-094). Tag firing lines: high-K at K% ≥ 27% of season plate "
-        "appearances; the low-whiff interaction at an arsenal-wide whiff of "
-        "≤ 22% — the interaction tag needs both. The x-gap tag fires when "
-        "either season gap's absolute value reaches .030 — both sides of a "
-        "gap read the same expected-statistics board, actual vs expected. "
-        "Contact-first needs squared-up ≥ 35% of competitive swings AND bat "
-        "speed ≥ 72 mph on the season contact board — both."
+        "weather is the venue reading. Three tag columns (v2.2, D-114): "
+        "**For HR** in green — the reads arguing for the home run; "
+        "**Against HR** in red — the reads arguing against it; **Tags** — "
+        "the neutral advisories (low samples, missing components, estimated "
+        "lineups, the lineup slot) plus the regression-gap and contact-first "
+        "context reads (D-110). A neon **$** marks a batter who homered in "
+        "his most recent game day on or before this slate (D-094). "
+        "Firing lines — K reads: the unlock needs K% ≥ 22% of season plate "
+        "appearances AND an arsenal-wide whiff ≤ 20%, both; without that "
+        "matchup K% ≥ 28% reads binary and ≥ 30% is the high-K caution. "
+        "Pitcher reads: low-whiff arm at whiff ≤ 20%; gas at season HR/9 "
+        "≥ 1.50 with an L30 ground-ball share under 40% of classified BBE; "
+        "fly-ball vulnerable at a season avg launch angle allowed ≥ 18°; "
+        "the ground-ball profile at an L30 ground-ball share ≥ 50% "
+        "(extreme ≥ 55%) or a season avg LA allowed ≤ 8°; the suppressor "
+        "at season HR/9 ≤ 0.80. The season boards publish no ground-ball "
+        "share, so that read is L30-only. The x-gap tag fires when either "
+        "season gap's absolute value reaches .030 — both sides of a gap "
+        "read the same expected-statistics board, actual vs expected. "
+        "Contact-first needs squared-up ≥ 35% of competitive swings AND "
+        "bat speed ≥ 72 mph on the season contact board — both."
     )
     texts, styles, cards = _slugger_frames(board)
     if texts.empty:
@@ -1560,7 +1646,7 @@ def _render_arms(board: SlateBoard) -> None:
     )
     st.caption(
         "Starter metrics (D-111): green marks the digest's "
-        "pitcher-vulnerability reads only — HR/9 ≥ 1.4 (season) and wOBA "
+        "pitcher-vulnerability reads only — HR/9 ≥ 1.5 (season, v2.2) and wOBA "
         "above xwOBA. Amber: contact reads below the ratified 15-BBE floor — "
         "value shown, advisory attached (D-068). PA and BBE carry every "
         "rate's sample (D-014). Air % is the fly-ball-plus-line-drive share "
@@ -1955,7 +2041,7 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
                 "statsapi season line) or, on the toggle, the last 30 days "
                 "of kept events; the side rows always read that L30 window. "
                 "Green marks only the digest's pitcher-vulnerability reads — "
-                "HR/9 ≥ 1.4 and wOBA above xwOBA. L30 publishes no innings "
+                "HR/9 ≥ 1.5 (v2.2) and wOBA above xwOBA. L30 publishes no innings "
                 "and no per-event expected SLG, so HR/9 and xISO stay "
                 "season reads and the HR count shows instead. Amber: below "
                 "the ratified floor — 80 BF / 40 BBE on a side row, 15 BBE "
