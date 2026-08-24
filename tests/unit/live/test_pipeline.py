@@ -467,6 +467,38 @@ def test_a_roofed_game_carries_no_wind() -> None:
     assert game.wind_direction is None
 
 
+def test_open_air_card_carries_the_park_axis_and_parsed_wind() -> None:
+    """SP-4 (D-119): Coors Field's measured home-to-CF axis (5 degrees) and
+    the compass reading parsed to degrees true ride the game card, so the
+    view never re-derives either."""
+    board = _build_with_wind(_OpenAirApi(), lambda venue: (Decimal("9"), "WSW"))
+    assert not isinstance(board, FetchFailure)
+    game = board.games[0]
+    assert game.park_orientation_degrees == Decimal("5")
+    assert game.wind_from_degrees == Decimal("247.5")
+
+
+def test_roofed_card_carries_neither_axis_nor_wind_bearing() -> None:
+    """A roofed venue's axis is a designed absence (D-073/D-119): no wind
+    reaches the field, so no bearing may resolve."""
+    board = _build_with_wind(_FakeApi(), lambda venue: (Decimal("9"), "WSW"))
+    assert not isinstance(board, FetchFailure)
+    game = board.games[0]
+    assert game.park_orientation_degrees is None
+    assert game.wind_from_degrees is None
+
+
+def test_an_unparseable_compass_reading_degrades_to_none() -> None:
+    """A direction text outside the sixteen-point compass is an honest
+    absence — the wind tags stay silent rather than resolve against a
+    guessed bearing."""
+    board = _build_with_wind(_OpenAirApi(), lambda venue: (Decimal("9"), "Variable"))
+    assert not isinstance(board, FetchFailure)
+    game = board.games[0]
+    assert game.wind_speed_mph == Decimal("9")
+    assert game.wind_from_degrees is None
+
+
 def test_recent_events_cover_the_newest_games_with_every_pitch() -> None:
     """D-086: the log's source rows are the newest seven games' events, all
     pitches kept (the mix needs full counts), newest game first."""

@@ -2512,3 +2512,49 @@ without it there is no honest read. The firing lines print in the
 Sluggers caption with the rest (D-079). The tag builder now takes the
 game as a keyword argument; without one the park/weather reads stay
 silent, which keeps the unit fixtures two-argument.
+
+## D-119 - the wind shortlist tags and the park-orientation table
+
+**(v2.2 tag dictionary, SP-4 — shipped.)** The park-orientation table
+lands: all 22 open-air venues carry their home-to-center-field axis in
+whole degrees true, measured 2026-08-24 from ESRI World Imagery tiles
+(north-up by construction, ground-square pixels via the
+cos(latitude)-corrected bbox; home-to-mound's known 60'6" calibrates
+each capture, and the ESRI street map of the identical bbox
+cross-validated the method at three parks). Five published compass
+readings the imagery contradicts (Target, Camden, PNC, Oracle,
+Comerica) are recorded as such in the module's provenance; degraded
+captures (a tarped Kauffman infield, construction at Angel, a patchy
+Oracle) name the fallback they fell back to. The eight roofed venues
+carry no row **by design** — the roof state is not sourced in v1
+(D-073), so no axis applies indoors and a lookup that finds nothing
+says exactly that. The GameCard now carries the axis and the parsed
+wind from-direction (degrees true, from the NWS compass text); a
+roofed venue, an unmapped park, or an unparseable reading degrades to
+None, never a guessed bearing.
+
+Four wind reads join the shortlist's tag columns, each resolving the
+forecast against the batter's **dominant air field** — the largest
+spray third in his form record (pull / center / oppo, L7 falling back
+to L14 under the ratified 8/15-air-ball floors), because the season
+view publishes no spray read (D-116). The pull corner sits 30° off the
+park axis toward the batter's pull side, center rides the axis, oppo
+mirrors. **Wind assist** (green) at ≥ 8 mph resolved out toward his
+field (strong ≥ 12); **wind kill** (red) at ≥ 10 mph resolved in from
+it, or ≥ 8 mph resolved out to the opposite corner — the v2.2 table
+names no number for the opposing case, so it borrows the assist line
+and the Sluggers caption says so. First match wins; a center-dominant
+spray has no opposite corner and reads only the straight out/in lines.
+**Cold suppress severe** (red) below 38°F with an in-wind ≥ 5 mph
+along the axis replaces the plain cold tag — the in-axis resolution
+needs no spray record, since a cold in-wind knocks the ball down
+wherever it was headed (this closes the gap D-118 named). A roof, an
+unmeasured axis, an unparseable compass text, or a spray record under
+the floors is a silent tag, never an invented one (absence first). The
+tags quote the resolved wind and the field, never a verdict
+(D-015/D-017); every firing line prints in the Sluggers caption
+(D-079). Live-verified on the 2026-08-24 slate: a light-wind night
+(5-7 mph at the four open-air games with a reading) fired no wind tag
+anywhere — the computed expectation, confirmed against the served
+board — while the axis geometry resolved correctly on real sprays (an
+oppo-dominant right-hander read as "right field" at Comerica).

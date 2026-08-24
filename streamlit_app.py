@@ -106,6 +106,7 @@ from greenmachine.live.pipeline import (
 )
 from greenmachine.live.savant import BaseballSavant
 from greenmachine.live.transport import UrllibTransport as MlbTransport
+from greenmachine.live.wind import resolved_wind_mph, spray_field_bearing
 from greenmachine.parks import ALL_COLUMNS as PARK_COLUMNS
 from greenmachine.parks import FACTOR_COLUMNS as PARK_FACTOR_COLUMNS
 from greenmachine.parks import (
@@ -686,9 +687,7 @@ _TOP5_SLOT = 5
 # weather reads fire only on open-air venues with a live temperature —
 # heat boost at ≥ 85°F (strong ≥ 90°F), cold suppress below 45°F. A
 # roofed stadium is the indoor neutral value and a missing reading is a
-# silent tag, never an invented one. COLD_SUPPRESS's severe variant
-# (< 38°F with the wind in) waits on the park-orientation table (SP-4):
-# there is no honest "wind in" without it.
+# silent tag, never an invented one.
 _PARK_BOOST_LINE = Decimal("110")
 _PARK_BOOST_STRONG_LINE = Decimal("115")
 _WRONG_SIDE_PARK_LINE = Decimal("90")
@@ -696,6 +695,22 @@ _WRONG_SIDE_PARK_STRONG_LINE = Decimal("85")
 _HEAT_BOOST_LINE = Decimal("85")
 _HEAT_BOOST_STRONG_LINE = Decimal("90")
 _COLD_SUPPRESS_LINE = Decimal("45")
+
+# v2.2 wind reads (SP-4, D-119): the forecast resolved against the batter's
+# dominant air field on the measured home-to-CF axis (PARK_ORIENTATION).
+# WIND_ASSIST at ≥ 8 mph resolved out toward his air field (strong ≥ 12);
+# WIND_KILL at ≥ 10 mph resolved in, or an out-wind of ≥ 8 mph resolved
+# toward the opposite corner ("out-wind opposing his air field" — the v2.2
+# table names no number for the opposing case, so it borrows the assist
+# line and the caption says so). The severe COLD_SUPPRESS below 38°F needs
+# an in-wind along the axis of ≥ 5 mph. A roofed venue, an unmeasured axis,
+# an unparseable compass reading, or a spray record under the ratified
+# floors (8 air balls L7 / 15 L14+) is a silent tag, never an invented one.
+_WIND_ASSIST_LINE = Decimal("8")
+_WIND_ASSIST_STRONG_LINE = Decimal("12")
+_WIND_KILL_IN_LINE = Decimal("10")
+_SEVERE_COLD_LINE = Decimal("38")
+_SEVERE_COLD_WIND_IN_LINE = Decimal("5")
 
 # The ratified pitch-type sample floor (10 BBE) for the breakup table's
 # per-pitch EV and Air% — below it the INSUFFICIENT treatment, never hidden.
@@ -732,6 +747,47 @@ def _ordinal(position: int) -> str:
     if 10 <= position % 100 <= 20:
         return f"{position}th"
     return f"{position}" + {1: "st", 2: "nd", 3: "rd"}.get(position % 10, "th")
+
+
+def _air_field(card: BatterCard) -> tuple[str, str] | None:
+    """(field, name) of the batter's dominant air field, or None.
+
+    The spray record is the form section's pull/oppo air shares — L7 falling
+    back to L14 under the ratified floors (8 air balls L7, 15 at L14+) —
+    because the season view publishes no spray read (D-116). "Dominant" is
+    the largest of the three thirds (pull, center, oppo); center is the
+    remainder of the two published shares over the identical denominator,
+    so an absent oppo share is a real zero, not an invention. The field is
+    "pull", "center", or "oppo" for `spray_field_bearing`; the name is the
+    field as the batter faces it — a right-hander's pull is "left", a
+    left-hander's "right". None when the side, the form section, or a
+    sufficient spray record is absent: the wind tags stay silent rather
+    than resolve against an invented field.
+    """
+    side = card.batting_side
+    form = card.form
+    if side not in ("L", "R") or form is None:
+        return None
+    spray = form.pull_air_pct
+    if not spray.sufficient or spray.value is None:
+        return None
+    pull_share = spray.value
+    oppo = form.oppo_air_pct
+    oppo_share = oppo.value if oppo is not None and oppo.value is not None else Decimal("0")
+    center_share = Decimal("100") - pull_share - oppo_share
+    if pull_share >= center_share and pull_share >= oppo_share:
+        field = "pull"
+    elif oppo_share >= center_share:
+        field = "oppo"
+    else:
+        field = "center"
+    if field == "center":
+        name = "center"
+    elif (field == "pull") == (side == "R"):
+        name = "left"
+    else:
+        name = "right"
+    return field, name
 
 
 def _card_tags(
@@ -904,12 +960,75 @@ def _card_tags(
                     f"wrong-side park: {strong}HR factor {float(factor.factor):.0f} ({side_text})"
                 )
         temp = game.temperature_fahrenheit
-        if game.venue_type is VenueType.OPEN_AIR and temp is not None:
+        open_air = game.venue_type is VenueType.OPEN_AIR
+        axis = game.park_orientation_degrees
+        wind_from = game.wind_from_degrees
+        wind_speed = game.wind_speed_mph
+        # The in-axis resolution powers the severe-cold read; it needs no
+        # spray record — a cold in-wind knocks the ball down wherever it
+        # was headed.
+        in_axis: Decimal | None = None
+        if open_air and axis is not None and wind_from is not None and wind_speed is not None:
+            in_axis = resolved_wind_mph(wind_speed, wind_from, axis)
+        if open_air and temp is not None:
             if temp >= _HEAT_BOOST_LINE:
                 strong = "strong " if temp >= _HEAT_BOOST_STRONG_LINE else ""
                 boosters.append(f"heat boost: {strong}{float(temp):.0f}°F")
             elif temp < _COLD_SUPPRESS_LINE:
-                vetoes.append(f"cold suppress: {float(temp):.0f}°F")
+                if (
+                    temp < _SEVERE_COLD_LINE
+                    and in_axis is not None
+                    and in_axis <= -_SEVERE_COLD_WIND_IN_LINE
+                ):
+                    vetoes.append(
+                        f"cold suppress: severe {float(temp):.0f}°F "
+                        f"+ wind in {float(-in_axis):.0f} mph"
+                    )
+                else:
+                    vetoes.append(f"cold suppress: {float(temp):.0f}°F")
+        # Wind reads (SP-4, D-119): the forecast resolved against the
+        # batter's dominant air field on the measured park axis. Assist
+        # out toward his field, kill in from it, kill out to the opposite
+        # corner; first match wins. A center-dominant spray has no
+        # opposite corner, and without a sufficient spray record there is
+        # no field to resolve toward — both stay silent.
+        if open_air and axis is not None and wind_from is not None and wind_speed is not None:
+            side = card.batting_side
+            air = _air_field(card)
+            if air is not None and side is not None:
+                field, field_name = air
+                resolved = resolved_wind_mph(
+                    wind_speed, wind_from, spray_field_bearing(axis, side, field)
+                )
+                direction = game.wind_direction
+                raw = (
+                    f"{direction.upper()} {float(wind_speed):.0f} mph"
+                    if direction
+                    else f"{float(wind_speed):.0f} mph"
+                )
+                if resolved >= _WIND_ASSIST_LINE:
+                    strong = "strong " if resolved >= _WIND_ASSIST_STRONG_LINE else ""
+                    boosters.append(
+                        f"wind assist: {strong}{float(resolved):.0f} mph "
+                        f"out to {field_name} ({raw})"
+                    )
+                elif resolved <= -_WIND_KILL_IN_LINE:
+                    vetoes.append(
+                        f"wind kill: {float(-resolved):.0f} mph in from {field_name} ({raw})"
+                    )
+                elif field != "center":
+                    opposing_field = "oppo" if field == "pull" else "pull"
+                    opposing_name = "right" if field_name == "left" else "left"
+                    opposing_resolved = resolved_wind_mph(
+                        wind_speed,
+                        wind_from,
+                        spray_field_bearing(axis, side, opposing_field),
+                    )
+                    if opposing_resolved >= _WIND_ASSIST_LINE:
+                        vetoes.append(
+                            f"wind kill: {float(opposing_resolved):.0f} mph out to "
+                            f"{opposing_name}, away from his air field ({raw})"
+                        )
     return " · ".join(advisories), " · ".join(boosters), " · ".join(vetoes)
 
 
@@ -1637,7 +1756,17 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "batter-side HR factor ≥ 110 (strong ≥ 115), the wrong-side park "
         "at ≤ 90 (strong ≤ 85); the heat boost at ≥ 85°F (strong ≥ 90°F) "
         "and the cold suppress below 45°F, open-air venues only — a "
-        "roofed stadium is the indoor neutral value."
+        "roofed stadium is the indoor neutral value. "
+        "Wind reads (D-119): the forecast resolved against the batter's "
+        "dominant air field — the largest spray third in his form record "
+        "(8 air balls L7 / 15 at L14+) on the measured park axis. The "
+        "wind assist at ≥ 8 mph resolved out toward his field (strong "
+        "≥ 12), the wind kill at ≥ 10 mph resolved in from it or ≥ 8 mph "
+        "resolved out to the opposite corner (the v2.2 table names no "
+        "number for the opposing case, so it borrows the assist line), "
+        "and the severe cold suppress below 38°F with an in-wind ≥ 5 mph "
+        "along the axis. A roofed venue or an insufficient spray record "
+        "carries no wind read."
     )
     texts, styles, cards = _slugger_frames(board)
     if texts.empty:
