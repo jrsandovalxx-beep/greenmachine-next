@@ -96,6 +96,14 @@ class PayloadMalformedError(Exception):
 
 @dataclass(frozen=True)
 class StatcastBatterRow:
+    """Season Statcast quality-of-contact board, one batter per row. Every
+    column is required — a renamed or dropped column fails the whole board
+    cleanly, never a wrong number. ``avg_launch_angle`` is the board's
+    ``avg_hit_angle`` (verified live 2026-08 on the batter type, the same
+    column the pitcher board carries) — a season average, so it is context
+    only: v2.2 reads the share of contact above the HR launch floor, not
+    the average."""
+
     player_id: int
     batted_ball_events: int
     exit_velocity_avg: Decimal
@@ -104,6 +112,7 @@ class StatcastBatterRow:
     barrel_count: int
     barrel_share: Decimal
     sweet_spot_share: Decimal
+    avg_launch_angle: Decimal
 
 
 @dataclass(frozen=True)
@@ -390,6 +399,7 @@ class BaseballSavant:
                 barrel_count=barrels,
                 barrel_share=_percent(row.get("brl_percent"), context),
                 sweet_spot_share=_percent(row.get("anglesweetspotpercent"), context),
+                avg_launch_angle=_decimal(row.get("avg_hit_angle"), context),
             )
 
         parsed = self._board(

@@ -2709,3 +2709,76 @@ starts in the window, names the absence); Logan Gilbert (100 pitches)
 and Chase Burns (104) carry the named workload flag; every drift
 caption renders both shares with samples; no probable spans two or
 fewer starts, so the thin-sample caption stays correctly silent.
+
+
+## D-124 - the batter-table remainder: star convention, launch angle, Form Score placeholder, hover notes
+
+**(The PO's finish-the-Matchups-and-Sluggers-tabs ticket — shipped.)**
+The PO's starred-column mock was unrecoverable (no copy in any session
+file); asked twice (the mock's handling, and the per-pitch season-LA
+fallback), the PO answered "No preference" both times — under the
+D-103/D-108 standing authorization the builder's recommendations
+shipped, disclosed here.
+
+**The star convention (Matchups grid).** A ★ on a column header marks
+a metric that carries a ratified v2.2 firing line, every line printed
+in the tab caption (D-079's print rule). The L30 view stars Pull Air %
+(≥ 40% of measurable air balls with a boosting same-side factor reads
+the pull-air match) and Oppo Air % (over 20% read against the
+opposite-side factor) — the D-120 spray reads. The season view stars EV
+(the power profile: ≥ 91 mph with a bat speed ≥ 73 mph), xISO-ISO
+(≥ +.050) and xwOBA-wOBA (≥ +.015) — the D-115 reads. The star is a
+marker, never emphasis: no colour fires on the grid. Deliberately
+unstarred: Barrel/PA % (the ratified barrel-elite line reads barrel%
+per BBE over ≥ 50 season BBE — not the grid's per-PA figure, and
+starring a sibling metric would misstate the line), Swing-Str %, xwOBA,
+AVG/SLG/ISO and Robbed HR (no batter-side firing line), and LA (below).
+
+**Season launch angle (Matchups, season view only).** The season
+Statcast batter board carries `avg_hit_angle` — verified live against
+the 2026 board before the parse shipped, the same column the pitcher
+board has carried since D-111. It parses as a required column: a rename
+or drop fails the whole board cleanly, never a wrong number. The column
+sits after EV, one decimal with the degree sign, muted "—" without a
+board row. It is deliberately unstarred context: v2.2's HR launch floor
+reads the SHARE of contact above 18°, never the average, and the season
+boards publish no share — the caption and the hover definition both say
+so. The L30 view omits the column (the mix scope computes no
+batter-level LA; the dialog carries the window's per-pitch read). The
+grid keeps its plain-value convention — no amber on the grid; the
+sample discipline lives in the dialog and the form section.
+
+**Per-pitch launch angle (batter dialog).** The arsenal breakup's
+batter half gains LA between EV and Air%: the window record's mean
+launch angle against that pitch, over the same measured-event base
+D-109's EV reads (a tracked foul is a measured event; it never swells
+the BBE denominators, which stay classification-based). The window
+label heads the half, so the read is honestly scoped. The arsenal board
+publishes no per-pitch LA, so the pitcher half has none and the
+season-scope line leaves the field None. The ratified 10-BBE
+pitch-type floor's INSUFFICIENT note rides the value exactly as EV's
+does. The caption prints the v2.2 per-pitch reads — 23°+ against a
+pitch is strong, 30° elite, 18° the HR launch floor (below it, home
+runs need ~115 mph EV) — with the average-is-context caution. The
+fallback question (per-pitch season LA has no source anywhere) was the
+PO's second "No preference": the window-record read shipped, labelled.
+
+**Form Score placeholder (Sluggers).** A "Form Score" column between
+Grade and Park factor, every cell the muted dash, captioned: v2.2
+ratifies the form reads but no rollup formula, so the dash holds until
+one is — never an invented number. The shortlist is the rollup's
+future home; the Matchups grid stays lean per D-098.
+
+**Hover notes (both surfaces).** Every column header carries a one-line
+glossary-derived definition via column config help. One source of
+truth: the star-rename maps feed both the grid cells and the help
+config, and entries naming columns a view does not carry drop out.
+
+Live-verified on the 2026-08-24 slate: 15 A/S batters dash the
+placeholder; the L30 grids star the spray shares; the season view's LA
+values match the Statcast board (Caminero 9.2°, Schwarber 21.5°); the
+dialog renders the per-pitch LA with its floor notes (Valdez's sinker
+7.3° · n=2 · INSUFFICIENT); the hover definitions render in both views'
+column config, locked by a suite test. Full gate green on both Pythons
+(3408 passed, 1 skipped), consistency check clean, all four showcase
+runners clean.

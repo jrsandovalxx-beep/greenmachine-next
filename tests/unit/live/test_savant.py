@@ -8,7 +8,19 @@ from greenmachine.live.mlb_api import FetchFailure
 from greenmachine.live.savant import BaseballSavant
 from greenmachine.live.transport import HttpResponse, TransportUnreachableError
 
+# D-124: avg_hit_angle joins the required set (verified live 2026-08 on the
+# batter board, the same column the pitcher board carries) — the season
+# average launch angle, context only per v2.2 (the ratified read is the
+# share of contact above the HR launch floor, not the average).
 _STATCAST_CSV = (
+    "player_id,attempts,avg_hit_angle,avg_hit_speed,ev95plus,ev95percent,barrels,"
+    "brl_percent,anglesweetspotpercent\n"
+    "101,300,16.4,91.5,150,50.0,30,10.0,33.3\n"
+)
+
+# A batter board missing the launch-angle column fails cleanly — a renamed
+# or dropped column must never smuggle in a wrong number.
+_STATCAST_CSV_MISSING_COLUMN = (
     "player_id,attempts,avg_hit_speed,ev95plus,ev95percent,barrels,brl_percent,anglesweetspotpercent\n"
     "101,300,91.5,150,50.0,30,10.0,33.3\n"
 )
@@ -97,6 +109,17 @@ def test_statcast_board_normalizes_percents_to_fractions() -> None:
     assert row.hard_hit_share == Decimal("0.5")  # derived from count over attempts
     assert row.barrel_share == Decimal("0.1")
     assert row.sweet_spot_share == Decimal("0.333")
+    assert row.avg_launch_angle == Decimal("16.4")
+
+
+def test_statcast_board_fails_cleanly_without_the_launch_angle_column() -> None:
+    """D-124: avg_hit_angle is required like every other column on the
+    board — a renamed or dropped column fails the whole board, never a
+    season LA read over a wrong number."""
+    rows = BaseballSavant(_FakeTransport(_STATCAST_CSV_MISSING_COLUMN)).fetch_statcast_batters(
+        year=2026
+    )
+    assert isinstance(rows, FetchFailure)
 
 
 def test_expected_stats_board_parses_actual_and_expected_rates() -> None:
