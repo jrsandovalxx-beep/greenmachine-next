@@ -1657,6 +1657,94 @@ def test_card_tags_carry_the_v22_batter_boosters() -> None:
     assert "actual over expected" not in streamlit_app._card_tags(slow, arm)[0]
 
 
+def test_card_tags_carry_the_v22_park_and_weather_reads() -> None:
+    """v2.2 (D-118): the park boost at a batter-side HR factor ≥ 110
+    (strong ≥ 115), the wrong-side park at ≤ 90 (strong ≤ 85), the heat
+    boost at ≥ 85°F (strong ≥ 90°F), and the cold suppress below 45°F —
+    open-air venues only; a roof or a missing game keeps the tags silent."""
+    from types import SimpleNamespace
+
+    import streamlit_app
+
+    from greenmachine.inputs.contract import VenueType
+
+    base = dict(
+        result=SimpleNamespace(present_observations=[], missing_observations=[]),
+        order_position=None,
+        lineup_is_estimate=False,
+        season_k_share=None,
+        season=None,
+        season_gaps=None,
+        squared_up_share=None,
+        squared_up_swings=0,
+        squared_up_bat_speed=None,
+        statcast=None,
+        sprint_speed_fps=None,
+        batting_side="L",
+        mix_line=None,
+    )
+
+    def batter(**over: object) -> SimpleNamespace:
+        return SimpleNamespace(**{**base, **over})
+
+    def game(factor_l: str, temp: str | None, venue: VenueType = VenueType.OPEN_AIR):
+        return SimpleNamespace(
+            venue_type=venue,
+            temperature_fahrenheit=Decimal(temp) if temp is not None else None,
+            home_run_factor_left=ParkFactor(
+                factor=Decimal(factor_l),
+                handedness=Handedness.LEFT,
+                plate_appearances=30000,
+            ),
+            home_run_factor_right=ParkFactor(
+                factor=Decimal("100"),
+                handedness=Handedness.RIGHT,
+                plate_appearances=30000,
+            ),
+        )
+
+    # The park reads fire off the batter's resolved side, with the strong
+    # variants past their own lines; a neutral factor stays silent.
+    _, boosters, _ = streamlit_app._card_tags(batter(), None, game=game("112", "72"))
+    assert "park boost: HR factor 112 (LHB)" in boosters
+    _, boosters, _ = streamlit_app._card_tags(batter(), None, game=game("118", "72"))
+    assert "park boost: strong HR factor 118 (LHB)" in boosters
+    _, _, vetoes = streamlit_app._card_tags(batter(), None, game=game("88", "72"))
+    assert "wrong-side park: HR factor 88 (LHB)" in vetoes
+    _, _, vetoes = streamlit_app._card_tags(batter(), None, game=game("84", "72"))
+    assert "wrong-side park: strong HR factor 84 (LHB)" in vetoes
+    tags = streamlit_app._card_tags(batter(), None, game=game("100", "72"))
+    assert "park" not in tags[1] and "park" not in tags[2]
+    # The right-handed read takes the right-side factor, not the left.
+    _, boosters, _ = streamlit_app._card_tags(
+        batter(batting_side="R"), None, game=game("118", "72")
+    )
+    assert "park boost" not in boosters
+    # The weather reads: heat at 85/90, cold below 45, open air only.
+    _, boosters, _ = streamlit_app._card_tags(batter(), None, game=game("100", "87"))
+    assert "heat boost: 87°F" in boosters
+    _, boosters, _ = streamlit_app._card_tags(batter(), None, game=game("100", "93"))
+    assert "heat boost: strong 93°F" in boosters
+    _, _, vetoes = streamlit_app._card_tags(batter(), None, game=game("100", "41"))
+    assert "cold suppress: 41°F" in vetoes
+    tags = streamlit_app._card_tags(batter(), None, game=game("100", "72"))
+    assert "heat" not in tags[1] and "cold" not in tags[2]
+    # A roof is the indoor neutral value — no weather reads at any temp.
+    tags = streamlit_app._card_tags(batter(), None, game=game("100", "93", VenueType.FIXED_ROOF))
+    assert "heat" not in tags[1]
+    tags = streamlit_app._card_tags(
+        batter(), None, game=game("100", "38", VenueType.RETRACTABLE_ROOF)
+    )
+    assert "cold" not in tags[2]
+    # A missing temperature or a missing game is a silent tag, never an
+    # invented one.
+    tags = streamlit_app._card_tags(batter(), None, game=game("100", None))
+    assert "heat" not in tags[1] and "cold" not in tags[2]
+    tags = streamlit_app._card_tags(batter(), None)
+    assert "park" not in tags[1] and "heat" not in tags[1]
+    assert "park" not in tags[2] and "cold" not in tags[2]
+
+
 def test_ordinal_never_says_1th() -> None:
     import streamlit_app
 

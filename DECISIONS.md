@@ -2489,3 +2489,26 @@ the metric meanings are reachable while auditing grades too. The
 glossary answers what the metric means and why it matters; the
 surfaces themselves still carry the firing math per D-079 — the two
 layers never duplicate each other's job.
+
+## D-118 - the park and weather shortlist tags
+
+**(v2.2 tag dictionary, planned for D-116 and displaced by the PO's
+GB%/pulled-barrels rulings — shipped now.)** Four game-state reads join
+the shortlist's tag columns, fired off the game the batter plays in:
+**park boost** (green) at a batter-side home-run factor ≥ 110 (strong
+≥ 115) and **wrong-side park** (red) at ≤ 90 (strong ≤ 85), both read
+off the hand-split factor for the batter's resolved side (D-065 — a
+switch hitter's side resolves against the starter's hand, so his tag
+quotes the side he will actually bat from); **heat boost** (green) at
+≥ 85°F (strong ≥ 90°F) and **cold suppress** (red) below 45°F, both
+open-air only — a roofed stadium is the indoor neutral value and fires
+no weather tag at any temperature. A missing factor or temperature is
+a silent tag, never an invented one (absence first). Two honest
+limits, stated where they belong: the tags quote the factor and the
+temperature, never a verdict about them (D-015/D-017); and
+COLD_SUPPRESS's severe variant (< 38°F with the wind in) stays
+unshipped — "wind in" needs the park-orientation table (SP-4), and
+without it there is no honest read. The firing lines print in the
+Sluggers caption with the rest (D-079). The tag builder now takes the
+game as a keyword argument; without one the park/weather reads stay
+silent, which keeps the unit fixtures two-argument.
