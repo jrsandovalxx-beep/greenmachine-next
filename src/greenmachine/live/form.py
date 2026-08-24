@@ -33,6 +33,10 @@ _HOME_PLATE_X = Decimal("125.42")
 _HOME_PLATE_DEPTH_Y = Decimal("198.27")
 
 MIN_BBE_FORM = 15
+# v2.2 (D-114): the air-ball floor splits by window — 8 over the L7 window
+# (a normal week is ~10 air balls; 15 was unreachable for everyday
+# regulars), 15 over L14 and longer. Supersedes part of D-068, append-only.
+MIN_AIR_BALLS_FORM_L7 = 8
 MIN_AIR_BALLS_FORM = 15
 MIN_COMPETITIVE_SWINGS_FORM = 25
 
@@ -193,11 +197,17 @@ def _pick(
     value_l14: Decimal | None,
     sample_l14: int,
     floor: int,
+    floor_l7: int | None = None,
 ) -> FormValue:
-    """Per-metric window resolution: prefer L7, fall back to L14 on empty."""
+    """Per-metric window resolution: prefer L7, fall back to L14 on empty.
+
+    ``floor`` binds the L14 window; ``floor_l7`` binds the L7 window where
+    v2.2 ratified a lighter short-window floor (air balls: 8 at L7, 15 at
+    L14+) — it defaults to ``floor`` for every other metric."""
+    short_floor = floor if floor_l7 is None else floor_l7
     if sample_l7 > 0 and value_l7 is not None:
         return FormValue(
-            value=value_l7, sample=sample_l7, window_days=7, sufficient=sample_l7 >= floor
+            value=value_l7, sample=sample_l7, window_days=7, sufficient=sample_l7 >= short_floor
         )
     if sample_l14 > 0 and value_l14 is not None:
         return FormValue(
@@ -288,6 +298,7 @@ def resolve_form_section(
             extended.pull_air_pct,
             extended.air_balls,
             MIN_AIR_BALLS_FORM,
+            floor_l7=MIN_AIR_BALLS_FORM_L7,
         ),
         oppo_air_pct=_pick(
             recent.oppo_air_pct,
@@ -295,6 +306,7 @@ def resolve_form_section(
             extended.oppo_air_pct,
             extended.air_balls,
             MIN_AIR_BALLS_FORM,
+            floor_l7=MIN_AIR_BALLS_FORM_L7,
         ),
         attack_angle_degrees=_pick(
             aa_value_recent,

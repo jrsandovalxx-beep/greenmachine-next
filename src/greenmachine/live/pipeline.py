@@ -380,6 +380,12 @@ class PitcherRecentLine:
     avg_launch_angle: Decimal | None
     air_ball_share: Decimal | None
     iso: Decimal | None
+    # D-114 (v2.2): ground balls over classified BBE — the GB% half of the
+    # GB_PROFILE / PITCHER_GAS tags, which the season boards do not publish.
+    # The classified count is the share's true denominator (BBE with a
+    # bb_type), carried so the tag's sample label never borrows a looser one.
+    ground_ball_share: Decimal | None = None
+    classified_batted_balls: int = 0
 
 
 def _innings_as_decimal(notation: str) -> Decimal | None:
@@ -470,9 +476,12 @@ def _pitcher_recent_line(events: tuple[PitchEvent, ...]) -> PitcherRecentLine | 
         woba_denominator += event.woba_denom
     classified = [event for event in batted if event.bb_type]
     air_balls = sum(1 for event in classified if event.bb_type in AIR_BALL_TYPES)
+    ground_balls = sum(1 for event in classified if event.bb_type == "ground_ball")
     air_ball_share: Decimal | None = None
+    ground_ball_share: Decimal | None = None
     if classified:
         air_ball_share = Decimal(air_balls) / Decimal(len(classified))
+        ground_ball_share = Decimal(ground_balls) / Decimal(len(classified))
     return PitcherRecentLine(
         plate_appearances=outcomes.plate_appearances,
         batted_balls=len(batted),
@@ -483,6 +492,8 @@ def _pitcher_recent_line(events: tuple[PitchEvent, ...]) -> PitcherRecentLine | 
         avg_launch_angle=(sum(angles, Decimal(0)) / Decimal(len(angles))) if angles else None,
         air_ball_share=air_ball_share,
         iso=outcomes.iso,
+        ground_ball_share=ground_ball_share,
+        classified_batted_balls=len(classified),
     )
 
 

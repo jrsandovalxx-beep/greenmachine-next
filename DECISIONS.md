@@ -2375,3 +2375,37 @@ rate — one robbed ball a week is a regular's pace and zero is a real
 observation, not a cold streak — and it is None, a named absence, only
 when the event record itself failed. The season scope keeps the named
 absence it always had: no season source publishes per-event distances.
+
+## D-114 - v2.2 batch 1: split air-ball floors, HR/9 re-line, colored tag columns, pitcher-side tags
+
+**(PO directive 2026-08-23, v2.2 thresholds doc: apply the refinements.
+This is the first batch — floors, the HR/9 line, the tag coloring, and
+the pitcher-side tags; the batter/situational tags follow in the next
+entry.)** Four moves, each printed on its surface per the D-079 pattern.
+(1) The air-ball sample floor splits by window — 8 air balls at L7, 15
+at L14+ — ratified in the v2.2 doc ("~10 air balls is a normal week; 15
+was unreachable for everyday regulars"); this partially supersedes
+D-068, logged append-only per the doc's governance note, D-068's text
+unchanged. (2) The pitcher-vulnerability green line moves from HR/9 1.4
+to v2.2's season target 1.50 on the starter cards and Arms surfaces.
+(3) The shortlist's single tags box becomes three columns — For HR
+(green boosters), Against HR (red vetoes, the new veto style), and the
+neutral Tags advisories — v2.2's green-good/red-bad tag coloring; the
+exit-velo event sheet is untouched. (4) The pitcher-side tags land with
+their v2.2 firing lines: low-whiff arm (arsenal whiff ≤ 20%, season),
+the K interaction re-lined (unlock needs K% ≥ 22% AND the low-whiff
+arm; without that matchup K% ≥ 28% reads binary and ≥ 30% is the
+high-K caution — superseding D-109's 27%/22% lines), the ground-ball
+profile (L30 ground-ball share ≥ 50%, extreme ≥ 55%, of classified BBE
+— or season avg launch angle allowed ≤ 8°), the HR/9 suppressor
+(≤ 0.80 season), the gas profile (HR/9 ≥ 1.50 season with the L30
+ground-ball share under 40%), and the fly-vulnerable flag (season avg
+LA allowed ≥ 18°). The season boards publish no ground-ball split
+against (D-111's live lesson), so the GB% halves read the L30 kept-event
+record and say so in the tag text; HR/FB is likewise unpublished, so
+FB_VULNERABLE flies on the launch-angle half only. HR/9 stays a
+season-scope read because the L30 window publishes no innings. Every
+firing line rides in the Sluggers caption. Open items reported to the
+PO, not stopped for: the temperature component cap (config decision),
+the pulled-barrels raw-count display (doc says pending PO ratify), and
+the GMN pull-air league baseline (awaits the raw Savant export).

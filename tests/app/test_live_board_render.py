@@ -380,6 +380,8 @@ def test_shortlist_keeps_only_a_and_s_with_the_d084_columns() -> None:
         "Grade",
         "Park factor",
         "Weather",
+        "For HR",
+        "Against HR",
         "Tags",
     ]
     # D-094: the outage board fetched no events, so no batter has a last
@@ -1315,10 +1317,11 @@ def test_breakup_batter_half_carries_contact_shape_with_the_pitch_type_floor() -
     assert row.count("<td>—</td>") >= 2
 
 
-def test_card_tags_carry_the_slot_and_the_high_k_reads() -> None:
-    """D-109: the tags box gains the ordinal lineup slot (est.-marked),
-    the high-K profile tag at the ratified 27% line, and the interaction
-    tag when the opposing arm is also low-whiff — never both K tags."""
+def test_card_tags_carry_the_slot_and_the_v22_k_reads() -> None:
+    """D-109 / v2.2 (D-114): the advisories carry the ordinal lineup slot
+    (est.-marked); the K reads re-line to the v2.2 set — the unlock needs
+    K% ≥ 22% AND an arsenal whiff ≤ 20%, without that matchup ≥ 28% reads
+    binary and ≥ 30% is the high-K caution — never two K tags at once."""
     from types import SimpleNamespace
 
     import streamlit_app
@@ -1335,20 +1338,98 @@ def test_card_tags_carry_the_slot_and_the_high_k_reads() -> None:
         squared_up_swings=0,
         squared_up_bat_speed=None,
     )
-    arm = SimpleNamespace(season_whiff_weighted=Decimal("0.20"))
-    tags = streamlit_app._card_tags(card, arm)
-    assert "est. lineup" in tags
-    assert "bats 1st (est.)" in tags
-    assert "high-K bat vs low-whiff arm: K% 28.0 (402 PA), arsenal whiff 20.0%" in tags
-    assert "high-K profile" not in tags  # the interaction tag supersedes it
-    # A normal-whiff arm leaves the descriptive profile tag.
-    tags = streamlit_app._card_tags(card, SimpleNamespace(season_whiff_weighted=Decimal("0.25")))
-    assert "high-K profile: K% 28.0 (402 PA)" in tags
-    # Below the ratified line, and no line at all: no K tag.
-    quiet = SimpleNamespace(**{**vars(card), "season_k_share": Decimal("0.20")})
-    assert "high-K" not in streamlit_app._card_tags(quiet, arm)
+    arm = SimpleNamespace(
+        season_whiff_weighted=Decimal("0.20"), season_reads=None, recent_overall=None
+    )
+    advisories, boosters, vetoes = streamlit_app._card_tags(card, arm)
+    assert "est. lineup" in advisories
+    assert "bats 1st (est.)" in advisories
+    assert "high-K bat vs low-whiff arm: K% 28.0 (402 PA), arsenal whiff 20.0%" in boosters
+    assert "low-whiff arm: arsenal whiff 20.0% (season)" in boosters
+    assert "high-K profile" not in vetoes  # the unlock tag supersedes it
+    assert "binary" not in vetoes
+    # A normal-whiff arm leaves the binary read at 28%...
+    _, boosters, vetoes = streamlit_app._card_tags(
+        card,
+        SimpleNamespace(
+            season_whiff_weighted=Decimal("0.25"), season_reads=None, recent_overall=None
+        ),
+    )
+    assert "binary K profile: K% 28.0 (402 PA)" in vetoes
+    assert "low-whiff arm" not in boosters
+    # ...and the high-K caution at 30%+.
+    hot = SimpleNamespace(**{**vars(card), "season_k_share": Decimal("0.31")})
+    _, _, vetoes = streamlit_app._card_tags(
+        hot, SimpleNamespace(season_whiff_weighted=None, season_reads=None, recent_overall=None)
+    )
+    assert "high-K profile: K% 31.0 (402 PA)" in vetoes
+    # The 22% unlock line: below it no K tag even against a low-whiff arm.
+    quiet = SimpleNamespace(**{**vars(card), "season_k_share": Decimal("0.21")})
+    _, boosters, vetoes = streamlit_app._card_tags(quiet, arm)
+    assert "high-K" not in boosters
+    assert "binary" not in vetoes
     no_line = SimpleNamespace(**{**vars(card), "season_k_share": None, "season": None})
-    assert "high-K" not in streamlit_app._card_tags(no_line, arm)
+    _, boosters, vetoes = streamlit_app._card_tags(no_line, arm)
+    assert "high-K" not in boosters
+    assert "binary" not in vetoes and "high-K profile" not in vetoes
+
+
+def test_card_tags_carry_the_v22_pitcher_side_reads() -> None:
+    """v2.2 (D-114): the pitcher-side tags — the ground-ball profile off the
+    L30 event record (extreme ≥ 55%) or the season avg-LA line, the HR/9
+    suppressor, the gas profile (HR/9 ≥ 1.50 with the L30 GB share under
+    40%), and the fly-vulnerable flag at season avg LA ≥ 18°."""
+    from types import SimpleNamespace
+
+    import streamlit_app
+
+    card = SimpleNamespace(
+        result=SimpleNamespace(present_observations=[], missing_observations=[]),
+        order_position=None,
+        lineup_is_estimate=False,
+        season_k_share=None,
+        season=None,
+        season_gaps=None,
+        squared_up_share=None,
+        squared_up_swings=0,
+        squared_up_bat_speed=None,
+    )
+
+    def arm(hr9: str, la: str, gb: str | None, bbe: int = 148) -> SimpleNamespace:
+        return SimpleNamespace(
+            season_whiff_weighted=None,
+            season_reads=SimpleNamespace(
+                home_run_per_nine=Decimal(hr9), avg_launch_angle=Decimal(la)
+            ),
+            recent_overall=SimpleNamespace(
+                ground_ball_share=Decimal(gb) if gb is not None else None,
+                classified_batted_balls=bbe,
+            ),
+        )
+
+    # GB profile off the L30 share, plain and extreme.
+    _, _, vetoes = streamlit_app._card_tags(card, arm("1.10", "10.2", "0.52"))
+    assert "air allowed: low — ground-ball profile (GB 52.0% of 148 BBE, L30)" in vetoes
+    _, _, vetoes = streamlit_app._card_tags(card, arm("1.10", "10.2", "0.56"))
+    assert "extreme ground-ball profile" in vetoes
+    # The season LA line carries it when the L30 share is unpublished.
+    _, _, vetoes = streamlit_app._card_tags(card, arm("1.10", "7.8", None))
+    assert "air allowed: low — ground-ball profile (avg LA 7.8°, season)" in vetoes
+    # Suppressor, gas, and fly-vulnerable.
+    _, _, vetoes = streamlit_app._card_tags(card, arm("0.75", "11.0", "0.44"))
+    assert "suppressor: HR/9 0.75 (season)" in vetoes
+    _, boosters, _ = streamlit_app._card_tags(card, arm("1.62", "11.0", "0.35"))
+    assert "gas: HR/9 1.62 season, GB 35.0% of 148 BBE, L30" in boosters
+    _, boosters, _ = streamlit_app._card_tags(card, arm("1.62", "11.0", "0.45"))
+    assert "gas" not in boosters
+    _, boosters, _ = streamlit_app._card_tags(card, arm("1.10", "18.4", "0.44"))
+    assert "fly-ball vulnerable: avg LA 18.4° (season)" in boosters
+    # A neutral arm fires none of the pitcher-side tags.
+    _, boosters, vetoes = streamlit_app._card_tags(card, arm("1.10", "11.0", "0.44"))
+    assert boosters == "" and vetoes == ""
+    # No opposing arm at all: no pitcher-side tags, no error.
+    _, boosters, vetoes = streamlit_app._card_tags(card, None)
+    assert boosters == "" and vetoes == ""
 
 
 def test_card_tags_carry_the_x_gap_and_contact_first_reads() -> None:
@@ -1383,8 +1464,8 @@ def test_card_tags_carry_the_x_gap_and_contact_first_reads() -> None:
             ),
         }
     )
-    tags = streamlit_app._card_tags(over, None)
-    assert "x-gap: xISO +.041, xwOBA -.012 (season, 412 PA)" in tags
+    advisories, _, _ = streamlit_app._card_tags(over, None)
+    assert "x-gap: xISO +.041, xwOBA -.012 (season, 412 PA)" in advisories
     flipped = SimpleNamespace(
         **{
             **base,
@@ -1395,7 +1476,7 @@ def test_card_tags_carry_the_x_gap_and_contact_first_reads() -> None:
             ),
         }
     )
-    assert "x-gap" in streamlit_app._card_tags(flipped, None)
+    assert "x-gap" in streamlit_app._card_tags(flipped, None)[0]
     # Under the line on both, and no board row: no tag.
     under = SimpleNamespace(
         **{
@@ -1407,8 +1488,8 @@ def test_card_tags_carry_the_x_gap_and_contact_first_reads() -> None:
             ),
         }
     )
-    assert "x-gap" not in streamlit_app._card_tags(under, None)
-    assert "x-gap" not in streamlit_app._card_tags(SimpleNamespace(**base), None)
+    assert "x-gap" not in streamlit_app._card_tags(under, None)[0]
+    assert "x-gap" not in streamlit_app._card_tags(SimpleNamespace(**base), None)[0]
     # Contact-first: both sides of the ratified line are required.
     contact = SimpleNamespace(
         **{
@@ -1418,12 +1499,12 @@ def test_card_tags_carry_the_x_gap_and_contact_first_reads() -> None:
             "squared_up_bat_speed": Decimal("73.4"),
         }
     )
-    tags = streamlit_app._card_tags(contact, None)
-    assert "contact-first profile: squared-up 36.2% (620 swings), bat speed 73.4 mph" in tags
+    advisories, _, _ = streamlit_app._card_tags(contact, None)
+    assert "contact-first profile: squared-up 36.2% (620 swings), bat speed 73.4 mph" in advisories
     slow_bat = SimpleNamespace(**{**vars(contact), "squared_up_bat_speed": Decimal("71.9")})
-    assert "contact-first" not in streamlit_app._card_tags(slow_bat, None)
+    assert "contact-first" not in streamlit_app._card_tags(slow_bat, None)[0]
     low_squared = SimpleNamespace(**{**vars(contact), "squared_up_share": Decimal("0.349")})
-    assert "contact-first" not in streamlit_app._card_tags(low_squared, None)
+    assert "contact-first" not in streamlit_app._card_tags(low_squared, None)[0]
 
 
 def test_ordinal_never_says_1th() -> None:
