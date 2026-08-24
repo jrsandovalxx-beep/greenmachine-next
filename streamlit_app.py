@@ -660,12 +660,25 @@ _K_UNLOCK_SHARE = Decimal("0.22")
 _BINARY_K_SHARE = Decimal("0.28")
 _HIGH_K_SHARE = Decimal("0.30")
 _LOW_WHIFF_SHARE = Decimal("0.20")
-# D-110: the x-gap tag fires when either season gap's absolute value reaches
-# .030 (ratified O-8); contact-first needs squared-up ≥ 35% of competitive
-# swings AND bat speed ≥ 72 mph on the season contact board — both.
-_X_GAP_LINE = Decimal("0.03")
+# v2.2 (D-115): the batter-side tag lines. The x-gap flag is an
+# under-performance read only — xISO-ISO ≥ +.050 or xwOBA-wOBA ≥ +.015,
+# superseding D-110's .030 absolute-value tag; barrel-elite needs barrel%
+# ≥ 15 over ≥ 50 season BBE; the power profile needs season avg EV ≥ 91
+# mph AND bat speed ≥ 73 mph; actual-over-expected is context only
+# (wOBA-xwOBA ≥ ~.040 with sprint ≥ 28 ft/s); contact-first flips to the
+# v2.2 veto — squared-up ≥ 35% of competitive swings with a sub-70 bat
+# speed, superseding D-110's ≥ 72 mph context tag.
+_X_ISO_GAP_LINE = Decimal("0.05")
+_X_WOBA_GAP_LINE = Decimal("0.015")
+_BARREL_ELITE_SHARE = Decimal("0.15")
+_BARREL_ELITE_MIN_BBE = 50
+_POWER_EV_LINE = Decimal("91")
+_POWER_BAT_SPEED_LINE = Decimal("73")
+_AOE_WOBA_GAP_LINE = Decimal("0.04")
+_AOE_SPRINT_LINE = Decimal("28")
 _SQUARED_UP_LINE = Decimal("0.35")
-_CONTACT_BAT_SPEED_LINE = Decimal("72")
+_CONTACT_BAT_SPEED_LINE = Decimal("70")
+_TOP5_SLOT = 5
 
 # The ratified pitch-type sample floor (10 BBE) for the breakup table's
 # per-pitch EV and Air% — below it the INSUFFICIENT treatment, never hidden.
@@ -722,7 +735,16 @@ def _card_tags(card: BatterCard, opposing: PitcherCard | None) -> tuple[str, str
         advisories.append("est. lineup")
     if card.order_position is not None:
         slot = f"bats {_ordinal(card.order_position)}"
-        advisories.append(slot + (" (est.)" if card.lineup_is_estimate else ""))
+        slot += " (est.)" if card.lineup_is_estimate else ""
+        # v2.2 (D-115): a top-5 slot is a booster — the 4-5 PA tier — and
+        # the leadoff spot adds the extra look at the starter. Later slots
+        # stay neutral advisories.
+        if card.order_position <= _TOP5_SLOT:
+            boosters.append(slot)
+            if card.order_position == 1:
+                boosters.append("extra look at the starter (4-5 PA tier)")
+        else:
+            advisories.append(slot)
     pa = card.season.plate_appearances if card.season is not None else 0
     # v2.2 K reads (D-114): the unlock needs K% ≥ 22% AND a low-whiff arm
     # (≤ 20%); without that matchup, ≥ 28% reads binary and ≥ 30% is the
@@ -777,25 +799,70 @@ def _card_tags(card: BatterCard, opposing: PitcherCard | None) -> tuple[str, str
             boosters.append(f"gas: HR/9 {float(hr9):.2f} season, {gb_text}")
         if season_la is not None and season_la >= _FB_VULNERABLE_LA_LINE:
             boosters.append(f"fly-ball vulnerable: avg LA {float(season_la):.1f}° (season)")
-    # D-110: the regression-gap tag — both gaps always shown, fired by either
-    # crossing the ratified line; no expected-stats row, no tag.
+    # v2.2 (D-115): the x-gap flag — an under-performance read, so the
+    # positive side only (expected above actual); both gaps always shown,
+    # no expected-stats row, no tag.
     gaps = card.season_gaps
     if gaps is not None and (
-        abs(gaps.xiso_minus_iso) >= _X_GAP_LINE or abs(gaps.xwoba_minus_woba) >= _X_GAP_LINE
+        gaps.xiso_minus_iso >= _X_ISO_GAP_LINE or gaps.xwoba_minus_woba >= _X_WOBA_GAP_LINE
     ):
-        advisories.append(
+        boosters.append(
             f"x-gap: xISO {_signed_avg_text(gaps.xiso_minus_iso)}, "
             f"xwOBA {_signed_avg_text(gaps.xwoba_minus_woba)} "
             f"(season, {gaps.plate_appearances} PA)"
         )
+    # Barrel-elite and the power profile read the season Statcast board;
+    # both carry the v2.2 power-badge gate (≥ 50 BBE, BBE-denominated).
+    statcast = card.statcast
+    if statcast is not None and statcast.batted_ball_events >= _BARREL_ELITE_MIN_BBE:
+        if statcast.barrel_share >= _BARREL_ELITE_SHARE:
+            boosters.append(
+                f"barrel {float(statcast.barrel_share) * 100:.1f}% "
+                f"({statcast.batted_ball_events} BBE)"
+            )
+        if (
+            statcast.exit_velocity_avg >= _POWER_EV_LINE
+            and card.squared_up_bat_speed is not None
+            and card.squared_up_bat_speed >= _POWER_BAT_SPEED_LINE
+        ):
+            boosters.append(
+                f"power profile: EV {float(statcast.exit_velocity_avg):.1f} mph, "
+                f"bat speed {float(card.squared_up_bat_speed):.1f} mph (season)"
+            )
+    # Actual-over-expected is context only (v2.2): no automatic speed
+    # attribution — it rides the neutral column.
+    if (
+        gaps is not None
+        and gaps.xwoba_minus_woba <= -_AOE_WOBA_GAP_LINE
+        and card.sprint_speed_fps is not None
+        and card.sprint_speed_fps >= _AOE_SPRINT_LINE
+    ):
+        advisories.append(
+            f"actual over expected: wOBA {_signed_avg_text(-gaps.xwoba_minus_woba)} "
+            f"over xwOBA (season, {gaps.plate_appearances} PA), "
+            f"sprint {float(card.sprint_speed_fps):.1f} ft/s"
+        )
+    # Platoon advantage (v2.2): the batter's resolved side against the
+    # starter's throwing hand — a contact-quality signal, with the 2025
+    # anomaly caveat stated in the caption.
+    throws = opposing.throws if opposing is not None else None
+    if card.batting_side is not None and throws is not None and card.batting_side != throws:
+        boosters.append(f"platoon advantage: bats {card.batting_side} vs {throws}P")
+    # Robbed (v2.2, aligned to D-113's column): 375+ ft balls that stayed
+    # in the park over the last 7 days — a raw count, never a rate.
+    mix = card.mix_line
+    if mix is not None and mix.robbed_hr_count:
+        boosters.append(f"robbed: {mix.robbed_hr_count} at 375+ ft stayed in the park (L7)")
+    # v2.2 contact-first veto: squared-up high with a sub-70 bat speed is a
+    # contact profile, not a power profile.
     squared = card.squared_up_share
     if (
         squared is not None
         and squared >= _SQUARED_UP_LINE
         and card.squared_up_bat_speed is not None
-        and card.squared_up_bat_speed >= _CONTACT_BAT_SPEED_LINE
+        and card.squared_up_bat_speed < _CONTACT_BAT_SPEED_LINE
     ):
-        advisories.append(
+        vetoes.append(
             f"contact-first profile: squared-up {float(squared) * 100:.1f}% "
             f"({card.squared_up_swings} swings), "
             f"bat speed {float(card.squared_up_bat_speed):.1f} mph"
@@ -1493,11 +1560,21 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "the ground-ball profile at an L30 ground-ball share ≥ 50% "
         "(extreme ≥ 55%) or a season avg LA allowed ≤ 8°; the suppressor "
         "at season HR/9 ≤ 0.80. The season boards publish no ground-ball "
-        "share, so that read is L30-only. The x-gap tag fires when either "
-        "season gap's absolute value reaches .030 — both sides of a gap "
-        "read the same expected-statistics board, actual vs expected. "
-        "Contact-first needs squared-up ≥ 35% of competitive swings AND "
-        "bat speed ≥ 72 mph on the season contact board — both."
+        "share, so that read is L30-only. Batter reads (v2.2, D-115): the "
+        "x-gap flag is under-performance evidence — xISO-ISO ≥ +.050 or "
+        "xwOBA-wOBA ≥ +.015, both sides of a gap off the same "
+        "expected-statistics board; barrel elite at barrel% ≥ 15 over "
+        "≥ 50 season BBE; the power profile at season EV ≥ 91 mph AND "
+        "bat speed ≥ 73 mph; a top-5 slot is the 4-5 PA tier, leadoff "
+        "adds the extra look; platoon advantage reads the batter's side "
+        "against the starter's hand (+28 wOBA pts LHB vs RHP, +16 RHB vs "
+        "LHP long-run — 2025 broke the RHB pattern for the first time in "
+        "20+ years, so it stays a contact-quality signal); robbed counts "
+        "375+ ft balls that stayed in the park over the last 7 days. "
+        "Contact-first is a veto: squared-up ≥ 35% of competitive swings "
+        "with a sub-70 mph bat speed — a contact profile, not power. "
+        "Actual over expected (wOBA-xwOBA ≥ ~.040 with sprint ≥ 28 ft/s) "
+        "is context only — no automatic speed attribution."
     )
     texts, styles, cards = _slugger_frames(board)
     if texts.empty:
