@@ -104,6 +104,7 @@ from greenmachine.live.pipeline import (
     PitcherSeasonReads,
     PitchLine,
     SlateBoard,
+    StarterWorkload,
     build_board,
 )
 from greenmachine.live.savant import BaseballSavant
@@ -1773,6 +1774,36 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
             "pitch-type floor — below it the value keeps its exact sample "
             "with an INSUFFICIENT marker (D-109)." + season_note
         )
+        # v2.2's stuff-drift caption (D-123, SP-3): the primary pitch's
+        # season-to-window whiff and usage facts. The mirage caution ships
+        # as this caption alone — no mirage or decay wording on screen.
+        drift = pitcher.stuff_drift
+        if drift is not None:
+            whiff_window_text = (
+                f"{float(drift.whiff_window) * 100:.0f}%"
+                if drift.whiff_window is not None
+                else "no swings at it"
+            )
+            usage_window_text = (
+                f"{float(drift.usage_window) * 100:.0f}%"
+                if drift.usage_window is not None
+                else "no typed pitches"
+            )
+            st.caption(
+                f"Stuff drift — primary pitch {drift.pitch_name}: whiff "
+                f"{float(drift.whiff_season) * 100:.0f}% season → "
+                f"{whiff_window_text} L30 ({drift.pitches_in_window} pitches "
+                f"L30), usage {float(drift.usage_season) * 100:.0f}% → "
+                f"{usage_window_text}."
+            )
+    if pitcher is not None:
+        # v2.2's workload echo (D-123, SP-3): the same raw facts the Arms
+        # columns carry — never a cap claim.
+        if pitcher.workload is None:
+            st.caption("Workload — no start record in the lookback window.")
+        else:
+            last_text, last_three_text = _workload_facts(pitcher.workload)
+            st.caption(f"Workload — last start: {last_text} · last 3 starts: {last_three_text}.")
 
     st.markdown("**Recent exit velocity — event log**")
     threshold_on = st.toggle(
@@ -1881,7 +1912,15 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
 # Absence texts that appear in otherwise-plain cells on the Arms and Backtest
 # tables. Every such cell takes the one muted reason style, so an absence reads
 # the same wherever it appears on the board (the D-076 colour discipline).
-_ABSENCE_TEXTS = frozenset({"starter not announced", "not yet observed", "no batters graded", "—"})
+_ABSENCE_TEXTS = frozenset(
+    {
+        "starter not announced",
+        "not yet observed",
+        "no batters graded",
+        "—",
+        "no start record in the lookback window",
+    }
+)
 
 
 def _absence_styles(texts: dict[str, str]) -> dict[str, str]:
@@ -2027,7 +2066,12 @@ def _render_arms(board: SlateBoard) -> None:
         "season scope names the absence and Air % reads L30 only. GB % is "
         "the ground-ball share of the window's classified batted balls "
         "against — the ground-ball profile's own number; it reads L30 "
-        "only and the season scope does not carry the column (D-116)."
+        "only and the season scope does not carry the column (D-116). "
+        "Last start and Last 3 starts are the raw workload facts off the "
+        "pitching game log (v2.2, D-123): a last start at 100+ pitches is "
+        "named a workload flag — a fact, never a cap claim, and a cap is "
+        "only a cap if the team announced one. Fewer than three counts "
+        "means fewer starts in the 31-day record."
     )
     text_rows: list[dict[str, str]] = []
     style_rows: list[dict[str, str]] = []
@@ -2048,6 +2092,8 @@ def _render_arms(board: SlateBoard) -> None:
                     "K": "starter not announced",
                     **{column: "starter not announced" for column in _ARMS_METRIC_COLUMNS},
                     "Arsenal": "starter not announced",
+                    "Last start": "starter not announced",
+                    "Last 3 starts": "starter not announced",
                 }
                 text_rows.append(tbd_texts)
                 style_rows.append(_absence_styles(tbd_texts))
@@ -2069,6 +2115,9 @@ def _render_arms(board: SlateBoard) -> None:
                 "K": str(card.season.strikeouts) if observed else "not yet observed",
                 "Arsenal": arsenal,
             }
+            last_start_text, last_three_text = _workload_facts(card.workload)
+            texts["Last start"] = last_start_text
+            texts["Last 3 starts"] = last_three_text
             metric_texts, metric_styles = (
                 _arms_recent_metrics(card.recent_overall)
                 if l30_view
@@ -2082,6 +2131,23 @@ def _render_arms(board: SlateBoard) -> None:
         hide_index=True,
         key="live_arms",
     )
+
+
+def _workload_facts(workload: StarterWorkload | None) -> tuple[str, str]:
+    """The v2.2 workload lines (D-123, SP-3) — one wording for the Arms
+    columns and the dialog echo, so the two surfaces cannot drift. Raw
+    facts only: a last start at or past the ratified line is named a
+    workload flag, and no cap claim ever rides the numbers. No start in
+    the lookback names the absence."""
+    if workload is None:
+        return "no start record in the lookback window", "—"
+    days = workload.days_since_last_start
+    day_text = "1 day ago" if days == 1 else f"{days} days ago"
+    last = f"{workload.last_start_pitches} pitches, {day_text}"
+    if workload.workload_flag:
+        last += " · workload flag"
+    last_three = "/".join(str(count) for count in workload.last_starts) + " pitches"
+    return last, last_three
 
 
 def _insert_after(texts: dict[str, str], after: str, additions: dict[str, str]) -> dict[str, str]:
@@ -2311,6 +2377,15 @@ def _sp_card(card: PitcherCard | None, team: str, *, l30: bool) -> None:
         hide_index=True,
         key=f"sp_card_{card.player_id}_{'l30' if l30 else 'season'}",
     )
+    # v2.2's thin-sample caution (D-123, SP-3): a window spanning at most
+    # two starts names itself beside the L30 hand splits.
+    workload = card.workload
+    if workload is not None and workload.thin_sample:
+        count = workload.starts_in_window
+        st.caption(
+            f"L30 record: {count} start" + ("" if count == 1 else "s") + " — a thin "
+            "sample: check who he faced."
+        )
 
 
 def _stadium_panel(game: GameCard) -> None:

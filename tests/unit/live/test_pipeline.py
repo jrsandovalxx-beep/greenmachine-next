@@ -20,13 +20,14 @@ from greenmachine.live.mlb_api import (
     BattingOrders,
     FetchFailure,
     GameLogEntry,
+    PitchingLogEntry,
     ProbablePitcher,
     ScheduledGame,
     SeasonHittingLine,
     SeasonPitchingLine,
     Slate,
 )
-from greenmachine.live.pipeline import build_board
+from greenmachine.live.pipeline import _starter_workload, _stuff_drift, build_board
 from greenmachine.live.savant import (
     BatTrackingRow,
     ExpectedStatsRow,
@@ -157,9 +158,11 @@ class _FakeApi:
         hitting: dict[int, SeasonHittingLine] | None = None,
         pitching: dict[int, SeasonPitchingLine] | None = None,
         game_logs: dict[int, tuple[GameLogEntry, ...]] | FetchFailure | None = None,
+        pitching_logs: dict[int, tuple[PitchingLogEntry, ...]] | FetchFailure | None = None,
     ) -> None:
         self._orders = orders
         self._game_logs = game_logs
+        self._pitching_logs = pitching_logs
         self._hitting = hitting if hitting is not None else {BATTER_ID: _season_hitting(BATTER_ID)}
         self._pitching = (
             pitching
@@ -201,6 +204,15 @@ class _FakeApi:
         if isinstance(self._game_logs, FetchFailure):
             return self._game_logs
         return {pid: log for pid, log in self._game_logs.items() if pid in player_ids}
+
+    def fetch_recent_pitching_logs(
+        self, player_ids: tuple[int, ...], start_mmddyyyy: str, end_mmddyyyy: str
+    ) -> dict[int, tuple[PitchingLogEntry, ...]] | FetchFailure:
+        if self._pitching_logs is None:
+            return {}
+        if isinstance(self._pitching_logs, FetchFailure):
+            return self._pitching_logs
+        return {pid: log for pid, log in self._pitching_logs.items() if pid in player_ids}
 
 
 class _FakeSavant:
@@ -486,6 +498,154 @@ def test_open_air_card_carries_the_venue_slug() -> None:
     board = _build_with_wind(_OpenAirApi(), lambda venue: (Decimal("9"), "WSW"))
     assert not isinstance(board, FetchFailure)
     assert board.games[0].venue_id == "coors-field"
+
+
+def _pitching_log_entry(
+    date_text: str, pitches: int, *, started: bool = True, game_pk: int = 1
+) -> PitchingLogEntry:
+    return PitchingLogEntry(date=date_text, game_pk=game_pk, started=started, pitches=pitches)
+
+
+def test_workload_flags_a_heavy_last_start_as_a_raw_fact() -> None:
+    """SP-3 (D-123): v2.2's firing line — a last start at 100+ pitches is
+    the workload flag. Newest first, days counted to the slate date."""
+    workload = _starter_workload(
+        (
+            _pitching_log_entry("2026-08-06", 92, game_pk=1),
+            _pitching_log_entry("2026-08-18", 104, game_pk=3),
+            _pitching_log_entry("2026-08-12", 88, game_pk=2),
+        ),
+        date(2026, 8, 22),
+    )
+    assert workload is not None
+    assert workload.last_start_date == "2026-08-18"
+    assert workload.last_start_pitches == 104
+    assert workload.days_since_last_start == 4
+    assert workload.last_starts == (104, 88, 92)
+    assert workload.starts_in_window == 3
+    assert workload.workload_flag
+    assert not workload.thin_sample
+
+
+def test_workload_skips_relief_outings_and_names_a_thin_window() -> None:
+    """A relief outing is not a start, and a window of at most two starts
+    is the thin sample the hand-split caption names (v2.2)."""
+    workload = _starter_workload(
+        (
+            _pitching_log_entry("2026-08-20", 12, started=False, game_pk=3),
+            _pitching_log_entry("2026-08-13", 88, game_pk=2),
+            _pitching_log_entry("2026-08-06", 92, game_pk=1),
+        ),
+        date(2026, 8, 22),
+    )
+    assert workload is not None
+    assert workload.last_start_date == "2026-08-13"
+    assert workload.last_starts == (88, 92)
+    assert workload.starts_in_window == 2
+    assert not workload.workload_flag
+    assert workload.thin_sample
+
+
+def test_workload_without_a_start_is_an_absence() -> None:
+    assert _starter_workload((), date(2026, 8, 22)) is None
+    relief_only = (_pitching_log_entry("2026-08-20", 15, started=False),)
+    assert _starter_workload(relief_only, date(2026, 8, 22)) is None
+
+
+def _drift_event(pitch_type: str, description: str) -> PitchEvent:
+    return PitchEvent(
+        game_pk=777000,
+        game_date="2026-08-19",
+        batter_id=BATTER_ID,
+        pitcher_id=PITCHER_ID,
+        batter_side="L",
+        pitcher_throws="R",
+        pitch_type=pitch_type,
+        event="",
+        description=description,
+        bb_type="",
+        launch_speed=None,
+        launch_angle=None,
+        launch_speed_angle=None,
+        hc_x=None,
+        hc_y=None,
+        estimated_woba=None,
+        woba_value=None,
+        woba_denom=None,
+    )
+
+
+def test_stuff_drift_reads_the_primary_pitch_against_the_window() -> None:
+    """SP-3 (D-123): the board's top-usage pitch is the primary; its season
+    shares face the same shares computed from the window's kept events."""
+    rows = (
+        _arsenal_row(PITCHER_ID, "FF", "0.50", "0.300", "0.25", "0.20"),
+        _arsenal_row(PITCHER_ID, "SL", "0.30", "0.280", "0.30", "0.22"),
+    )
+    events = (
+        _drift_event("FF", "swinging_strike"),
+        _drift_event("FF", "foul"),
+        _drift_event("FF", "hit_into_play"),
+        _drift_event("SL", "ball"),
+    )
+    drift = _stuff_drift(rows, events)
+    assert drift is not None
+    assert drift.pitch_type == "FF"
+    assert drift.pitches_in_window == 3
+    assert drift.usage_season == Decimal("0.50")
+    assert drift.usage_window == Decimal("0.75")
+    assert drift.whiff_season == Decimal("0.25")
+    assert drift.whiff_window == Decimal(1) / Decimal(3)
+
+
+def test_stuff_drift_names_empty_denominators_and_honest_zeros() -> None:
+    rows = (_arsenal_row(PITCHER_ID, "FF", "0.50", "0.300", "0.25", "0.20"),)
+    # Nobody swung at the primary pitch in the window: the whiff names its
+    # absence; the usage is a full honest share.
+    drift = _stuff_drift(rows, (_drift_event("FF", "called_strike"),))
+    assert drift is not None
+    assert drift.pitches_in_window == 1
+    assert drift.usage_window == Decimal(1)
+    assert drift.whiff_window is None
+    # The primary pitch never thrown in the window is an honest zero usage.
+    drift = _stuff_drift(rows, (_drift_event("SL", "ball"),))
+    assert drift is not None
+    assert drift.usage_window == Decimal(0)
+    assert drift.whiff_window is None
+    # No typed events at all: the usage names its absence.
+    empty = _stuff_drift(rows, ())
+    assert empty is not None
+    assert empty.pitches_in_window == 0
+    assert empty.usage_window is None
+    # No board rows: no drift line at all.
+    assert _stuff_drift((), (_drift_event("FF", "ball"),)) is None
+
+
+def test_the_card_carries_the_workload_and_drift_facts() -> None:
+    """SP-3 (D-123): the pitching game log and the window events land on
+    the pitcher card computed — the view only formats (GMF-008)."""
+    board = _build(
+        _FakeApi(
+            pitching_logs={
+                PITCHER_ID: (
+                    _pitching_log_entry("2026-08-18", 101, game_pk=3),
+                    _pitching_log_entry("2026-08-12", 88, game_pk=2),
+                )
+            }
+        ),
+        _FakeSavant(
+            pitcher_arsenal=(_arsenal_row(PITCHER_ID, "FF", "0.55", "0.300", "0.25", "0.20"),)
+        ),
+    )
+    assert not isinstance(board, FetchFailure)
+    pitcher = board.games[0].home_pitcher
+    assert pitcher is not None
+    assert pitcher.workload is not None
+    assert pitcher.workload.last_start_pitches == 101
+    assert pitcher.workload.workload_flag
+    assert pitcher.workload.thin_sample  # two starts in the window
+    assert pitcher.stuff_drift is not None
+    assert pitcher.stuff_drift.pitch_type == "FF"
 
 
 def test_roofed_card_carries_neither_axis_nor_wind_bearing() -> None:

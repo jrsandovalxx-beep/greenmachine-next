@@ -2659,3 +2659,53 @@ Comerica's 13 mph west wind resolves 8.2 mph out along the axis,
 but its out receptiveness is 0.36, under the line despite an Overall of
 5.05: the direction-specific read working as intended, where the
 Overall figure alone would have coloured it.
+
+## D-123 - SP-3 remainder: workload facts, stuff-drift caption, thin-sample caption
+
+**(The signals program's SP-3 leftovers — shipped.)** Three raw-fact
+reads close out the pitcher ticket.
+
+**Workload lines** (Arms columns + dialog echo): "Last start" carries
+"{p} pitches, {d} days ago" and "Last 3 starts" the newest-first counts,
+off a pitching variant of the game-log hydrate (group=pitching — the old
+constant hardcoded hitting; the pitch-count key `numberOfPitches` and
+the `gamesStarted` flag were verified against the live API before the
+parse shipped). The v2.2 firing line stands: a last start at 100+
+pitches is named a workload flag — appended to the fact in the same
+cell, never a colour, never a cap claim; the Arms caption prints the
+line and the no-cap rule (a cap is only a cap if the team announced
+one). Fewer than three counts means fewer starts in the record, and the
+record's reach is 31 days — the same month the L30 surfaces read, so
+the start count and the hand splits never disagree about the window. No
+start in the lookback reads "no start record in the lookback window" in
+the muted reason style. Relief outings never count as starts; the log
+lists completed games only, so today's outing neither flags nor
+clears.
+
+**Stuff-drift caption** (the dialog, under the arsenal breakup): the
+primary pitch's season whiff and usage shares off the arsenal board
+against the same shares computed from the kept window events — "primary
+pitch {name}: whiff {w}% season → {w}% L30 ({n} pitches L30), usage {u}%
+→ {u}%". The primary pitch is the board's top-usage row. A window
+whiff with no swings names its absence ("no swings at it"); a primary
+pitch never thrown in the window is an honest 0% usage, not a hidden
+row. This caption IS the v2.2 MIRAGE_CAUTION — the spec's ruling
+stands: the mirage caution ships as drift facts alone, with no mirage
+or decay wording on screen. The velocity/movement leg was evaluated and
+deliberately not adopted: the arsenal board publishes no velocity, so no
+season baseline exists for a delta, and a lone window velocity would
+invite the reader to invent the comparison — an invented baseline is
+worse than a named gap.
+
+**Thin-sample caption** (the starter header card on Matchups): when the
+window's record spans at most two starts, the card says so beside
+the L30 hand splits — "L30 record: {n} start(s) — a thin sample: check
+who he faced" — the v2.2 caution verbatim.
+
+All three compute pipeline-side (the view formats, never derives —
+GMF-008) and ride the pitcher card. Live-verified on the 2026-08-24
+slate: 19 of 20 probables carry workload records (Jose Urquidy, no
+starts in the window, names the absence); Logan Gilbert (100 pitches)
+and Chase Burns (104) carry the named workload flag; every drift
+caption renders both shares with samples; no probable spans two or
+fewer starts, so the thin-sample caption stays correctly silent.

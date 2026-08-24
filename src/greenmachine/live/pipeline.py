@@ -60,6 +60,7 @@ from greenmachine.live.mlb_api import (
     FetchFailure,
     GameLogEntry,
     MlbStatsApi,
+    PitchingLogEntry,
     SeasonHittingLine,
     SeasonPitchingLine,
 )
@@ -89,6 +90,10 @@ MATCHUP_WINDOW_DAYS = 30
 # carries — the dialog's window control selects, never derives.
 MATCHUP_LINE_WINDOWS_DAYS = (7, 14, 21, 28, 30)
 GAME_LOG_LOOKBACK_DAYS = 5
+# SP-3 (D-123): the pitching game log's reach. It mirrors the pitch
+# window's full month so the start count behind the thin-sample caption
+# is the same record the L30 hand splits read.
+PITCHING_LOG_LOOKBACK_DAYS = 31
 # D-081's reach: a starter whose mix has no pitches in the matchup window
 # extends the read to L45 before falling back to the season board.
 MIX_REACH_DAYS = 45
@@ -390,6 +395,47 @@ class PitcherRecentLine:
     classified_batted_balls: int = 0
 
 
+@dataclass(frozen=True)
+class StarterWorkload:
+    """D-123 (SP-3): the starter's raw workload facts off the pitching game
+    log — the last start's pitch count and date, the days since it, the
+    most recent starts' counts (newest first), and how many starts the
+    window spans. Facts only: v2.2 bars a cap claim unless the team
+    announced one, so no limit wording ever rides these numbers. The
+    v2.2 firing lines: a last start at or past the workload line is a
+    workload flag (a named fact, never a cap), and a window spanning at
+    most two starts is the thin sample the hand-split caption names.
+    """
+
+    last_start_date: str  # ISO YYYY-MM-DD
+    last_start_pitches: int
+    days_since_last_start: int
+    last_starts: tuple[int, ...]  # newest first, up to three pitch counts
+    starts_in_window: int
+    workload_flag: bool
+    thin_sample: bool
+
+
+@dataclass(frozen=True)
+class StuffDrift:
+    """D-123 (SP-3): the primary pitch's season-to-window drift facts —
+    the arsenal board's season whiff and usage shares against the same
+    figures computed from the kept pitch events. Facts only: the v2.2
+    mirage caution ships as this caption alone, no mirage or decay
+    wording on screen. The window whiff is None when nobody swung at the
+    pitch in the record; a pitcher who never threw it in the window gets
+    an honest zero share, never a hidden absence.
+    """
+
+    pitch_type: str
+    pitch_name: str
+    pitches_in_window: int
+    usage_season: Decimal
+    usage_window: Decimal | None  # None only when the window has no typed pitches
+    whiff_season: Decimal
+    whiff_window: Decimal | None  # None when the window record holds no swings at it
+
+
 def _innings_as_decimal(notation: str) -> Decimal | None:
     """MLB's baseball innings notation as a decimal: the fractional digit is
     OUTS (.1/.2), not tenths — "137.1" is 137 and a third innings. Anything
@@ -534,6 +580,11 @@ class PitcherCard:
     recent_overall: PitcherRecentLine | None = None
     recent_vs_left: PitcherRecentLine | None = None
     recent_vs_right: PitcherRecentLine | None = None
+    # SP-3 (D-123): the primary pitch's season-to-window drift facts, and
+    # the raw workload facts off the pitching game log. Each None names
+    # its absence — no arsenal board rows, or no start in the lookback.
+    stuff_drift: StuffDrift | None = None
+    workload: StarterWorkload | None = None
 
 
 @dataclass(frozen=True)
@@ -1120,6 +1171,71 @@ def fetch_window_events(
     return tuple(events), tuple(diagnostics)
 
 
+# v2.2's workload firing line: a last start at or past this many pitches
+# is a workload flag — a named raw fact, never a cap claim (a cap is only
+# a cap if the team announced one).
+WORKLOAD_FLAG_PITCH_LINE = 100
+# v2.2's thin-sample line: a window spanning at most this many starts
+# names itself beside the L30 hand splits.
+THIN_SAMPLE_STARTS_LINE = 2
+
+
+def _starter_workload(
+    entries: tuple[PitchingLogEntry, ...], slate_date: date
+) -> StarterWorkload | None:
+    """SP-3 (D-123): the raw workload facts from a pitcher's game log.
+    Starts only — a relief outing is not a start — newest first. No start
+    in the lookback is a None: the surface names the absence, and the log
+    lists completed games only, so today's outing never counts."""
+    starts = sorted(
+        (entry for entry in entries if entry.started),
+        key=lambda entry: (entry.date, entry.game_pk),
+        reverse=True,
+    )
+    if not starts:
+        return None
+    last = starts[0]
+    return StarterWorkload(
+        last_start_date=last.date,
+        last_start_pitches=last.pitches,
+        days_since_last_start=(slate_date - date.fromisoformat(last.date)).days,
+        last_starts=tuple(entry.pitches for entry in starts[:3]),
+        starts_in_window=len(starts),
+        workload_flag=last.pitches >= WORKLOAD_FLAG_PITCH_LINE,
+        thin_sample=len(starts) <= THIN_SAMPLE_STARTS_LINE,
+    )
+
+
+def _stuff_drift(
+    season_rows: tuple[PitchArsenalRow, ...],
+    window_events: tuple[PitchEvent, ...],
+) -> StuffDrift | None:
+    """SP-3 (D-123): the primary pitch's drift facts — the season arsenal
+    board against the same shares computed from the window's kept events.
+    The primary pitch is the board's top-usage row; no board rows, no
+    drift line. The window usage is an honest zero when he never threw
+    the pitch in the record, and the window whiff is None when nobody
+    swung at it — the caption names the absence, never a zero."""
+    if not season_rows:
+        return None
+    primary = max(season_rows, key=lambda row: row.usage_share)
+    typed = [event for event in window_events if event.pitch_type]
+    own = [event for event in typed if event.pitch_type == primary.pitch_type]
+    usage_window = Decimal(len(own)) / Decimal(len(typed)) if typed else None
+    swings = sum(1 for event in own if event.description in _SWING_DESCRIPTIONS)
+    whiffs = sum(1 for event in own if event.description in _WHIFF_DESCRIPTIONS)
+    whiff_window = Decimal(whiffs) / Decimal(swings) if swings else None
+    return StuffDrift(
+        pitch_type=primary.pitch_type,
+        pitch_name=primary.pitch_name,
+        pitches_in_window=len(own),
+        usage_season=primary.usage_share,
+        usage_window=usage_window,
+        whiff_season=primary.whiff_share,
+        whiff_window=whiff_window,
+    )
+
+
 def _side_usage(events: tuple[PitchEvent, ...], side: str) -> dict[str, Decimal]:
     """Each pitch type's share of the pitches he threw to one batting side
     in the window record (D-102). The arsenal leaderboard's usage spans all
@@ -1147,6 +1263,8 @@ def _pitcher_card(
     pitcher_statcast: dict[int, StatcastPitcherRow],
     season_year: int,
     window_events: tuple[PitchEvent, ...],
+    log_entries: tuple[PitchingLogEntry, ...] = (),
+    slate_date: date | None = None,
 ) -> PitcherCard:
     season = season_pitching.get(probable_id)
     current_rows = pitcher_arsenal.get(probable_id, ())
@@ -1190,6 +1308,8 @@ def _pitcher_card(
         recent_vs_right=_pitcher_recent_line(
             tuple(event for event in window_events if event.batter_side == "R")
         ),
+        stuff_drift=_stuff_drift(season_rows, window_events),
+        workload=(_starter_workload(log_entries, slate_date) if slate_date is not None else None),
     )
 
 
@@ -1340,6 +1460,23 @@ def build_board(
             diagnostics.append(f"season pitching: {fetched_pitching.reason}")
         else:
             season_pitching = fetched_pitching
+
+    # SP-3 (D-123): the probables' pitching game logs — the raw workload
+    # facts and the start count behind the thin-sample caption. The reach
+    # mirrors the pitch window's month so both read the same record.
+    pitching_logs: dict[int, tuple[PitchingLogEntry, ...]] = {}
+    if probable_ids:
+        pitching_log_start = (slate_date - timedelta(days=PITCHING_LOG_LOOKBACK_DAYS)).strftime(
+            "%m/%d/%Y"
+        )
+        for chunk in _chunked(probable_ids, SEASON_IDS_PER_REQUEST):
+            fetched_pitching_logs = api.fetch_recent_pitching_logs(
+                chunk, pitching_log_start, log_end
+            )
+            if isinstance(fetched_pitching_logs, FetchFailure):
+                diagnostics.append(f"pitching game logs: {fetched_pitching_logs.reason}")
+                continue
+            pitching_logs.update(fetched_pitching_logs)
 
     statcast_result = savant.fetch_statcast_batters(year=year)
     statcast: dict[int, StatcastBatterRow]
@@ -1573,6 +1710,8 @@ def build_board(
                         for event in events_by_pitcher.get(probable.player_id, ())
                         if event.game_date >= matchup_cutoff
                     ),
+                    pitching_logs.get(probable.player_id, ()),
+                    slate_date,
                 )
                 probable_by_side[side_key] = (probable.player_id, probable.full_name)
 

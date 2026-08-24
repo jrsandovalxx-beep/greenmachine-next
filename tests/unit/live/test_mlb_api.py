@@ -303,3 +303,103 @@ def test_game_logs_malformed_split_is_a_fetch_failure() -> None:
     }
     failure = _api(payload).fetch_recent_game_logs((101,), "08/20/2026", "08/20/2026")
     assert isinstance(failure, FetchFailure)
+
+
+_PEOPLE_PITCHING_LOG = {
+    "people": [
+        {
+            "id": 201,
+            "fullName": "Ace Righty",
+            "stats": [
+                {
+                    "group": {"displayName": "pitching"},
+                    "type": {"displayName": "gameLog"},
+                    "splits": [
+                        {
+                            "date": "2026-08-06",
+                            "game": {"gamePk": 777100},
+                            "stat": {"gamesStarted": 1, "numberOfPitches": 92},
+                        },
+                        {
+                            "date": "2026-08-11",
+                            "game": {"gamePk": 777101},
+                            "stat": {"gamesStarted": 0, "numberOfPitches": 12},
+                        },
+                        {
+                            "date": "2026-08-17",
+                            "game": {"gamePk": 777102},
+                            "stat": {"gamesStarted": 1, "numberOfPitches": 101},
+                        },
+                    ],
+                },
+                {
+                    "group": {"displayName": "pitching"},
+                    "type": {"displayName": "season"},
+                    "splits": [{"stat": {"gamesStarted": 25, "numberOfPitches": 2100}}],
+                },
+            ],
+        },
+        {"id": 202, "fullName": "No Games", "stats": []},
+    ]
+}
+
+
+def test_pitching_logs_parse_starts_relief_and_skip_season_totals() -> None:
+    """SP-3 (D-123): dated, gamed pitching splits carry the start flag and
+    the pitch count; the season-total split riding the same response is
+    not one. Entries sort by date then game."""
+    logs = _api(_PEOPLE_PITCHING_LOG).fetch_recent_pitching_logs(
+        (201, 202), "07/25/2026", "08/24/2026"
+    )
+    assert not isinstance(logs, FetchFailure)
+    assert 202 not in logs  # no appearances in the range: absent, not empty
+    entries = logs[201]
+    assert [(entry.date, entry.started, entry.pitches) for entry in entries] == [
+        ("2026-08-06", True, 92),
+        ("2026-08-11", False, 12),
+        ("2026-08-17", True, 101),
+    ]
+
+
+def test_pitching_logs_skip_a_split_without_a_pitch_count() -> None:
+    """A workload line with no count is no fact — the row drops rather
+    than invent a zero."""
+    payload = {
+        "people": [
+            {
+                "id": 201,
+                "stats": [
+                    {
+                        "splits": [
+                            {
+                                "date": "2026-08-17",
+                                "game": {"gamePk": 777102},
+                                "stat": {"gamesStarted": 1},
+                            },
+                            {
+                                "date": "2026-08-20",
+                                "game": {"gamePk": 777103},
+                                "stat": {"gamesStarted": 1, "numberOfPitches": 88},
+                            },
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    logs = _api(payload).fetch_recent_pitching_logs((201,), "08/15/2026", "08/24/2026")
+    assert not isinstance(logs, FetchFailure)
+    assert [(entry.date, entry.pitches) for entry in logs[201]] == [("2026-08-20", 88)]
+
+
+def test_pitching_logs_malformed_split_is_a_fetch_failure() -> None:
+    payload = {
+        "people": [
+            {
+                "id": 201,
+                "stats": [{"splits": [{"date": "2026-08-20", "game": {"gamePk": "oops"}}]}],
+            }
+        ]
+    }
+    failure = _api(payload).fetch_recent_pitching_logs((201,), "08/20/2026", "08/20/2026")
+    assert isinstance(failure, FetchFailure)
