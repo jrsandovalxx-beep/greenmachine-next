@@ -109,6 +109,9 @@ ALLOWED_NON_SNAPSHOT_FIELDS: dict[tuple[str, str], str] = {
     ("WeatherForecast", "wind_speed_mph"): "value-component",
     ("WeatherForecast", "wind_direction"): "value-component",
     ("WeatherForecast", "short_forecast"): "value-component",
+    # D-111: relative humidity beside the temperature — an observed value
+    # like the others; its optionality is the named-absence channel.
+    ("WeatherForecast", "relative_humidity_percent"): "value-component",
     # When this value was obtained from its source - the same category as
     # InputSnapshot.captured_at, and deliberately on the value rather than the
     # source table, because a cached forecast is older than the snapshot that

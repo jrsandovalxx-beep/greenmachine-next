@@ -17,6 +17,7 @@ cell pattern the deployed slate produced.
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -38,7 +39,12 @@ from greenmachine.live.mlb_api import (
     SeasonPitchingLine,
     Slate,
 )
-from greenmachine.live.pipeline import SlateBoard, build_board
+from greenmachine.live.pipeline import (
+    PitcherRecentLine,
+    PitcherSeasonReads,
+    SlateBoard,
+    build_board,
+)
 from greenmachine.live.savant import BatTrackingRow, StatcastBatterRow
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -155,6 +161,12 @@ class _OutageSavant:
         return {}
 
     def fetch_squared_up(self, *, year: int, minimum: int = 0) -> dict:
+        return {}
+
+    def fetch_pitcher_expected_stats(self, *, year: int) -> dict:
+        return {}
+
+    def fetch_statcast_pitchers(self, *, year: int, minimum: int = 0) -> dict:
         return {}
 
 
@@ -807,6 +819,141 @@ def test_grid_line_cells_render_rates_and_named_absences() -> None:
     assert texts["Oppo Air %"] == "—"
     assert styles["+350 ft"] == streamlit_app._REASON_CSS
     assert styles["Pull Air %"] == streamlit_app._REASON_CSS
+
+
+def _sp_reads() -> PitcherSeasonReads:
+    return PitcherSeasonReads(
+        plate_appearances=620,
+        woba=Decimal("0.320"),
+        expected_woba=Decimal("0.297"),
+        iso=Decimal("0.170"),
+        expected_iso=Decimal("0.180"),
+        batted_ball_events=450,
+        barrel_share=Decimal("0.08"),
+        avg_launch_angle=Decimal("12.9"),
+        air_ball_share=Decimal("0.44"),
+        home_runs=26,
+        home_run_per_nine=Decimal("1.50"),
+        innings_text="150.1",
+    )
+
+
+def test_sp_season_row_marks_the_digest_reads_green() -> None:
+    """D-111: green marks only the digest's pitcher-vulnerability reads —
+    HR/9 at or above 1.4 and wOBA above xwOBA — and the samples ride the
+    Scope label beside the rates they basis."""
+    import streamlit_app
+
+    row, styles = streamlit_app._sp_season_row(_sp_reads())
+    assert row["Scope"] == "Season — 620 PA · 450 BBE · 150.1 IP"
+    assert row["wOBA"] == ".320"
+    assert row["xwOBA"] == ".297"
+    assert row["HR"] == "26"
+    assert row["HR/9"] == "1.50"
+    assert row["BRL%"] == "8.0%"
+    assert row["LA"] == "12.9°"
+    assert row["ISO"] == ".170"
+    assert row["xISO"] == ".180"
+    assert styles["wOBA"] == streamlit_app._HIGHLIGHT
+    assert styles["HR/9"] == streamlit_app._HIGHLIGHT
+    assert "ISO" not in styles  # no invented bands — plain cells
+    # On the lines' other side: no green.
+    flipped = dataclasses.replace(
+        _sp_reads(), woba=Decimal("0.290"), home_run_per_nine=Decimal("1.39")
+    )
+    _, styles = streamlit_app._sp_season_row(flipped)
+    assert "wOBA" not in styles
+    assert "HR/9" not in styles
+
+
+def test_sp_season_row_names_absences_and_the_contact_floor() -> None:
+    """D-111: no sources at all is a named absence row; a thin Statcast
+    sample keeps its contact reads under the amber advisory, never hidden."""
+    import streamlit_app
+
+    row, styles = streamlit_app._sp_season_row(None)
+    assert row["Scope"] == "Season — no season record"
+    assert all(text == "—" for key, text in row.items() if key != "Scope")
+    assert styles["wOBA"] == streamlit_app._REASON_CSS
+    thin = dataclasses.replace(_sp_reads(), batted_ball_events=12)
+    row, styles = streamlit_app._sp_season_row(thin)
+    assert row["Scope"].endswith("INSUFFICIENT")
+    assert styles["BRL%"] == streamlit_app._INSUFFICIENT_CSS
+    assert styles["LA"] == streamlit_app._INSUFFICIENT_CSS
+    assert row["BRL%"] == "8.0%"  # the value stays visible (D-068)
+
+
+def _sp_line() -> PitcherRecentLine:
+    return PitcherRecentLine(
+        plate_appearances=41,
+        batted_balls=33,
+        home_runs=3,
+        woba=Decimal("0.355"),
+        expected_woba=Decimal("0.310"),
+        barrel_share=Decimal("0.12"),
+        avg_launch_angle=Decimal("17.5"),
+        air_ball_share=Decimal("0.55"),
+        iso=Decimal("0.210"),
+    )
+
+
+def test_sp_recent_row_names_the_l30_absences() -> None:
+    """D-111: the L30 scope publishes no innings and no per-event expected
+    SLG, so HR/9 and xISO name their absences and the HR count shows."""
+    import streamlit_app
+
+    row, styles = streamlit_app._sp_recent_row("vs L (L30)", _sp_line(), vulnerability_floor=True)
+    assert row["Scope"] == "vs L (L30) — 41 BF · 33 BBE · INSUFFICIENT"
+    assert row["HR"] == "3"
+    assert row["HR/9"] == "—"
+    assert row["xISO"] == "—"
+    assert styles["HR/9"] == streamlit_app._REASON_CSS
+    assert styles["xISO"] == streamlit_app._REASON_CSS
+    # Below the ratified vulnerability floor (80 BF / 40 BBE): amber, with
+    # the values still visible.
+    assert styles["wOBA"] == streamlit_app._INSUFFICIENT_CSS
+    assert row["wOBA"] == ".355"
+    # An empty scope names itself.
+    row, styles = streamlit_app._sp_recent_row("vs R (L30)", None)
+    assert row["Scope"] == "vs R (L30) — no L30 record"
+    assert styles["wOBA"] == streamlit_app._REASON_CSS
+
+
+def test_sp_recent_row_at_the_floor_carries_no_advisory() -> None:
+    """D-111: exactly 80 BF and 40 BBE meets the floor — the amber is for
+    below the line, never at it. wOBA above xwOBA still marks green."""
+    import streamlit_app
+
+    line = dataclasses.replace(_sp_line(), plate_appearances=80, batted_balls=40)
+    row, styles = streamlit_app._sp_recent_row("vs R (L30)", line, vulnerability_floor=True)
+    assert "INSUFFICIENT" not in row["Scope"]
+    assert styles["wOBA"] == streamlit_app._HIGHLIGHT
+
+
+def test_arms_metrics_mirror_the_card_rules_on_both_scopes() -> None:
+    """D-111: the Arms tab carries the same five metrics plus the air
+    mirror, with the samples as their own columns; the L30 scope names
+    HR/9 and xISO absent exactly like the cards."""
+    import streamlit_app
+
+    texts, styles = streamlit_app._arms_season_metrics(_sp_reads())
+    assert texts["PA"] == "620"
+    assert texts["BBE"] == "450"
+    assert texts["Air %"] == "44.0%"
+    assert styles["wOBA"] == streamlit_app._HIGHLIGHT
+    assert styles["HR/9"] == streamlit_app._HIGHLIGHT
+    texts, styles = streamlit_app._arms_recent_metrics(_sp_line())
+    assert texts["PA"] == "41"
+    assert texts["BBE"] == "33"
+    assert texts["HR"] == "3"
+    assert texts["HR/9"] == "—"
+    assert texts["xISO"] == "—"
+    assert texts["Air %"] == "55.0%"
+    assert styles["wOBA"] == streamlit_app._HIGHLIGHT
+    # No record at all: a fully named absence, never invented zeros.
+    texts, styles = streamlit_app._arms_recent_metrics(None)
+    assert all(text == "—" for text in texts.values())
+    assert styles["wOBA"] == streamlit_app._REASON_CSS
 
 
 def test_grid_line_cells_add_the_gaps_on_the_season_view_only() -> None:

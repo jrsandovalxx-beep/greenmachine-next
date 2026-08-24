@@ -41,6 +41,22 @@ _EXPECTED_STATS_URL = (
     "https://baseballsavant.mlb.com/leaderboard/expected_statistics"
     "?type=batter&year={year}&min=0&csv=true"
 )
+# D-111: the same expected-statistics board against pitchers — identical
+# metric columns plus era/xera, which this read ignores (verified live
+# 2026-08). The header cards and the Arms tab read wOBA/xwOBA and ISO/xISO
+# against from it.
+_EXPECTED_PITCHER_STATS_URL = (
+    "https://baseballsavant.mlb.com/leaderboard/expected_statistics"
+    "?type=pitcher&year={year}&min=0&csv=true"
+)
+# D-111: the season Statcast board against pitchers. Verified live 2026-08:
+# columns player_id, attempts, avg_hit_angle, barrels, fbld, gb (among
+# others) — fbld is fly balls plus line drives (the air balls), gb the
+# grounders, attempts the batted balls against.
+_STATCAST_PITCHERS_URL = (
+    "https://baseballsavant.mlb.com/leaderboard/statcast"
+    "?type=pitcher&year={year}&min={minimum}&csv=true"
+)
 _SPRINT_SPEED_URL = (
     "https://baseballsavant.mlb.com/leaderboard/sprint_speed?year={year}&min=0&csv=true"
 )
@@ -103,6 +119,21 @@ class ExpectedStatsRow:
     expected_batting_average: Decimal
     expected_slugging: Decimal
     xwoba: Decimal
+
+
+@dataclass(frozen=True)
+class StatcastPitcherRow:
+    """The season Statcast board against one pitcher (D-111): batted balls,
+    barrels, and average launch angle against, plus the air/ground split
+    behind the ground-ball profile. Every column is required — an unknown
+    column is a clean FetchFailure, never a wrong number."""
+
+    player_id: int
+    batted_ball_events: int
+    avg_launch_angle: Decimal
+    barrel_count: int
+    air_balls: int
+    ground_balls: int
 
 
 @dataclass(frozen=True)
@@ -241,6 +272,24 @@ def _percent_or_none(raw: Any) -> Decimal | None:
     return value / Decimal(100) if value is not None else None
 
 
+def _parse_expected_row(row: dict[str, str], context: str) -> ExpectedStatsRow:
+    """One expected-statistics row, batter or pitcher board (D-111): the two
+    boards publish the identical metric columns, and every parsed column is
+    required — an unknown column is a clean FetchFailure, never a wrong
+    number."""
+    return ExpectedStatsRow(
+        player_id=_int(row.get("player_id"), context),
+        plate_appearances=_int(row.get("pa"), context),
+        balls_in_play=_int(row.get("bip"), context),
+        batting_average=_decimal(row.get("ba"), context),
+        slugging=_decimal(row.get("slg"), context),
+        woba=_decimal(row.get("woba"), context),
+        expected_batting_average=_decimal(row.get("est_ba"), context),
+        expected_slugging=_decimal(row.get("est_slg"), context),
+        xwoba=_decimal(row.get("est_woba"), context),
+    )
+
+
 _T = TypeVar("_T")
 
 
@@ -352,22 +401,53 @@ class BaseballSavant:
         cleanly rather than smuggling in a wrong number.
         """
         context = "expected-stats"
+        parsed = self._board(
+            _EXPECTED_STATS_URL.format(year=year),
+            context,
+            lambda row: _parse_expected_row(row, context),
+        )
+        if isinstance(parsed, FetchFailure):
+            return parsed
+        return {row.player_id: row for row in parsed}
 
-        def parse(row: dict[str, str]) -> ExpectedStatsRow:
-            player_id = _int(row.get("player_id"), context)
-            return ExpectedStatsRow(
-                player_id=player_id,
-                plate_appearances=_int(row.get("pa"), context),
-                balls_in_play=_int(row.get("bip"), context),
-                batting_average=_decimal(row.get("ba"), context),
-                slugging=_decimal(row.get("slg"), context),
-                woba=_decimal(row.get("woba"), context),
-                expected_batting_average=_decimal(row.get("est_ba"), context),
-                expected_slugging=_decimal(row.get("est_slg"), context),
-                xwoba=_decimal(row.get("est_woba"), context),
+    def fetch_pitcher_expected_stats(
+        self, *, year: int
+    ) -> dict[int, ExpectedStatsRow] | FetchFailure:
+        """Season expected-statistics board against pitchers (D-111), keyed
+        by player id. Same metric columns as the batter board (the pitcher's
+        adds era/xera, ignored here); every parsed column is required, so a
+        renamed or dropped column fails the whole board cleanly."""
+        context = "pitcher-expected-stats"
+        parsed = self._board(
+            _EXPECTED_PITCHER_STATS_URL.format(year=year),
+            context,
+            lambda row: _parse_expected_row(row, context),
+        )
+        if isinstance(parsed, FetchFailure):
+            return parsed
+        return {row.player_id: row for row in parsed}
+
+    def fetch_statcast_pitchers(
+        self, *, year: int, minimum: int = 0
+    ) -> dict[int, StatcastPitcherRow] | FetchFailure:
+        """Season Statcast quality-of-contact board against pitchers (D-111),
+        keyed by player id. Barrels, average launch angle, and the
+        air/ground split against; every column required."""
+        context = "statcast-pitchers"
+
+        def parse(row: dict[str, str]) -> StatcastPitcherRow:
+            return StatcastPitcherRow(
+                player_id=_int(row.get("player_id"), context),
+                batted_ball_events=_int(row.get("attempts"), context),
+                avg_launch_angle=_decimal(row.get("avg_hit_angle"), context),
+                barrel_count=_int(row.get("barrels"), context),
+                air_balls=_int(row.get("fbld"), context),
+                ground_balls=_int(row.get("gb"), context),
             )
 
-        parsed = self._board(_EXPECTED_STATS_URL.format(year=year), context, parse)
+        parsed = self._board(
+            _STATCAST_PITCHERS_URL.format(year=year, minimum=minimum), context, parse
+        )
         if isinstance(parsed, FetchFailure):
             return parsed
         return {row.player_id: row for row in parsed}

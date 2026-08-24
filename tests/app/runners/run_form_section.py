@@ -33,7 +33,7 @@ from greenmachine.live.mlb_api import (
     Slate,
 )
 from greenmachine.live.pipeline import BatterCard, GameCard, SlateBoard, build_board
-from greenmachine.live.savant import SprintSpeedRow
+from greenmachine.live.savant import ExpectedStatsRow, SprintSpeedRow, StatcastPitcherRow
 
 SLATE_DATE = date(2026, 8, 20)
 AS_OF = datetime(2026, 8, 20, 18, 0, tzinfo=UTC)
@@ -109,6 +109,7 @@ class _RunnerApi:
                 whip="1.05",
                 strikeouts=190,
                 batters_faced=620,
+                home_runs=26,  # D-111 showcase: a 1.56 HR/9, over the green line
             )
         }
 
@@ -136,6 +137,35 @@ class _RunnerSavant:
 
     def fetch_squared_up(self, *, year: int, minimum: int = 0) -> dict:
         return {}
+
+    def fetch_pitcher_expected_stats(self, *, year: int) -> dict:
+        # D-111 showcase: the starter card's season row carries real-shaped
+        # values — wOBA above xwOBA and a 1.50 HR/9, so both greens show.
+        return {
+            PITCHER_ID: ExpectedStatsRow(
+                player_id=PITCHER_ID,
+                plate_appearances=620,
+                balls_in_play=450,
+                batting_average=Decimal("0.240"),
+                slugging=Decimal("0.410"),
+                woba=Decimal("0.320"),
+                expected_batting_average=Decimal("0.250"),
+                expected_slugging=Decimal("0.430"),
+                xwoba=Decimal("0.297"),
+            )
+        }
+
+    def fetch_statcast_pitchers(self, *, year: int, minimum: int = 0) -> dict:
+        return {
+            PITCHER_ID: StatcastPitcherRow(
+                player_id=PITCHER_ID,
+                batted_ball_events=450,
+                avg_launch_angle=Decimal("12.9"),
+                barrel_count=36,
+                air_balls=198,
+                ground_balls=252,
+            )
+        }
 
 
 def _runner_card() -> tuple[BatterCard, GameCard]:

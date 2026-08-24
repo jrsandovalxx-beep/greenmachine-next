@@ -163,6 +163,48 @@ def test_a_forecast_carries_its_values_and_the_time_it_was_obtained() -> None:
     assert field.derivation is None  # sourced, never computed
 
 
+def test_a_forecast_carries_relative_humidity_when_the_period_publishes_it() -> None:
+    """D-111: the hourly period's relativeHumidity object parses to a
+    percent beside the temperature."""
+    periods = [
+        {
+            "temperature": 321,
+            "windSpeed": "88 mph",
+            "windDirection": "NNE",
+            "shortForecast": "Synthetic sky (OQ-4)",
+            "relativeHumidity": {"unitCode": "wmoUnit:percent", "value": 42},
+        }
+    ]
+    adapter, _, _ = build([ok(points_body()), ok(forecast_body(periods))])
+    forecast = adapter.forecast_for(VENUE).value
+    assert forecast is not None
+    assert forecast.relative_humidity_percent == Decimal("42")
+
+
+def test_a_period_without_humidity_keeps_the_rest_of_the_forecast() -> None:
+    """D-111: a missing or unreadable humidity reading is None — the named
+    absence — and never costs the period's other readings."""
+    adapter, _, _ = build([ok(points_body()), ok(forecast_body())])
+    forecast = adapter.forecast_for(VENUE).value
+    assert forecast is not None
+    assert forecast.temperature_f == Decimal("321")
+    assert forecast.relative_humidity_percent is None
+    periods = [
+        {
+            "temperature": 300,
+            "windSpeed": "5 mph",
+            "windDirection": "SW",
+            "shortForecast": "Synthetic",
+            "relativeHumidity": {"unitCode": "wmoUnit:percent", "value": None},
+        }
+    ]
+    adapter, _, _ = build([ok(points_body()), ok(forecast_body(periods))])
+    forecast = adapter.forecast_for(VENUE).value
+    assert forecast is not None
+    assert forecast.temperature_f == Decimal("300")
+    assert forecast.relative_humidity_percent is None
+
+
 def test_a_wind_range_takes_its_first_number() -> None:
     """NWS reports ``5 to 10 mph``; a naive parse would raise and lose a value
     that is perfectly readable."""
