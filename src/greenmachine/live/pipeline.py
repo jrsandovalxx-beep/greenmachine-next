@@ -71,6 +71,7 @@ from greenmachine.live.savant import (
     SprintSpeedRow,
     SquaredUpRow,
     StatcastBatterRow,
+    StatcastPitcherRow,
 )
 
 FORM_REACH_DAYS = 14
@@ -329,13 +330,165 @@ class BatterCard:
 
 
 @dataclass(frozen=True)
+class PitcherSeasonReads:
+    """D-111: the season reads behind the starter header card and the Arms
+    tab's starter metrics — each off its named source, None where that
+    source has no row for him, never an invented figure. wOBA/xwOBA and
+    ISO/xISO read the expected-statistics board against, both sides of each
+    pair off the one board so the denominators match; barrel rate and
+    launch angle read the Statcast pitcher board (which publishes no
+    air-ball split against — season air share stays a named absence; the
+    L30 events carry the real split); HR/9 reads the statsapi season line.
+    Computed here, pipeline-side — the view only formats (§GMF-008)."""
+
+    plate_appearances: int  # the expected board's PA sample (0 without a row)
+    woba: Decimal | None
+    expected_woba: Decimal | None
+    iso: Decimal | None
+    expected_iso: Decimal | None
+    batted_ball_events: int  # the Statcast pitcher board's BBE sample (0 without)
+    barrel_share: Decimal | None
+    avg_launch_angle: Decimal | None
+    home_runs: int | None  # the season line's HR count (None without a line)
+    home_run_per_nine: Decimal | None
+    innings_text: str  # the line's baseball-notation innings ("" without one)
+
+
+@dataclass(frozen=True)
+class PitcherRecentLine:
+    """D-111: one L30 scope of the starter's record — overall, or against
+    one batting side — computed here from the window's kept events
+    (§GMF-008: the view formats, never derives). Rates are None where their
+    denominator is empty. The L30 scope publishes no innings, so HR/9 stays
+    a season read and the HR count shows instead; it publishes no per-event
+    expected SLG, so xISO stays a season read — the surface names both
+    absences rather than inventing them."""
+
+    plate_appearances: int
+    batted_balls: int
+    home_runs: int
+    woba: Decimal | None
+    expected_woba: Decimal | None
+    barrel_share: Decimal | None
+    avg_launch_angle: Decimal | None
+    air_ball_share: Decimal | None
+    iso: Decimal | None
+
+
+def _innings_as_decimal(notation: str) -> Decimal | None:
+    """MLB's baseball innings notation as a decimal: the fractional digit is
+    OUTS (.1/.2), not tenths — "137.1" is 137 and a third innings. Anything
+    outside that notation is None: the surface names the absence rather than
+    divide by a guessed number."""
+    text = notation.strip()
+    if not text:
+        return None
+    whole, dot, fraction = text.partition(".")
+    if not whole.isdigit():
+        return None
+    if not dot:
+        return Decimal(whole)
+    if len(fraction) != 1 or fraction not in "012":
+        return None
+    return Decimal(whole) + Decimal(int(fraction)) / Decimal(3)
+
+
+def _pitcher_season_reads(
+    expected_row: ExpectedStatsRow | None,
+    statcast_row: StatcastPitcherRow | None,
+    season: SeasonPitchingLine | None,
+) -> PitcherSeasonReads:
+    """The D-111 season reads, each off its named source, None where that
+    source has no row — never an invented figure."""
+    plate_appearances = 0
+    woba: Decimal | None = None
+    expected_woba: Decimal | None = None
+    iso: Decimal | None = None
+    expected_iso: Decimal | None = None
+    if expected_row is not None:
+        plate_appearances = expected_row.plate_appearances
+        woba = expected_row.woba
+        expected_woba = expected_row.xwoba
+        iso = expected_row.slugging - expected_row.batting_average
+        expected_iso = expected_row.expected_slugging - expected_row.expected_batting_average
+    batted_ball_events = 0
+    barrel_share: Decimal | None = None
+    avg_launch_angle: Decimal | None = None
+    if statcast_row is not None:
+        batted_ball_events = statcast_row.batted_ball_events
+        avg_launch_angle = statcast_row.avg_launch_angle
+        if batted_ball_events:
+            barrel_share = Decimal(statcast_row.barrel_count) / Decimal(batted_ball_events)
+    home_runs: int | None = None
+    home_run_per_nine: Decimal | None = None
+    innings_text = ""
+    if season is not None:
+        home_runs = season.home_runs
+        innings_text = season.innings_pitched
+        innings = _innings_as_decimal(season.innings_pitched)
+        if innings is not None and innings > 0:
+            home_run_per_nine = Decimal(season.home_runs) * Decimal(9) / innings
+    return PitcherSeasonReads(
+        plate_appearances=plate_appearances,
+        woba=woba,
+        expected_woba=expected_woba,
+        iso=iso,
+        expected_iso=expected_iso,
+        batted_ball_events=batted_ball_events,
+        barrel_share=barrel_share,
+        avg_launch_angle=avg_launch_angle,
+        home_runs=home_runs,
+        home_run_per_nine=home_run_per_nine,
+        innings_text=innings_text,
+    )
+
+
+def _pitcher_recent_line(events: tuple[PitchEvent, ...]) -> PitcherRecentLine | None:
+    """One L30 scope of the starter's record off the kept window events
+    (D-111). None when the scope has no events at all — the surface names
+    the absence. wOBA sums the per-event values over the per-event
+    denominators, the same convention the expected-wOBA read uses."""
+    if not events:
+        return None
+    outcomes = _plate_outcomes(events)
+    batted = [event for event in events if event.launch_speed is not None]
+    barrels = sum(1 for event in batted if event.launch_speed_angle == BARREL_CLASSIFICATION)
+    angles = [event.launch_angle for event in events if event.launch_angle is not None]
+    woba_total = Decimal(0)
+    woba_denominator = Decimal(0)
+    for event in events:
+        if event.woba_value is None or not event.woba_denom:
+            continue
+        woba_total += event.woba_value
+        woba_denominator += event.woba_denom
+    classified = [event for event in batted if event.bb_type]
+    air_balls = sum(1 for event in classified if event.bb_type in AIR_BALL_TYPES)
+    air_ball_share: Decimal | None = None
+    if classified:
+        air_ball_share = Decimal(air_balls) / Decimal(len(classified))
+    return PitcherRecentLine(
+        plate_appearances=outcomes.plate_appearances,
+        batted_balls=len(batted),
+        home_runs=outcomes.home_runs,
+        woba=(woba_total / woba_denominator) if woba_denominator else None,
+        expected_woba=outcomes.expected_woba,
+        barrel_share=(Decimal(barrels) / Decimal(len(batted))) if batted else None,
+        avg_launch_angle=(sum(angles, Decimal(0)) / Decimal(len(angles))) if angles else None,
+        air_ball_share=air_ball_share,
+        iso=outcomes.iso,
+    )
+
+
+@dataclass(frozen=True)
 class PitcherCard:
     """The expected opposing pitcher: season line, qualifying arsenal, and the
-    season-long per-pitch lines the Arsenal table shows (D-087). Pitcher
-    metrics are always season figures — never windowed — with last season
-    filling in when he has no current record; the only window reads are the
-    per-side pitch-type set behind the table's side filter and, when that
-    filter is on, the per-side usage share it switches to (D-102)."""
+    season-long per-pitch lines the Arsenal table shows (D-087). The arsenal
+    figures are season reads with last season filling in when he has no
+    current record; the D-111 header-card metrics are season reads off the
+    named boards, with L30 companions (overall and per batting side) off the
+    window's kept events; the only other window reads are the per-side
+    pitch-type set behind the table's side filter and, when that filter is
+    on, the per-side usage share it switches to (D-102)."""
 
     player_id: int
     full_name: str
@@ -354,6 +507,13 @@ class PitcherCard:
     # SP-1 (D-109): arsenal-wide whiff — the pitch-weighted mean over his
     # season lines, for the low-whiff side of the high-K interaction tag.
     season_whiff_weighted: Decimal | None = None
+    # D-111: the header-card and Arms reads — season figures off the named
+    # boards, and the L30 lines (overall, per batting side) off the window's
+    # kept events. Each None names its scope's absence.
+    season_reads: PitcherSeasonReads | None = None
+    recent_overall: PitcherRecentLine | None = None
+    recent_vs_left: PitcherRecentLine | None = None
+    recent_vs_right: PitcherRecentLine | None = None
 
 
 @dataclass(frozen=True)
@@ -376,6 +536,10 @@ class GameCard:
     wind_direction: str | None
     home_run_factor_left: ParkFactor | None
     home_run_factor_right: ParkFactor | None
+    # D-111: relative humidity beside the temperature on the conditions
+    # surfaces — None for a roofed venue or an unpublished reading, never an
+    # invented number.
+    relative_humidity_percent: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -934,6 +1098,8 @@ def _pitcher_card(
     season_pitching: dict[int, SeasonPitchingLine],
     pitcher_arsenal: dict[int, tuple[PitchArsenalRow, ...]],
     fallback_arsenal: dict[int, tuple[PitchArsenalRow, ...]],
+    pitcher_expected: dict[int, ExpectedStatsRow],
+    pitcher_statcast: dict[int, StatcastPitcherRow],
     season_year: int,
     window_events: tuple[PitchEvent, ...],
 ) -> PitcherCard:
@@ -967,6 +1133,18 @@ def _pitcher_card(
         usage_vs_left=_side_usage(window_events, "L"),
         usage_vs_right=_side_usage(window_events, "R"),
         season_whiff_weighted=_arsenal_whiff_weighted(season_rows),
+        season_reads=_pitcher_season_reads(
+            pitcher_expected.get(probable_id),
+            pitcher_statcast.get(probable_id),
+            season,
+        ),
+        recent_overall=_pitcher_recent_line(window_events),
+        recent_vs_left=_pitcher_recent_line(
+            tuple(event for event in window_events if event.batter_side == "L")
+        ),
+        recent_vs_right=_pitcher_recent_line(
+            tuple(event for event in window_events if event.batter_side == "R")
+        ),
     )
 
 
@@ -1010,6 +1188,7 @@ def build_board(
     temperature_for: Callable[[ParkVenue], Decimal | None],
     park_factors: dict[int, dict[Handedness, ParkFactor]],
     wind_for: Callable[[ParkVenue], tuple[Decimal, str] | None] = lambda venue: None,
+    humidity_for: Callable[[ParkVenue], Decimal | None] = lambda venue: None,
 ) -> SlateBoard | FetchFailure:
     """Assemble and grade the full slate. Only a slate-level failure is fatal."""
     diagnostics: list[str] = []
@@ -1158,6 +1337,30 @@ def build_board(
         if not squared_up:
             diagnostics.append("squared-up board: returned zero rows")
 
+    # D-111's two pitcher boards: expected statistics against (the header
+    # card's wOBA/xwOBA and ISO/xISO) and the Statcast board against (barrel
+    # rate, launch angle, air/ground split). Each degrades to a named
+    # absence on its own.
+    pitcher_expected_result = savant.fetch_pitcher_expected_stats(year=year)
+    pitcher_expected: dict[int, ExpectedStatsRow]
+    if isinstance(pitcher_expected_result, FetchFailure):
+        reason = pitcher_expected_result.reason
+        diagnostics.append(f"pitcher expected-stats board: {reason}")
+        pitcher_expected = {}
+    else:
+        pitcher_expected = pitcher_expected_result
+        if not pitcher_expected:
+            diagnostics.append("pitcher expected-stats board: returned zero rows")
+    pitcher_statcast_result = savant.fetch_statcast_pitchers(year=year)
+    pitcher_statcast: dict[int, StatcastPitcherRow]
+    if isinstance(pitcher_statcast_result, FetchFailure):
+        diagnostics.append(f"statcast pitcher board: {pitcher_statcast_result.reason}")
+        pitcher_statcast = {}
+    else:
+        pitcher_statcast = pitcher_statcast_result
+        if not pitcher_statcast:
+            diagnostics.append("statcast pitcher board: returned zero rows")
+
     short_start = (as_of - timedelta(days=FORM_SHORT_DAYS)).date()
     reach_start = (as_of - timedelta(days=FORM_REACH_DAYS)).date()
     tracking_short_result = savant.fetch_bat_tracking(
@@ -1281,6 +1484,9 @@ def build_board(
         # Wind only reaches the field of an open-air venue; a roofed game
         # carries no wind reading rather than a number that never applied.
         wind = wind_for(venue) if venue is not None and not roofed else None
+        # D-111: humidity rides the same rule — a roofed venue's reading
+        # never reaches the field.
+        humidity = humidity_for(venue) if venue is not None and not roofed else None
 
         factor_left: ParkFactor | None = None
         factor_right: ParkFactor | None = None
@@ -1314,6 +1520,8 @@ def build_board(
                     season_pitching,
                     arsenal_by_pitcher,
                     fallback_arsenal_by_pitcher,
+                    pitcher_expected,
+                    pitcher_statcast,
                     year,
                     tuple(
                         event
@@ -1536,6 +1744,7 @@ def build_board(
                 wind_direction=wind[1] if wind is not None else None,
                 home_run_factor_left=factor_left,
                 home_run_factor_right=factor_right,
+                relative_humidity_percent=humidity,
             )
         )
 

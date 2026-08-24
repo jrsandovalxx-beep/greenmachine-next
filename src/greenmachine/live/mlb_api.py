@@ -137,6 +137,9 @@ class SeasonPitchingLine:
     whip: str
     strikeouts: int
     batters_faced: int
+    # D-111: home runs allowed, the HR/9 numerator on the starter header
+    # cards and the Arms tab. Defaulted so pre-D-111 fixtures stay valid.
+    home_runs: int = 0
 
 
 def _parse_json(body: bytes, context: str) -> Any:
@@ -455,6 +458,7 @@ class MlbStatsApi:
                     whip=whip if isinstance(whip, str) else "",
                     strikeouts=_optional_int(stat, "strikeOuts", context) or 0,
                     batters_faced=_optional_int(stat, "battersFaced", context) or 0,
+                    home_runs=_optional_int(stat, "homeRuns", context) or 0,
                 )
         except PayloadMalformedError as exc:
             return FetchFailure(str(exc))

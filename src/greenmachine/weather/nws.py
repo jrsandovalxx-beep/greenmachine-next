@@ -136,6 +136,23 @@ def _as_decimal(value: object, field_name: str) -> Decimal:
         raise MalformedPayloadError(f"{field_name} is not a parsable number") from exc
 
 
+def _humidity_percent(value: object) -> Decimal | None:
+    """D-111: the hourly period's ``relativeHumidity`` object
+    (``{"unitCode": "wmoUnit:percent", "value": n}``) as a percent. A missing
+    or unreadable reading is None — the surface names the absence, and the
+    period's other readings still stand: humidity must never cost the whole
+    forecast."""
+    if not isinstance(value, dict):
+        return None
+    raw = value.get("value")
+    if isinstance(raw, bool) or not isinstance(raw, int | float):
+        return None
+    try:
+        return Decimal(str(raw))
+    except InvalidOperation:  # pragma: no cover - str() of a number parses
+        return None
+
+
 def _leading_number(text: str, field_name: str) -> Decimal:
     """NWS reports wind as ``10 mph`` or ``5 to 10 mph``; take the first number."""
     parts = text.strip().split()
@@ -273,6 +290,7 @@ class NwsWeatherAdapter:
                 wind_direction=_as_text(period.get("windDirection"), "windDirection"),
                 short_forecast=_as_text(period.get("shortForecast"), "shortForecast"),
                 obtained_at=self._clock.now(),
+                relative_humidity_percent=_humidity_percent(period.get("relativeHumidity")),
             )
         except StatusFailureError as failure:
             reason = failure.reason()

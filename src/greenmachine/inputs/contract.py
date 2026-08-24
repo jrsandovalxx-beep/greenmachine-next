@@ -895,12 +895,21 @@ class WeatherForecast:
     wind_direction: str
     short_forecast: str
     obtained_at: datetime
+    # D-111: relative humidity in percent, beside the temperature on the
+    # conditions surfaces. Optional: NWS hourly periods publish it, but a
+    # period without the reading must not cost the whole forecast — None is
+    # the named absence the screens render, never an invented number.
+    relative_humidity_percent: Decimal | None = None
 
     def __post_init__(self) -> None:
         if self.wind_speed_mph < 0:
             raise InputContractError("wind speed cannot be negative")
         if not self.wind_direction or not self.short_forecast:
             raise InputContractError("wind_direction and short_forecast must be non-empty")
+        if self.relative_humidity_percent is not None and not (
+            Decimal(0) <= self.relative_humidity_percent <= Decimal(100)
+        ):
+            raise InputContractError("relative humidity is a percent: 0 to 100")
         if (
             self.obtained_at.tzinfo is None
             or self.obtained_at.utcoffset() is None

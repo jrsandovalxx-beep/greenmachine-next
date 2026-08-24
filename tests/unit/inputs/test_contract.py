@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections import Counter
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -691,3 +691,24 @@ def test_savant_join_ids_are_unique_and_absent_only_for_the_athletics() -> None:
     ids = [v.savant_venue_id for v in joined]
     assert len(ids) == len(set(ids))
     assert [v.team for v in missing] == ["Athletics"]  # the gap is represented, never filled
+
+
+def test_relative_humidity_is_a_percent() -> None:
+    """D-111: humidity is bounded 0..100 like the percent it is — out of
+    range is a contract error, and None is the named absence."""
+    from greenmachine.inputs.contract import WeatherForecast
+
+    base = {
+        "temperature_f": Decimal("70"),
+        "wind_speed_mph": Decimal("8"),
+        "wind_direction": "SW",
+        "short_forecast": "Clear",
+        "obtained_at": datetime(2026, 8, 20, tzinfo=UTC),
+    }
+    with pytest.raises(InputContractError):
+        WeatherForecast(relative_humidity_percent=Decimal("101"), **base)  # type: ignore[arg-type]
+    with pytest.raises(InputContractError):
+        WeatherForecast(relative_humidity_percent=Decimal("-1"), **base)  # type: ignore[arg-type]
+    assert WeatherForecast(**base).relative_humidity_percent is None  # type: ignore[arg-type]
+    present = WeatherForecast(relative_humidity_percent=Decimal("42"), **base)  # type: ignore[arg-type]
+    assert present.relative_humidity_percent == Decimal("42")

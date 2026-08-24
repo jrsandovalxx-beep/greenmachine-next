@@ -24,6 +24,25 @@ _EXPECTED_CSV_MISSING_COLUMN = (
     "player_id,pa,bip,ba,slg,woba,est_ba,est_woba\n101,500,380,0.251,0.465,0.340,0.270,0.362\n"
 )
 
+# D-111: the pitcher board publishes the identical metric columns plus
+# era/xera and the diff columns (verified live 2026-08) — the parse reads
+# the same nine and ignores the rest.
+_PITCHER_EXPECTED_CSV = (
+    "player_id,pa,bip,ba,est_ba,est_ba_minus_ba_diff,slg,est_slg,est_slg_minus_slg_diff,"
+    "woba,est_woba,est_woba_minus_woba_diff,era,xera,era_minus_xera_diff\n"
+    "201,620,450,0.240,0.250,0.010,0.410,0.430,0.020,0.294,0.297,0.003,3.46,3.67,-0.206\n"
+)
+
+# D-111: the Statcast board against pitchers (verified live 2026-08):
+# attempts is the batted balls against; the fbld/gb columns are FB/LD and
+# GB exit velocities in mph, not air/ground counts.
+_STATCAST_PITCHERS_CSV = (
+    "player_id,attempts,avg_hit_angle,anglesweetspotpercent,max_hit_speed,avg_hit_speed,"
+    "ev50,fbld,gb,max_distance,avg_distance,avg_hr_distance,ev95plus,ev95percent,barrels,"
+    "brl_percent,brl_pa\n"
+    "201,100,12.9,32,111.3,88.4,77.8,92.1,86.1,430,157,395,35,35.2,8,8.0,5.2\n"
+)
+
 _SPRINT_CSV = (
     "player_id,team_id,team,position,age,competitive_runs,bolts,hp_to_1b,sprint_speed\n"
     "101,147,NYY,CF,26,142,8,4.20,29.4\n"
@@ -104,6 +123,56 @@ def test_expected_stats_board_fails_cleanly_on_an_unknown_column() -> None:
     )
     assert isinstance(result, FetchFailure)
     assert "no row parsed" in result.reason
+
+
+def test_pitcher_expected_board_parses_and_ignores_the_era_columns() -> None:
+    """D-111: the pitcher board's metric columns are the batter board's —
+    the era/xera extras are ignored, never required."""
+    rows = BaseballSavant(_FakeTransport(_PITCHER_EXPECTED_CSV)).fetch_pitcher_expected_stats(
+        year=2026
+    )
+    assert not isinstance(rows, FetchFailure)
+    row = rows[201]
+    assert row.plate_appearances == 620
+    assert row.batting_average == Decimal("0.240")
+    assert row.slugging == Decimal("0.410")
+    assert row.woba == Decimal("0.294")
+    assert row.xwoba == Decimal("0.297")
+    assert row.expected_batting_average == Decimal("0.250")
+    assert row.expected_slugging == Decimal("0.430")
+
+
+def test_pitcher_expected_board_fails_cleanly_on_an_unknown_column() -> None:
+    """D-111: the same unknown-column discipline as the batter board — a
+    missing required column is a clean FetchFailure, never a wrong number."""
+    savant = BaseballSavant(_FakeTransport(_EXPECTED_CSV_MISSING_COLUMN))
+    result = savant.fetch_pitcher_expected_stats(year=2026)
+    assert isinstance(result, FetchFailure)
+    assert "no row parsed" in result.reason
+
+
+def test_statcast_pitcher_board_parses_the_against_record() -> None:
+    """D-111: batted balls, barrels, and launch angle against — the board
+    publishes no air/ground split (fbld/gb are exit velocities)."""
+    rows = BaseballSavant(_FakeTransport(_STATCAST_PITCHERS_CSV)).fetch_statcast_pitchers(year=2026)
+    assert not isinstance(rows, FetchFailure)
+    row = rows[201]
+    assert row.batted_ball_events == 100
+    assert row.avg_launch_angle == Decimal("12.9")
+    assert row.barrel_count == 8
+
+
+def test_a_board_that_loses_half_its_rows_fails_instead_of_shrinking_silently() -> None:
+    """D-111 live lesson: when fbld/gb were misread as counts, 809 of 818
+    rows dropped silently and every starter read an invented empty board.
+    A board that cannot parse half its rows has changed shape — fail it."""
+    data_row = _STATCAST_PITCHERS_CSV.split("\n", 1)[1]
+    bad_row = data_row.replace("201,", "202,").replace("100,", "not-a-number,", 1)
+    worse_row = data_row.replace("201,", "203,").replace("100,", "", 1)
+    body = _STATCAST_PITCHERS_CSV + bad_row + worse_row
+    rows = BaseballSavant(_FakeTransport(body)).fetch_statcast_pitchers(year=2026)
+    assert isinstance(rows, FetchFailure)
+    assert "only 1 of 3 rows parsed" in rows.reason
 
 
 def test_sprint_speed_board_parses() -> None:

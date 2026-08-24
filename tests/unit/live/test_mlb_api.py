@@ -99,6 +99,7 @@ _PEOPLE_PITCHING = {
                                 "whip": "1.05",
                                 "strikeOuts": 190,
                                 "battersFaced": 620,
+                                "homeRuns": 20,
                             }
                         }
                     ],
@@ -176,6 +177,7 @@ def test_season_pitching_line_and_throwing_hand_parse() -> None:
     assert line.innings_pitched == "150.1"
     assert line.era == "3.10"
     assert line.batters_faced == 620
+    assert line.home_runs == 20  # D-111: the HR/9 numerator
 
 
 def test_a_non_200_status_becomes_a_fetch_failure() -> None:

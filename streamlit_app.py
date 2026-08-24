@@ -97,6 +97,8 @@ from greenmachine.live.pipeline import (
     BatterGridLine,
     GameCard,
     PitcherCard,
+    PitcherRecentLine,
+    PitcherSeasonReads,
     PitchLine,
     SlateBoard,
     build_board,
@@ -558,6 +560,13 @@ def _wind_lookup(diagnostics: list[str]) -> object:
     )
 
 
+def _humidity_lookup(diagnostics: list[str]) -> object:
+    """A venue -> relative-humidity-percent reader over the weather seam
+    (D-111); None locally or on absence — same discipline as the other
+    conditions readers."""
+    return _forecast_lookup(lambda forecast: forecast.relative_humidity_percent, diagnostics)
+
+
 @st.cache_data(ttl=BOARD_TTL_SECONDS, show_spinner=False)
 def live_board(slate_iso: str) -> SlateBoard | FetchFailure:
     """Assemble and grade the slate; cached so a rerun is not a refetch."""
@@ -579,6 +588,7 @@ def live_board(slate_iso: str) -> SlateBoard | FetchFailure:
         temperature_for=_temperature_lookup(weather_diagnostics),  # type: ignore[arg-type]
         park_factors=park_factor_table(),
         wind_for=_wind_lookup(weather_diagnostics),  # type: ignore[arg-type]
+        humidity_for=_humidity_lookup(weather_diagnostics),  # type: ignore[arg-type]
     )
     LIVE_WEATHER_DIAGNOSTICS[slate_iso] = weather_diagnostics
     return board
@@ -632,6 +642,18 @@ _CONTACT_BAT_SPEED_LINE = Decimal("72")
 # The ratified pitch-type sample floor (10 BBE) for the breakup table's
 # per-pitch EV and Air% — below it the INSUFFICIENT treatment, never hidden.
 _MIN_BBE_PITCH_TYPE = 10
+
+# D-111: the starter header cards' and Arms tab's emphasis and sample
+# lines, each printed on its surface (the D-079 pattern). Green marks the
+# digest's pitcher-vulnerability reads only: HR/9 at or above 1.4, and wOBA
+# above xwOBA — no invented bands. The L30 side rows carry the ratified
+# pitcher-vulnerability floor (80 batters faced / 40 batted balls); contact
+# reads carry the general 15-BBE floor. Below a floor the value stays
+# visible under the amber INSUFFICIENT advisory, never hidden (D-068).
+_HR9_LINE = Decimal("1.4")
+_VULN_MIN_BF = 80
+_VULN_MIN_BBE = 40
+_MIN_BBE_CONTACT = 15
 
 
 def _ordinal(position: int) -> str:
@@ -951,6 +973,15 @@ def _signed_avg_text(value: Decimal) -> str:
 
 def _pct_text(value: Decimal | None) -> str:
     return "—" if value is None else f"{float(value):.1%}"
+
+
+def _metric_text(value: Decimal | None, spec: str, suffix: str = "") -> str:
+    """A starter metric cell (D-111): the formatted value with any unit
+    suffix, or the absence dash — one formatter so every cell names None
+    the same way."""
+    if value is None:
+        return "—"
+    return f"{float(value):{spec}}{suffix}"
 
 
 _BREAKUP_CSS = """
@@ -1393,10 +1424,130 @@ def _absence_styles(texts: dict[str, str]) -> dict[str, str]:
     return {column: _REASON_CSS for column, text in texts.items() if text in _ABSENCE_TEXTS}
 
 
+_ARMS_METRIC_COLUMNS = (
+    "PA",
+    "BBE",
+    "wOBA",
+    "xwOBA",
+    "HR",
+    "HR/9",
+    "BRL%",
+    "LA",
+    "ISO",
+    "xISO",
+    "Air %",
+)
+
+
+def _arms_season_metrics(
+    reads: PitcherSeasonReads | None,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """The season starter-metric columns on the Arms tab (D-111): samples
+    as their own columns (D-014), every absence named, green only on the
+    digest's two pitcher-vulnerability reads, amber contact reads below the
+    ratified 15-BBE floor (D-068)."""
+    if reads is None:
+        dash = {column: "—" for column in _ARMS_METRIC_COLUMNS}
+        return dash, {column: _REASON_CSS for column in dash}
+    texts = {
+        "PA": str(reads.plate_appearances) if reads.plate_appearances else "—",
+        "BBE": str(reads.batted_ball_events) if reads.batted_ball_events else "—",
+        "wOBA": _avg_text(reads.woba),
+        "xwOBA": _avg_text(reads.expected_woba),
+        "HR": str(reads.home_runs) if reads.home_runs is not None else "—",
+        "HR/9": (
+            f"{float(reads.home_run_per_nine):.2f}" if reads.home_run_per_nine is not None else "—"
+        ),
+        "BRL%": _pct_text(reads.barrel_share),
+        "LA": (
+            f"{float(reads.avg_launch_angle):.1f}°" if reads.avg_launch_angle is not None else "—"
+        ),
+        "ISO": _avg_text(reads.iso),
+        "xISO": _avg_text(reads.expected_iso),
+        # The season Statcast board against publishes no air-ball split
+        # (its fbld/gb columns are exit velocities) — the season air share
+        # names its absence; the L30 events carry the real split.
+        "Air %": "—",
+    }
+    styles = {column: _REASON_CSS for column, text in texts.items() if text == "—"}
+    if (
+        reads.woba is not None
+        and reads.expected_woba is not None
+        and reads.woba > reads.expected_woba
+    ):
+        styles["wOBA"] = _HIGHLIGHT
+    if reads.home_run_per_nine is not None and reads.home_run_per_nine >= _HR9_LINE:
+        styles["HR/9"] = _HIGHLIGHT
+    if 0 < reads.batted_ball_events < _MIN_BBE_CONTACT:
+        for column in ("BRL%", "LA"):
+            if texts[column] != "—":
+                styles[column] = _INSUFFICIENT_CSS
+    return texts, styles
+
+
+def _arms_recent_metrics(
+    line: PitcherRecentLine | None,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """The L30 starter-metric columns on the Arms tab (D-111): the kept
+    events' figures with their BF/BBE samples. The scope publishes no
+    innings and no per-event expected SLG, so HR/9 and xISO name their
+    absences and the HR count shows instead; amber contact reads below the
+    ratified 15-BBE floor (D-068)."""
+    if line is None:
+        dash = {column: "—" for column in _ARMS_METRIC_COLUMNS}
+        return dash, {column: _REASON_CSS for column in dash}
+    texts = {
+        "PA": str(line.plate_appearances),
+        "BBE": str(line.batted_balls),
+        "wOBA": _avg_text(line.woba),
+        "xwOBA": _avg_text(line.expected_woba),
+        "HR": str(line.home_runs),
+        "HR/9": "—",
+        "BRL%": _pct_text(line.barrel_share),
+        "LA": (
+            f"{float(line.avg_launch_angle):.1f}°" if line.avg_launch_angle is not None else "—"
+        ),
+        "ISO": _avg_text(line.iso),
+        "xISO": "—",
+        "Air %": _pct_text(line.air_ball_share),
+    }
+    styles = {column: _REASON_CSS for column, text in texts.items() if text == "—"}
+    if line.woba is not None and line.expected_woba is not None and line.woba > line.expected_woba:
+        styles["wOBA"] = _HIGHLIGHT
+    if 0 < line.batted_balls < _MIN_BBE_CONTACT:
+        for column in ("BRL%", "LA"):
+            if texts[column] != "—":
+                styles[column] = _INSUFFICIENT_CSS
+    return texts, styles
+
+
 def _render_arms(board: SlateBoard) -> None:
     st.caption(
         "Expected starters with their season line and the arsenal they actually "
         "throw (pitch types at or above the qualifying usage share)."
+    )
+    l30_view = st.toggle(
+        "L30 starter metrics — the metric columns read the last 30 days of "
+        "kept events; season is the default",
+        value=False,
+        key="arms_l30_view",
+        help=(
+            "D-111. Season metrics read the expected-statistics and Statcast "
+            "boards against plus the statsapi season line. L30 reads the "
+            "window's kept pitch events: it publishes no innings (HR/9 stays "
+            "a season read, the HR count shows) and no per-event expected "
+            "SLG (xISO stays a season read)."
+        ),
+    )
+    st.caption(
+        "Starter metrics (D-111): green marks the digest's "
+        "pitcher-vulnerability reads only — HR/9 ≥ 1.4 (season) and wOBA "
+        "above xwOBA. Amber: contact reads below the ratified 15-BBE floor — "
+        "value shown, advisory attached (D-068). PA and BBE carry every "
+        "rate's sample (D-014). Air % is the fly-ball-plus-line-drive share "
+        "of the window's batted balls against — the ground-ball profile's "
+        "air mirror; the season board publishes no air split, so the "
+        "season scope names the absence and Air % reads L30 only."
     )
     text_rows: list[dict[str, str]] = []
     style_rows: list[dict[str, str]] = []
@@ -1415,6 +1566,7 @@ def _render_arms(board: SlateBoard) -> None:
                     "WHIP": "starter not announced",
                     "GS": "starter not announced",
                     "K": "starter not announced",
+                    **{column: "starter not announced" for column in _ARMS_METRIC_COLUMNS},
                     "Arsenal": "starter not announced",
                 }
                 text_rows.append(tbd_texts)
@@ -1437,8 +1589,14 @@ def _render_arms(board: SlateBoard) -> None:
                 "K": str(card.season.strikeouts) if observed else "not yet observed",
                 "Arsenal": arsenal,
             }
+            metric_texts, metric_styles = (
+                _arms_recent_metrics(card.recent_overall)
+                if l30_view
+                else _arms_season_metrics(card.season_reads)
+            )
+            texts = _insert_after(texts, "K", metric_texts)
             text_rows.append(texts)
-            style_rows.append(_absence_styles(texts))
+            style_rows.append({**_absence_styles(texts), **metric_styles})
     st.dataframe(
         styled_text_frame(pd.DataFrame(text_rows), pd.DataFrame(style_rows)),
         hide_index=True,
@@ -1546,6 +1704,190 @@ def _grid_line_cells(
     return texts, styles
 
 
+# D-111's starter header card: the overall row (Season, or L30 on the
+# toggle) plus the two always-L30 side rows, with the drawn stadium between
+# the two starters' cards.
+_SP_CARD_COLUMNS = ("Scope", "wOBA", "xwOBA", "HR", "HR/9", "BRL%", "LA", "ISO", "xISO")
+
+
+def _sp_season_row(reads: PitcherSeasonReads | None) -> tuple[dict[str, str], dict[str, str]]:
+    """The season-scope row of a starter header card (D-111). Samples ride
+    the Scope label beside the rates they basis (D-014); a missing source's
+    cells name the absence, never an invented zero. Green marks only the
+    digest's two pitcher-vulnerability reads; contact reads below the
+    ratified 15-BBE floor keep their values under the amber advisory
+    (D-068)."""
+    dash = {column: "—" for column in _SP_CARD_COLUMNS[1:]}
+    if reads is None or (
+        not reads.plate_appearances and not reads.batted_ball_events and reads.home_runs is None
+    ):
+        return {"Scope": "Season — no season record", **dash}, {
+            column: _REASON_CSS for column in dash
+        }
+    label = f"Season — {reads.plate_appearances} PA · {reads.batted_ball_events} BBE"
+    if reads.innings_text:
+        label += f" · {reads.innings_text} IP"
+    texts = {
+        "wOBA": _avg_text(reads.woba),
+        "xwOBA": _avg_text(reads.expected_woba),
+        "HR": str(reads.home_runs) if reads.home_runs is not None else "—",
+        "HR/9": (
+            f"{float(reads.home_run_per_nine):.2f}" if reads.home_run_per_nine is not None else "—"
+        ),
+        "BRL%": _pct_text(reads.barrel_share),
+        "LA": (
+            f"{float(reads.avg_launch_angle):.1f}°" if reads.avg_launch_angle is not None else "—"
+        ),
+        "ISO": _avg_text(reads.iso),
+        "xISO": _avg_text(reads.expected_iso),
+    }
+    styles = {column: _REASON_CSS for column, text in texts.items() if text == "—"}
+    if (
+        reads.woba is not None
+        and reads.expected_woba is not None
+        and reads.woba > reads.expected_woba
+    ):
+        styles["wOBA"] = _HIGHLIGHT
+    if reads.home_run_per_nine is not None and reads.home_run_per_nine >= _HR9_LINE:
+        styles["HR/9"] = _HIGHLIGHT
+    if 0 < reads.batted_ball_events < _MIN_BBE_CONTACT:
+        for column in ("BRL%", "LA"):
+            if texts[column] != "—":
+                styles[column] = _INSUFFICIENT_CSS
+        styles["Scope"] = _INSUFFICIENT_CSS
+        label += " · INSUFFICIENT"
+    return {"Scope": label, **texts}, styles
+
+
+def _sp_recent_row(
+    label: str,
+    line: PitcherRecentLine | None,
+    *,
+    vulnerability_floor: bool = False,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """One L30 row of a starter header card (D-111) — the toggle's overall
+    row, or an always-L30 side row. The L30 scope publishes no innings and
+    no per-event expected SLG, so HR/9 and xISO name their absences and the
+    HR count shows instead. ``vulnerability_floor`` is the side rows'
+    ratified 80-BF / 40-BBE line; the overall row carries the general
+    15-BBE contact floor. Below a floor the values stay visible under the
+    amber advisory, never hidden (D-068)."""
+    dash = {column: "—" for column in _SP_CARD_COLUMNS[1:]}
+    if line is None:
+        return {"Scope": f"{label} — no L30 record", **dash}, {
+            column: _REASON_CSS for column in dash
+        }
+    full_label = f"{label} — {line.plate_appearances} BF · {line.batted_balls} BBE"
+    texts = {
+        "wOBA": _avg_text(line.woba),
+        "xwOBA": _avg_text(line.expected_woba),
+        "HR": str(line.home_runs),
+        "HR/9": "—",
+        "BRL%": _pct_text(line.barrel_share),
+        "LA": (
+            f"{float(line.avg_launch_angle):.1f}°" if line.avg_launch_angle is not None else "—"
+        ),
+        "ISO": _avg_text(line.iso),
+        "xISO": "—",
+    }
+    styles = {column: _REASON_CSS for column, text in texts.items() if text == "—"}
+    if line.woba is not None and line.expected_woba is not None and line.woba > line.expected_woba:
+        styles["wOBA"] = _HIGHLIGHT
+    insufficient = (
+        (line.plate_appearances < _VULN_MIN_BF or line.batted_balls < _VULN_MIN_BBE)
+        if vulnerability_floor
+        else 0 < line.batted_balls < _MIN_BBE_CONTACT
+    )
+    if insufficient:
+        for column, text in texts.items():
+            if text != "—":
+                styles[column] = _INSUFFICIENT_CSS
+        styles["Scope"] = _INSUFFICIENT_CSS
+        full_label += " · INSUFFICIENT"
+    return {"Scope": full_label, **texts}, styles
+
+
+def _sp_card(card: PitcherCard | None, team: str, *, l30: bool) -> None:
+    """One starter header card (D-111): name, team, and hand over the scope
+    rows. An unannounced starter names the absence."""
+    if card is None:
+        st.markdown(f"**{team} starter**")
+        st.caption("starter not announced")
+        return
+    throws = f" · throws {card.throws}" if card.throws else ""
+    st.markdown(f"**{card.full_name}** — {team}{throws}")
+    overall = (
+        _sp_recent_row("L30", card.recent_overall) if l30 else _sp_season_row(card.season_reads)
+    )
+    rows = [
+        overall,
+        _sp_recent_row("vs L (L30)", card.recent_vs_left, vulnerability_floor=True),
+        _sp_recent_row("vs R (L30)", card.recent_vs_right, vulnerability_floor=True),
+    ]
+    st.dataframe(
+        styled_text_frame(
+            pd.DataFrame([row for row, _ in rows]),
+            pd.DataFrame([style for _, style in rows]),
+        ),
+        hide_index=True,
+        key=f"sp_card_{card.player_id}_{'l30' if l30 else 'season'}",
+    )
+
+
+def _stadium_panel(game: GameCard) -> None:
+    """The drawn stadium between the two starter cards (D-111): the field
+    with its live wind flow, the park factors with their PA samples, and
+    temperature beside humidity — each absence named, never an invented
+    number."""
+    factor_left = game.home_run_factor_left
+    factor_right = game.home_run_factor_right
+    if factor_left is not None and factor_right is not None:
+        factor_text = (
+            f"HR factor L {float(factor_left.factor):.0f} ({factor_left.plate_appearances} PA)"
+            f" · R {float(factor_right.factor):.0f} ({factor_right.plate_appearances} PA)"
+        )
+    elif factor_left is not None:
+        factor_text = (
+            f"HR factor L {float(factor_left.factor):.0f} ({factor_left.plate_appearances} PA)"
+            " · R not covered"
+        )
+    elif factor_right is not None:
+        factor_text = (
+            f"HR factor R {float(factor_right.factor):.0f} ({factor_right.plate_appearances} PA)"
+            " · L not covered"
+        )
+    else:
+        factor_text = "HR factor not covered"
+    detail_lines = [factor_text]
+    if game.venue_type is VenueType.OPEN_AIR:
+        temperature = (
+            f"{float(game.temperature_fahrenheit):.0f}°F"
+            if game.temperature_fahrenheit is not None
+            else "temp unavailable"
+        )
+        humidity = (
+            f"humidity {float(game.relative_humidity_percent):.0f}%"
+            if game.relative_humidity_percent is not None
+            else "humidity unpublished"
+        )
+        detail_lines.append(f"{temperature} · {humidity}")
+    roofed = game.venue_type is not VenueType.OPEN_AIR
+    st.markdown(
+        field_wind_html(
+            venue_name=game.venue_name,
+            detail_lines=tuple(detail_lines),
+            wind_speed_mph=(
+                float(game.wind_speed_mph) if game.wind_speed_mph is not None else None
+            ),
+            wind_direction=game.wind_direction,
+            wind_absent_text=(
+                "roofed — wind never reaches the field" if roofed else "wind reading unavailable"
+            ),
+        ),
+        unsafe_allow_html=True,
+    )
+
+
 def _render_matchups(board: SlateBoard) -> BatterCard | None:
     st.caption(
         "One row per batter against the expected starter's mix — pitches at "
@@ -1572,6 +1914,35 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
             card.full_name if card else "TBD" for card in (game.away_pitcher, game.home_pitcher)
         )
         with st.expander(f"{game.away_team} at {game.home_team} — {game.venue_name} · {pitchers}"):
+            sp_l30 = st.toggle(
+                "Starter metrics: L30 — season is the default",
+                value=False,
+                key=f"sp_l30_{game.game_pk}",
+                help=(
+                    "D-111. The overall row flips from the season boards to "
+                    "the starter's last 30 days of kept pitch events. The "
+                    "side rows always read that L30 window."
+                ),
+            )
+            away_column, field_column, home_column = st.columns([5, 4, 5])
+            with away_column:
+                _sp_card(game.away_pitcher, game.away_team, l30=sp_l30)
+            with field_column:
+                _stadium_panel(game)
+            with home_column:
+                _sp_card(game.home_pitcher, game.home_team, l30=sp_l30)
+            st.caption(
+                "Starter cards (D-111): the overall row reads the season "
+                "boards (expected-statistics and Statcast boards against, "
+                "statsapi season line) or, on the toggle, the last 30 days "
+                "of kept events; the side rows always read that L30 window. "
+                "Green marks only the digest's pitcher-vulnerability reads — "
+                "HR/9 ≥ 1.4 and wOBA above xwOBA. L30 publishes no innings "
+                "and no per-event expected SLG, so HR/9 and xISO stay "
+                "season reads and the HR count shows instead. Amber: below "
+                "the ratified floor — 80 BF / 40 BBE on a side row, 15 BBE "
+                "on contact reads — value shown, advisory attached (D-068)."
+            )
             for label, batters, opposing_card in (
                 ("Away", game.away_batters, game.home_pitcher),
                 ("Home", game.home_batters, game.away_pitcher),

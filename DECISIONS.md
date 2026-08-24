@@ -2291,3 +2291,56 @@ cost: +3 board-cached calls per build. Every rate carries its sample,
 every absence names its reason, and every firing line is printed in the
 Sluggers caption (the D-079 pattern). Signed rates render ASCII
 ("+.041") because the lint gate bars the typographic minus in source.
+
+
+## D-111 - starter header cards, stadium panel, Arms metrics, humidity
+
+**(PO's Matchups/Arms redesign, ticket 1 of 2; PO delegated the ISO
+choice — ISO paired with expected ISO, both off the one expected board,
+was accepted.)** Each Matchups game expander now opens with the two
+expected starters as header cards flanking the drawn stadium. The card's
+overall row reads the season boards by default — wOBA and xwOBA against
+plus ISO and expected ISO off a new expected-statistics pitcher board
+(same metric columns as the batter board plus era/xera, which the read
+ignores; every parsed column required, verified live 2026-08), barrel
+rate and average launch angle against off a new Statcast pitcher board
+(attempts/avg_hit_angle/barrels/fbld/gb, verified live 2026-08), and
+HR/9 off the statsapi season line — homeRuns joins the season-pitching
+parse, and the innings conversion treats the notation's fractional digit
+as OUTS (.1/.2), never tenths, with anything outside the notation a
+named absence. A per-game toggle flips the overall row to the starter's
+last 30 days of kept pitch events; the two side rows always read that
+L30 window ("vs L (L30)", "vs R (L30)"). L30 publishes no innings and no
+per-event expected SLG, so HR/9 and xISO name their absences on L30 rows
+and the HR count shows instead. Green marks ONLY the digest's
+pitcher-vulnerability reads — HR/9 >= 1.4 and wOBA above xwOBA, no
+invented bands — and below the ratified floors (80 BF / 40 BBE on a side
+row, 15 BBE on contact reads) the values stay visible under the amber
+INSUFFICIENT advisory, never hidden. Every sample rides the Scope label
+beside the rates it basis. The stadium panel draws the field with its
+live wind flow and adds detail lines: the hand-split HR park factors
+with their PA samples, and temperature beside HUMIDITY — relative
+humidity now flows end to end (NWS hourly relativeHumidity object, a new
+optional WeatherForecast field validated 0..100, a humidity_for reader
+injected at the composition root, GameCard.relative_humidity_percent),
+None for a roofed venue or an unpublished reading, never an invented
+number. The Arms tab gains the same starter metrics as season columns
+(PA, BBE, wOBA, xwOBA, HR, HR/9, BRL%, LA, ISO, xISO, plus Air % — the
+fly-ball-plus-line-drive share against, the ground-ball profile's air
+mirror) with the same L30 toggle, the same green and amber rules, and
+every firing line printed in the surface caption (the D-079 pattern).
+Net new steady-state cost: +2 board-cached calls per build.
+
+**(Live-verify correction, same PR — caught before merge.)** The
+pre-merge live board exposed two faults the unit gate could not: the
+Statcast pitcher board's fbld/gb columns are FB/LD and GB exit
+velocities in mph, NOT air/ground counts, and the misread quietly
+dropped 809 of 818 rows (decimal EV strings failing the int parse), so
+every starter's season reads fell back to an invented-empty board —
+0 BBE beside real wOBA figures — with no diagnostic. The air/ground
+fields are removed: no season air-ball split against exists, so the
+season Air % names its absence and the share reads the L30 events,
+whose bb_type split is real. And the board parser now FAILS any board
+that cannot parse at least half its rows ("only N of M rows parsed"),
+so a changed payload can never shrink a board into silent absences
+again.

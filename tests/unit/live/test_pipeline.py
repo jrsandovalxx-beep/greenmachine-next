@@ -35,6 +35,7 @@ from greenmachine.live.savant import (
     SprintSpeedRow,
     SquaredUpRow,
     StatcastBatterRow,
+    StatcastPitcherRow,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -211,12 +212,16 @@ class _FakeSavant:
         expected: dict[int, ExpectedStatsRow] | FetchFailure | None = None,
         sprint: dict[int, SprintSpeedRow] | FetchFailure | None = None,
         squared: dict[int, SquaredUpRow] | FetchFailure | None = None,
+        pitcher_expected: dict[int, ExpectedStatsRow] | FetchFailure | None = None,
+        pitcher_statcast: dict[int, StatcastPitcherRow] | FetchFailure | None = None,
     ) -> None:
         self._batter_arsenal = batter_arsenal
         self._pitcher_arsenal = pitcher_arsenal
         self._expected = expected
         self._sprint = sprint
         self._squared = squared
+        self._pitcher_expected = pitcher_expected
+        self._pitcher_statcast = pitcher_statcast
 
     def fetch_pitch_arsenal(
         self, *, kind: str, year: int
@@ -248,6 +253,20 @@ class _FakeSavant:
     ) -> dict[int, SquaredUpRow] | FetchFailure:
         if self._squared is not None:
             return self._squared
+        return {}
+
+    def fetch_pitcher_expected_stats(
+        self, *, year: int
+    ) -> dict[int, ExpectedStatsRow] | FetchFailure:
+        if self._pitcher_expected is not None:
+            return self._pitcher_expected
+        return {}
+
+    def fetch_statcast_pitchers(
+        self, *, year: int, minimum: int = 0
+    ) -> dict[int, StatcastPitcherRow] | FetchFailure:
+        if self._pitcher_statcast is not None:
+            return self._pitcher_statcast
         return {}
 
 
@@ -1062,6 +1081,162 @@ def test_the_d110_board_failures_degrade_to_named_absences() -> None:
     assert "expected-stats board" in joined
     assert "sprint-speed board" in joined
     assert "squared-up board" in joined
+
+
+def _pitcher_expected_row() -> ExpectedStatsRow:
+    return ExpectedStatsRow(
+        player_id=PITCHER_ID,
+        plate_appearances=620,
+        balls_in_play=450,
+        batting_average=Decimal("0.240"),
+        slugging=Decimal("0.410"),
+        woba=Decimal("0.294"),
+        expected_batting_average=Decimal("0.250"),
+        expected_slugging=Decimal("0.430"),
+        xwoba=Decimal("0.297"),
+    )
+
+
+def _pitcher_statcast_row() -> StatcastPitcherRow:
+    return StatcastPitcherRow(
+        player_id=PITCHER_ID,
+        batted_ball_events=100,
+        avg_launch_angle=Decimal("12.9"),
+        barrel_count=8,
+    )
+
+
+def test_the_pitcher_card_carries_the_d111_season_reads() -> None:
+    """D-111: wOBA/xwOBA and ISO/xISO read the expected board against (both
+    sides of each pair share its denominator); barrel rate, launch angle,
+    launch angle read the Statcast pitcher board; HR/9 reads the season
+    line's own notation — 20 homers over "150.1" (150 and a third) innings."""
+    api = _FakeApi(
+        pitching={
+            PITCHER_ID: SeasonPitchingLine(
+                player_id=PITCHER_ID,
+                full_name="Ace Righty",
+                throws="R",
+                games_started=25,
+                innings_pitched="150.1",
+                era="3.10",
+                whip="1.05",
+                strikeouts=190,
+                batters_faced=620,
+                home_runs=20,
+            )
+        }
+    )
+    savant = _FakeSavant(
+        pitcher_expected={PITCHER_ID: _pitcher_expected_row()},
+        pitcher_statcast={PITCHER_ID: _pitcher_statcast_row()},
+    )
+    board = _build(api, savant)
+    assert not isinstance(board, FetchFailure)
+    card = board.games[0].home_pitcher
+    assert card is not None
+    reads = card.season_reads
+    assert reads is not None
+    assert reads.woba == Decimal("0.294")
+    assert reads.expected_woba == Decimal("0.297")
+    assert reads.iso == Decimal("0.170")
+    assert reads.expected_iso == Decimal("0.180")
+    assert reads.plate_appearances == 620
+    assert reads.barrel_share == Decimal("0.08")
+    assert reads.avg_launch_angle == Decimal("12.9")
+    assert reads.batted_ball_events == 100
+    assert reads.home_runs == 20
+    assert reads.innings_text == "150.1"
+    assert reads.home_run_per_nine == Decimal(180) / (Decimal(451) / Decimal(3))
+
+
+def test_innings_notation_is_outs_not_tenths() -> None:
+    """D-111: the fractional digit is outs (.1/.2), never tenths — anything
+    outside the notation is a named absence, not a guessed divisor."""
+    from greenmachine.live.pipeline import _innings_as_decimal
+
+    assert _innings_as_decimal("150.1") == Decimal(451) / Decimal(3)
+    assert _innings_as_decimal("150.2") == Decimal(452) / Decimal(3)
+    assert _innings_as_decimal("150") == Decimal(150)
+    assert _innings_as_decimal("150.0") == Decimal(150)
+    assert _innings_as_decimal("") is None
+    assert _innings_as_decimal("abc") is None
+    assert _innings_as_decimal("1.3") is None
+    assert _innings_as_decimal("1.10") is None
+
+
+def test_the_pitcher_l30_lines_read_the_kept_events_by_side() -> None:
+    """D-111: the default slate's kept events all belong to the starter and
+    every one came against a left-handed batter, so his overall and vs-L
+    lines carry the record while vs-R names its empty scope."""
+    board = _build(_FakeApi(), _FakeSavant())
+    assert not isinstance(board, FetchFailure)
+    card = board.games[0].home_pitcher
+    assert card is not None
+    overall = card.recent_overall
+    assert overall is not None
+    assert overall.plate_appearances == MIN_BBE_FORM
+    assert overall.batted_balls == MIN_BBE_FORM
+    assert overall.barrel_share == Decimal(1)
+    assert overall.avg_launch_angle == Decimal("20")
+    assert overall.air_ball_share == Decimal(1)
+    assert overall.woba == Decimal("0.9")
+    assert overall.expected_woba is None  # the events publish no expected wOBA here
+    assert overall.iso == Decimal(0)
+    left = card.recent_vs_left
+    assert left is not None
+    assert left.plate_appearances == MIN_BBE_FORM
+    assert card.recent_vs_right is None
+
+
+def test_the_d111_pitcher_board_failures_degrade_to_named_absences() -> None:
+    savant = _FakeSavant(
+        pitcher_expected=FetchFailure("pitcher-expected-stats: HTTP 503"),
+        pitcher_statcast=FetchFailure("statcast-pitchers: HTTP 503"),
+    )
+    board = _build(_FakeApi(), savant)
+    assert not isinstance(board, FetchFailure)
+    card = board.games[0].home_pitcher
+    assert card is not None
+    reads = card.season_reads
+    assert reads is not None
+    assert reads.woba is None and reads.expected_woba is None
+    assert reads.iso is None and reads.expected_iso is None
+    assert reads.barrel_share is None
+    assert reads.avg_launch_angle is None
+    assert reads.home_runs == 0  # the season line still answers
+    assert reads.home_run_per_nine == Decimal(0)  # zero homers allowed is a real zero
+    joined = " ".join(board.diagnostics)
+    assert "pitcher expected-stats board" in joined
+    assert "statcast pitcher board" in joined
+
+
+def _build_with_humidity(api: object, humidity: object) -> object:
+    def fetch_day(day: date) -> tuple[PitchEvent, ...]:
+        return tuple(e for e in _recent_events() if e.game_date == day.isoformat())
+
+    return build_board(
+        api=api,  # type: ignore[arg-type]
+        savant=_FakeSavant(),  # type: ignore[arg-type]
+        slate_date=SLATE_DATE,
+        as_of=AS_OF,
+        config=CONFIG,
+        fetch_day_events=fetch_day,
+        temperature_for=lambda venue: Decimal("78"),
+        park_factors=_park_factors(),
+        humidity_for=humidity,  # type: ignore[arg-type]
+    )
+
+
+def test_humidity_reaches_an_open_air_game_card_only() -> None:
+    """D-111: humidity rides the wind rule — an open-air venue's reading
+    reaches the card; a roofed venue carries no reading that never applied."""
+    board = _build_with_humidity(_OpenAirApi(), lambda venue: Decimal("42"))
+    assert not isinstance(board, FetchFailure)
+    assert board.games[0].relative_humidity_percent == Decimal("42")
+    roofed = _build_with_humidity(_FakeApi(), lambda venue: Decimal("42"))
+    assert not isinstance(roofed, FetchFailure)
+    assert roofed.games[0].relative_humidity_percent is None
 
 
 def test_the_mix_reach_never_stretches_the_form_fallback_window() -> None:
