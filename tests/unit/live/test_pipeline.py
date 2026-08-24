@@ -1103,15 +1103,13 @@ def _pitcher_statcast_row() -> StatcastPitcherRow:
         batted_ball_events=100,
         avg_launch_angle=Decimal("12.9"),
         barrel_count=8,
-        air_balls=44,
-        ground_balls=56,
     )
 
 
 def test_the_pitcher_card_carries_the_d111_season_reads() -> None:
     """D-111: wOBA/xwOBA and ISO/xISO read the expected board against (both
     sides of each pair share its denominator); barrel rate, launch angle,
-    and air share read the Statcast pitcher board; HR/9 reads the season
+    launch angle read the Statcast pitcher board; HR/9 reads the season
     line's own notation — 20 homers over "150.1" (150 and a third) innings."""
     api = _FakeApi(
         pitching={
@@ -1145,7 +1143,6 @@ def test_the_pitcher_card_carries_the_d111_season_reads() -> None:
     assert reads.expected_iso == Decimal("0.180")
     assert reads.plate_appearances == 620
     assert reads.barrel_share == Decimal("0.08")
-    assert reads.air_ball_share == Decimal("0.44")
     assert reads.avg_launch_angle == Decimal("12.9")
     assert reads.batted_ball_events == 100
     assert reads.home_runs == 20
@@ -1205,7 +1202,7 @@ def test_the_d111_pitcher_board_failures_degrade_to_named_absences() -> None:
     assert reads is not None
     assert reads.woba is None and reads.expected_woba is None
     assert reads.iso is None and reads.expected_iso is None
-    assert reads.barrel_share is None and reads.air_ball_share is None
+    assert reads.barrel_share is None
     assert reads.avg_launch_angle is None
     assert reads.home_runs == 0  # the season line still answers
     assert reads.home_run_per_nine == Decimal(0)  # zero homers allowed is a real zero

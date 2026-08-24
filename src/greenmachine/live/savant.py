@@ -50,9 +50,12 @@ _EXPECTED_PITCHER_STATS_URL = (
     "?type=pitcher&year={year}&min=0&csv=true"
 )
 # D-111: the season Statcast board against pitchers. Verified live 2026-08:
-# columns player_id, attempts, avg_hit_angle, barrels, fbld, gb (among
-# others) — fbld is fly balls plus line drives (the air balls), gb the
-# grounders, attempts the batted balls against.
+# columns player_id, attempts, avg_hit_angle, barrels (among others) —
+# attempts the batted balls against, avg_hit_angle the average launch angle
+# against. The fbld/gb columns on this board are FB/LD and GB exit
+# velocities in mph, NOT air/ground counts — this board publishes no
+# air-ball split against, so the season air share stays a named absence
+# (the L30 events carry the real bb_type split).
 _STATCAST_PITCHERS_URL = (
     "https://baseballsavant.mlb.com/leaderboard/statcast"
     "?type=pitcher&year={year}&min={minimum}&csv=true"
@@ -124,16 +127,15 @@ class ExpectedStatsRow:
 @dataclass(frozen=True)
 class StatcastPitcherRow:
     """The season Statcast board against one pitcher (D-111): batted balls,
-    barrels, and average launch angle against, plus the air/ground split
-    behind the ground-ball profile. Every column is required — an unknown
-    column is a clean FetchFailure, never a wrong number."""
+    barrels, and average launch angle against. Every column is required —
+    an unknown column is a clean FetchFailure, never a wrong number. The
+    board's fbld/gb columns are exit velocities, not counts, so no
+    air/ground split is read here."""
 
     player_id: int
     batted_ball_events: int
     avg_launch_angle: Decimal
     barrel_count: int
-    air_balls: int
-    ground_balls: int
 
 
 @dataclass(frozen=True)
@@ -311,6 +313,11 @@ def _parse_rows(
             continue
     if rows and not parsed:
         raise PayloadMalformedError(f"{context}: no row parsed")
+    if len(parsed) < len(rows) / 2:
+        # Losing isolated tiny-sample rows is honest; losing half the board
+        # means the payload changed shape and every miss after this would be
+        # a silent absence — fail the board instead (D-111's live lesson).
+        raise PayloadMalformedError(f"{context}: only {len(parsed)} of {len(rows)} rows parsed")
     return parsed
 
 
@@ -431,8 +438,8 @@ class BaseballSavant:
         self, *, year: int, minimum: int = 0
     ) -> dict[int, StatcastPitcherRow] | FetchFailure:
         """Season Statcast quality-of-contact board against pitchers (D-111),
-        keyed by player id. Barrels, average launch angle, and the
-        air/ground split against; every column required."""
+        keyed by player id. Batted balls, barrels, and average launch angle
+        against; every column required."""
         context = "statcast-pitchers"
 
         def parse(row: dict[str, str]) -> StatcastPitcherRow:
@@ -441,8 +448,6 @@ class BaseballSavant:
                 batted_ball_events=_int(row.get("attempts"), context),
                 avg_launch_angle=_decimal(row.get("avg_hit_angle"), context),
                 barrel_count=_int(row.get("barrels"), context),
-                air_balls=_int(row.get("fbld"), context),
-                ground_balls=_int(row.get("gb"), context),
             )
 
         parsed = self._board(

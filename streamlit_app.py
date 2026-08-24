@@ -1464,7 +1464,10 @@ def _arms_season_metrics(
         ),
         "ISO": _avg_text(reads.iso),
         "xISO": _avg_text(reads.expected_iso),
-        "Air %": _pct_text(reads.air_ball_share),
+        # The season Statcast board against publishes no air-ball split
+        # (its fbld/gb columns are exit velocities) — the season air share
+        # names its absence; the L30 events carry the real split.
+        "Air %": "—",
     }
     styles = {column: _REASON_CSS for column, text in texts.items() if text == "—"}
     if (
@@ -1542,8 +1545,9 @@ def _render_arms(board: SlateBoard) -> None:
         "above xwOBA. Amber: contact reads below the ratified 15-BBE floor — "
         "value shown, advisory attached (D-068). PA and BBE carry every "
         "rate's sample (D-014). Air % is the fly-ball-plus-line-drive share "
-        "of the board's batted balls against — the ground-ball profile's "
-        "air mirror."
+        "of the window's batted balls against — the ground-ball profile's "
+        "air mirror; the season board publishes no air split, so the "
+        "season scope names the absence and Air % reads L30 only."
     )
     text_rows: list[dict[str, str]] = []
     style_rows: list[dict[str, str]] = []

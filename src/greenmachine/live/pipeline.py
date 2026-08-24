@@ -335,10 +335,11 @@ class PitcherSeasonReads:
     tab's starter metrics — each off its named source, None where that
     source has no row for him, never an invented figure. wOBA/xwOBA and
     ISO/xISO read the expected-statistics board against, both sides of each
-    pair off the one board so the denominators match; barrel rate, launch
-    angle, and the air-ball share read the Statcast pitcher board; HR/9
-    reads the statsapi season line. Computed here, pipeline-side — the view
-    only formats (§GMF-008)."""
+    pair off the one board so the denominators match; barrel rate and
+    launch angle read the Statcast pitcher board (which publishes no
+    air-ball split against — season air share stays a named absence; the
+    L30 events carry the real split); HR/9 reads the statsapi season line.
+    Computed here, pipeline-side — the view only formats (§GMF-008)."""
 
     plate_appearances: int  # the expected board's PA sample (0 without a row)
     woba: Decimal | None
@@ -348,7 +349,6 @@ class PitcherSeasonReads:
     batted_ball_events: int  # the Statcast pitcher board's BBE sample (0 without)
     barrel_share: Decimal | None
     avg_launch_angle: Decimal | None
-    air_ball_share: Decimal | None
     home_runs: int | None  # the season line's HR count (None without a line)
     home_run_per_nine: Decimal | None
     innings_text: str  # the line's baseball-notation innings ("" without one)
@@ -414,13 +414,11 @@ def _pitcher_season_reads(
     batted_ball_events = 0
     barrel_share: Decimal | None = None
     avg_launch_angle: Decimal | None = None
-    air_ball_share: Decimal | None = None
     if statcast_row is not None:
         batted_ball_events = statcast_row.batted_ball_events
         avg_launch_angle = statcast_row.avg_launch_angle
         if batted_ball_events:
             barrel_share = Decimal(statcast_row.barrel_count) / Decimal(batted_ball_events)
-            air_ball_share = Decimal(statcast_row.air_balls) / Decimal(batted_ball_events)
     home_runs: int | None = None
     home_run_per_nine: Decimal | None = None
     innings_text = ""
@@ -439,7 +437,6 @@ def _pitcher_season_reads(
         batted_ball_events=batted_ball_events,
         barrel_share=barrel_share,
         avg_launch_angle=avg_launch_angle,
-        air_ball_share=air_ball_share,
         home_runs=home_runs,
         home_run_per_nine=home_run_per_nine,
         innings_text=innings_text,

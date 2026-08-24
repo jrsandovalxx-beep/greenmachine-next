@@ -831,7 +831,6 @@ def _sp_reads() -> PitcherSeasonReads:
         batted_ball_events=450,
         barrel_share=Decimal("0.08"),
         avg_launch_angle=Decimal("12.9"),
-        air_ball_share=Decimal("0.44"),
         home_runs=26,
         home_run_per_nine=Decimal("1.50"),
         innings_text="150.1",
@@ -932,14 +931,18 @@ def test_sp_recent_row_at_the_floor_carries_no_advisory() -> None:
 
 def test_arms_metrics_mirror_the_card_rules_on_both_scopes() -> None:
     """D-111: the Arms tab carries the same five metrics plus the air
-    mirror, with the samples as their own columns; the L30 scope names
-    HR/9 and xISO absent exactly like the cards."""
+    mirror, with the samples as their own columns; the season scope names
+    the air share absent (the board's fbld/gb columns are exit velocities,
+    not a split), and the L30 scope names HR/9 and xISO absent exactly
+    like the cards."""
     import streamlit_app
 
     texts, styles = streamlit_app._arms_season_metrics(_sp_reads())
     assert texts["PA"] == "620"
     assert texts["BBE"] == "450"
-    assert texts["Air %"] == "44.0%"
+    # The season board publishes no air split — a named absence, L30 only.
+    assert texts["Air %"] == "—"
+    assert styles["Air %"] == streamlit_app._REASON_CSS
     assert styles["wOBA"] == streamlit_app._HIGHLIGHT
     assert styles["HR/9"] == streamlit_app._HIGHLIGHT
     texts, styles = streamlit_app._arms_recent_metrics(_sp_line())

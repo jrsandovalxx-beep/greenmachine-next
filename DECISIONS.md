@@ -2330,3 +2330,17 @@ fly-ball-plus-line-drive share against, the ground-ball profile's air
 mirror) with the same L30 toggle, the same green and amber rules, and
 every firing line printed in the surface caption (the D-079 pattern).
 Net new steady-state cost: +2 board-cached calls per build.
+
+**(Live-verify correction, same PR — caught before merge.)** The
+pre-merge live board exposed two faults the unit gate could not: the
+Statcast pitcher board's fbld/gb columns are FB/LD and GB exit
+velocities in mph, NOT air/ground counts, and the misread quietly
+dropped 809 of 818 rows (decimal EV strings failing the int parse), so
+every starter's season reads fell back to an invented-empty board —
+0 BBE beside real wOBA figures — with no diagnostic. The air/ground
+fields are removed: no season air-ball split against exists, so the
+season Air % names its absence and the share reads the L30 events,
+whose bb_type split is real. And the board parser now FAILS any board
+that cannot parse at least half its rows ("only N of M rows parsed"),
+so a changed payload can never shrink a board into silent absences
+again.

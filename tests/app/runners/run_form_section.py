@@ -162,8 +162,6 @@ class _RunnerSavant:
                 batted_ball_events=450,
                 avg_launch_angle=Decimal("12.9"),
                 barrel_count=36,
-                air_balls=198,
-                ground_balls=252,
             )
         }
 

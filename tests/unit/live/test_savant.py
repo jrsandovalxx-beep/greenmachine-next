@@ -34,13 +34,13 @@ _PITCHER_EXPECTED_CSV = (
 )
 
 # D-111: the Statcast board against pitchers (verified live 2026-08):
-# attempts is the batted balls against, fbld the air balls (fly balls plus
-# line drives), gb the grounders.
+# attempts is the batted balls against; the fbld/gb columns are FB/LD and
+# GB exit velocities in mph, not air/ground counts.
 _STATCAST_PITCHERS_CSV = (
     "player_id,attempts,avg_hit_angle,anglesweetspotpercent,max_hit_speed,avg_hit_speed,"
     "ev50,fbld,gb,max_distance,avg_distance,avg_hr_distance,ev95plus,ev95percent,barrels,"
     "brl_percent,brl_pa\n"
-    "201,100,12.9,32,111.3,88.4,77.8,44,56,430,157,395,35,35.2,8,8.0,5.2\n"
+    "201,100,12.9,32,111.3,88.4,77.8,92.1,86.1,430,157,395,35,35.2,8,8.0,5.2\n"
 )
 
 _SPRINT_CSV = (
@@ -152,15 +152,27 @@ def test_pitcher_expected_board_fails_cleanly_on_an_unknown_column() -> None:
 
 
 def test_statcast_pitcher_board_parses_the_against_record() -> None:
-    """D-111: barrels, launch angle, and the air/ground split against."""
+    """D-111: batted balls, barrels, and launch angle against — the board
+    publishes no air/ground split (fbld/gb are exit velocities)."""
     rows = BaseballSavant(_FakeTransport(_STATCAST_PITCHERS_CSV)).fetch_statcast_pitchers(year=2026)
     assert not isinstance(rows, FetchFailure)
     row = rows[201]
     assert row.batted_ball_events == 100
     assert row.avg_launch_angle == Decimal("12.9")
     assert row.barrel_count == 8
-    assert row.air_balls == 44
-    assert row.ground_balls == 56
+
+
+def test_a_board_that_loses_half_its_rows_fails_instead_of_shrinking_silently() -> None:
+    """D-111 live lesson: when fbld/gb were misread as counts, 809 of 818
+    rows dropped silently and every starter read an invented empty board.
+    A board that cannot parse half its rows has changed shape — fail it."""
+    data_row = _STATCAST_PITCHERS_CSV.split("\n", 1)[1]
+    bad_row = data_row.replace("201,", "202,").replace("100,", "not-a-number,", 1)
+    worse_row = data_row.replace("201,", "203,").replace("100,", "", 1)
+    body = _STATCAST_PITCHERS_CSV + bad_row + worse_row
+    rows = BaseballSavant(_FakeTransport(body)).fetch_statcast_pitchers(year=2026)
+    assert isinstance(rows, FetchFailure)
+    assert "only 1 of 3 rows parsed" in rows.reason
 
 
 def test_sprint_speed_board_parses() -> None:
