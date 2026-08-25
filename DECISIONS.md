@@ -2894,3 +2894,68 @@ left" at Angel Stadium, roofed venues neutral), the date-stamped $
 renders with its hover, and More opens the batter detail. Full gate
 green on both Pythons (3417 passed, 1 skipped), consistency check
 clean, all four showcase runners clean.
+
+## D-127 - every metric cell wears a researched color: six bands, league baselines, hover definitions on every table
+
+**Decided:** 2026-08-25 · **Status:** shipped (staging)
+
+The change list's headline items 1-3 (uploaded 2026-08-25): "color-grade
+all cells with thresholds — dark red = very poor for HRs, dark green =
+elite," at least three shades of each "via bands/buckets," "research
+baselines where thresholds are missing," and "hover every column title
+for a definition."
+
+**The scale.** Six opaque fills — three greens (dark at elite), three
+reds (dark at very poor) — with the unfilled theme cell as the neutral
+middle. The two extremes ARE the console's existing highlight and veto
+colors, so a researched "elite" bucket and a ratified green read speak
+one color language. Precedence is absolute: a named absence, the amber
+INSUFFICIENT advisory and the ratified green all outrank a bucket.
+**Disclosure:** the bucket edges are researched baselines, NOT v2.2
+firing lines; where an edge coincides with a ratified line the column's
+hover says so, and every edge prints on its surface (D-079) — the
+captions build from the same registry the cells grade with, so a moved
+edge cannot drift from its printed line.
+
+**The researched baselines (2025 MLB, sources on file).** Barrel 8.6%
+of batted balls, whiff 25.3% of swings, ground balls 42.4%, fly-plus-
+line 50.5%, pull/straight/oppo 39.2/36.4/24.5 (Baseball Savant league
+page); wOBA .313, ISO .158, AVG .245, SLG .404 (StatMuse 2025 season);
+average EV ≈ 88.8 mph and bat speed 71.5 mph (ESPN/Savant reporting);
+hard-hit ≈ 40% (the third-worst TEAM sat at 38.4%; 2026 leaders 58%+);
+HR/9 ≈ 1.16 derived from 5,650 HR over 4,860 team-games (StatMuse
+totals); pull-air ≈ 31% of measurable air balls, derived from MLB.com's
+17.8%-of-batted-balls pulled-in-the-air (2024) over Savant's 57.6% air
+share, with the elite edge past the ratified 40% spray line (MLB.com's
+top-10 territory ≈ 25% of BBE ≈ 43% of air balls); league average LA
+≈ 12° (Rapsodo 2023). Ratified lines anchor edges where they exist:
+EV 91 (power profile) and whiff ≤ 20 (unlock) on the batter scale;
+HR/9 1.50/0.80, LA 18/8, GB% <40/≥50/≥55 on the vulnerability scale;
+park factor 115/110/90/85 IS the Conditions factor scale; and the six
+v2.2 temperature awards wear the six colors directly — the one fully
+ratified color scale on the board.
+
+**Judgment calls, disclosed.** Oppo Air % carries no quality scale — a
+fit read against the park, not a grade; its read lives in Pull Air %
+(the two shares are mirrors). The counting columns (AB, H, Barrels, HR,
+Robbed HR, the factor samples) are volume, not quality, and stay
+neutral. LA keeps its "an average carries no firing line" posture — it
+wears a researched bucket, never a star. Pitcher cells grade
+VULNERABILITY (greener = more forgiving), matching the Arms tab's
+existing green-on-gas semantics. Form-table and arsenal colors ride
+D-129's popup package on the same registry.
+
+**Hover definitions (item 2).** The Matchups grids' hover pattern now
+covers the Arms tab, the starter header cards and the Conditions table;
+every graded metric's hover carries its definition plus its six edges.
+
+Live-verified on the 2026-08-24 slate: Mullins's L30 row reads dark
+green across nine cells; Feltner's season line reads vulnerable green
+across wOBA/xwOBA/HR/9/BRL%/ISO/xISO; Rasmussen's wOBA .255 sits dark
+red with his LA 12.6 neutral; the SP side rows show amber INSUFFICIENT
+outranking every band; the Conditions tab grades both factors per hand
+(Petco RHB 114 strong green, Oracle LHB 73 very-poor red) and wears the
+temp-award colors (65-74 light red, 75-84 light green, 45-64 red), with
+samples and "not covered"/"source unavailable" cells neutral. Full gate
+green on both Pythons (3422 passed, 1 skipped), consistency check
+clean, all four showcase runners clean.
