@@ -914,7 +914,21 @@ def test_grid_line_cells_render_rates_and_named_absences() -> None:
     assert texts["Pull Air % ★"] == "40.0%"
     assert texts["Oppo Air % ★"] == "25.0%"
     assert texts["xwOBA"] == ".450"
-    assert styles == {}
+    # D-127 (PO): the researched bands grade every valued rate cell —
+    # three greens to dark at elite, three reds to dark at very poor. The
+    # counting columns and the Oppo Air % fit read stay neutral.
+    assert styles == {
+        "EV": streamlit_app._BAND_G3_CSS,  # 95.5 ≥ 91
+        "Barrel/PA %": streamlit_app._BAND_G3_CSS,  # 16.7% ≥ 9%
+        "Hard-Hit %": streamlit_app._BAND_G2_CSS,  # 50% ≥ 46%
+        "AVG": streamlit_app._BAND_G3_CSS,  # .400 ≥ .285
+        "SLG": streamlit_app._BAND_G3_CSS,  # 1.000 ≥ .500
+        "ISO": streamlit_app._BAND_G3_CSS,  # .600 ≥ .240
+        "Pull Air % ★": streamlit_app._BAND_G2_CSS,  # 40% ≥ 38%
+        "xwOBA": streamlit_app._BAND_G3_CSS,  # .450 ≥ .370
+        "Swing-Str %": streamlit_app._BAND_G3_CSS,  # 12% ≤ 18%
+    }
+    assert "Oppo Air % ★" not in styles
 
     texts, styles = streamlit_app._grid_line_cells(
         _grid_line(robbed_hr_count=None, pull_air_share=None, oppo_air_share=None)
@@ -960,14 +974,24 @@ def test_sp_season_row_marks_the_digest_reads_green() -> None:
     assert row["xISO"] == ".180"
     assert styles["wOBA"] == streamlit_app._HIGHLIGHT
     assert styles["HR/9"] == streamlit_app._HIGHLIGHT
-    assert "ISO" not in styles  # no invented bands — plain cells
-    # On the lines' other side: no green.
+    # D-127 (PO): the researched vulnerability bands grade the rest —
+    # the "no invented bands" posture is superseded by the PO's
+    # color-graded-cells directive, with every edge printed on the
+    # surface (D-079). The ratified green reads keep precedence.
+    assert styles["xwOBA"] == streamlit_app._BAND_R1_CSS  # .297 < .300
+    assert styles["BRL%"] == streamlit_app._BAND_G1_CSS  # 8.0% ≥ 8%
+    assert styles["ISO"] == streamlit_app._BAND_G2_CSS  # .170 ≥ .170
+    assert styles["xISO"] == streamlit_app._BAND_G2_CSS  # .180 ≥ .170
+    assert "LA" not in styles  # 12.9° — the neutral middle
+    # On the lines' other side: no ratified green — the researched bands
+    # still grade what the cells are worth (wOBA .290 lands light red,
+    # HR/9 1.39 strong green on the vulnerability scale).
     flipped = dataclasses.replace(
         _sp_reads(), woba=Decimal("0.290"), home_run_per_nine=Decimal("1.39")
     )
     _, styles = streamlit_app._sp_season_row(flipped)
-    assert "wOBA" not in styles
-    assert "HR/9" not in styles
+    assert styles["wOBA"] == streamlit_app._BAND_R1_CSS
+    assert styles["HR/9"] == streamlit_app._BAND_G2_CSS
 
 
 def test_sp_season_row_names_absences_and_the_contact_floor() -> None:
@@ -1150,7 +1174,9 @@ def test_grid_line_cells_carry_no_gap_columns_on_either_view() -> None:
     columns = list(texts)
     assert columns.index("LA") == columns.index("EV ★") + 1
     assert texts["LA"] == "16.4°"
-    assert "LA" not in styles
+    # D-127: an average carries no firing line, but it still wears its
+    # researched bucket — 16.4° lands the strong band (≥ 14.5).
+    assert styles["LA"] == streamlit_app._BAND_G2_CSS
     assert "ISO" in texts and "xwOBA" in texts
     for gone in ("xISO-ISO", "xISO-ISO ★", "xwOBA-wOBA", "xwOBA-wOBA ★"):
         assert gone not in texts
@@ -1167,6 +1193,111 @@ def test_grid_line_cells_carry_no_gap_columns_on_either_view() -> None:
     texts, styles = streamlit_app._grid_line_cells(None, include_gaps=True)
     assert texts["AB"] == "no data available"
     assert styles["Oppo Air %"] == streamlit_app._REASON_CSS
+
+
+def test_band_css_walks_all_six_bands_in_both_directions() -> None:
+    """D-127 (PO): three greens to dark at elite, three reds to dark at
+    very poor, the neutral middle unfilled — and a lower-is-better metric
+    mirrors the walk."""
+    import streamlit_app
+
+    spec = streamlit_app._GRID_BANDS["EV"]  # 91/90/89 over 88/87/85.5
+    assert streamlit_app._band_css(spec, 91.0) == streamlit_app._BAND_G3_CSS
+    assert streamlit_app._band_css(spec, 90.4) == streamlit_app._BAND_G2_CSS
+    assert streamlit_app._band_css(spec, 89.0) == streamlit_app._BAND_G1_CSS
+    assert streamlit_app._band_css(spec, 88.4) is None  # the neutral middle
+    assert streamlit_app._band_css(spec, 87.9) == streamlit_app._BAND_R1_CSS
+    assert streamlit_app._band_css(spec, 86.0) == streamlit_app._BAND_R2_CSS
+    assert streamlit_app._band_css(spec, 84.0) == streamlit_app._BAND_R3_CSS
+
+    low = streamlit_app._GRID_BANDS["Swing-Str %"]  # 18/21/24 over 27/30/33
+    assert streamlit_app._band_css(low, 0.17) == streamlit_app._BAND_G3_CSS
+    assert streamlit_app._band_css(low, 0.255) is None
+    assert streamlit_app._band_css(low, 0.34) == streamlit_app._BAND_R3_CSS
+    # The extremes ARE the console's highlight/veto pair — one language.
+    assert streamlit_app._BAND_G3_CSS == streamlit_app._HIGHLIGHT
+    assert streamlit_app._BAND_R3_CSS == streamlit_app._VETO_CSS
+
+
+def test_bands_never_outrank_an_absence_an_advisory_or_the_ratified_green() -> None:
+    """D-127's precedence: a named absence, the amber INSUFFICIENT
+    advisory and the ratified green all outrank a researched bucket."""
+    import streamlit_app
+
+    # A None rate keeps its styled dash, never a bucket.
+    texts, styles = streamlit_app._grid_line_cells(_grid_line(exit_velocity=None))
+    assert texts["EV"] == "—"
+    assert styles["EV"] == streamlit_app._REASON_CSS
+    # A thin contact sample keeps the amber advisory over the bucket.
+    thin = dataclasses.replace(_sp_reads(), batted_ball_events=12)
+    _, styles = streamlit_app._sp_season_row(thin)
+    assert styles["BRL%"] == streamlit_app._INSUFFICIENT_CSS
+    assert styles["LA"] == streamlit_app._INSUFFICIENT_CSS
+    # The ratified green reads keep their own fill (which is also the
+    # elite band's — one color language), never a mid-band override.
+    gas = dataclasses.replace(_sp_reads(), home_run_per_nine=Decimal("1.75"))
+    _, styles = streamlit_app._sp_season_row(gas)
+    assert styles["HR/9"] == streamlit_app._HIGHLIGHT
+
+
+def test_band_registries_cover_every_graded_table() -> None:
+    """D-127's "all tables" guard: the grid registry grades every rate
+    column the grid carries (Oppo Air % deliberately excepted — a fit
+    read), and the pitcher registry grades every Arms metric column."""
+    import streamlit_app
+
+    texts, _ = streamlit_app._grid_line_cells(_grid_line(), include_gaps=True)
+    rate_columns = {column.removesuffix(" ★") for column in texts} - {
+        "AB",
+        "H",
+        "Barrels",
+        "HR",
+        "Robbed HR",
+        "Oppo Air %",  # the fit read — no quality scale, by decision
+    }
+    assert rate_columns == set(streamlit_app._GRID_BANDS)
+    season_columns = set(streamlit_app._ARMS_METRIC_COLUMNS) - {"PA", "BBE", "HR", "Air %"}
+    assert season_columns <= set(streamlit_app._PITCHER_BANDS)
+    recent_columns = set(streamlit_app._ARMS_RECENT_METRIC_COLUMNS) - {
+        "PA",
+        "BBE",
+        "HR",
+        "HR/9",  # a season read — the L30 cell names its absence
+        "xISO",  # same
+    }
+    assert recent_columns <= set(streamlit_app._PITCHER_BANDS)
+
+
+def test_every_temperature_award_wears_a_band_color() -> None:
+    """D-127 on the Conditions tab: the six ratified v2.2 temperature
+    awards ARE the six color bands — every award mapped, factor edges at
+    the ratified park lines."""
+    import streamlit_app
+
+    raws = {raw for _, _, raw in streamlit_app._TEMP_BANDS}
+    assert set(streamlit_app._TEMP_AWARD_CSS) == raws
+    factor = streamlit_app._FACTOR_BAND
+    assert streamlit_app._band_css(factor, 115.0) == streamlit_app._BAND_G3_CSS
+    assert streamlit_app._band_css(factor, 110.0) == streamlit_app._BAND_G2_CSS
+    assert streamlit_app._band_css(factor, 89.0) == streamlit_app._BAND_R2_CSS
+    assert streamlit_app._band_css(factor, 84.0) == streamlit_app._BAND_R3_CSS
+    assert streamlit_app._band_css(factor, 100.0) is None
+
+
+def test_band_edges_print_on_their_surfaces() -> None:
+    """D-079 for D-127: every bucket edge prints on its surface — the
+    caption fragments build from the same registry the cells grade with,
+    and every graded column's hover carries its scale."""
+    import streamlit_app
+
+    assert "EV — elite ≥ 91" in streamlit_app._GRID_SCALE_TEXT
+    assert "very poor < 85.5" in streamlit_app._GRID_SCALE_TEXT
+    assert "HR/9 — elite ≥ 1.5" in streamlit_app._PITCHER_SCALE_TEXT
+    assert "elite ≤ 18%" in streamlit_app._GRID_SCALE_TEXT  # the low-direction wording
+    assert "elite ≥ 91" in streamlit_app._MATCHUPS_HELP["EV"]
+    assert "elite ≥ 1.5" in streamlit_app._ARMS_HELP["HR/9"]
+    assert "No cell colors" in streamlit_app._MATCHUPS_HELP["Oppo Air %"]
+    assert "115" in streamlit_app._CONDITIONS_HELP["HR factor (LHB)"]
 
 
 def test_column_help_renames_with_the_grid_stars_and_drops_absent_columns() -> None:
@@ -1302,7 +1433,9 @@ def test_grid_headers_carry_their_hover_definitions(monkeypatch: pytest.MonkeyPa
     """D-124: every batter-grid header carries its one-line definition as
     column help — starred under the view's own rename, absent columns
     dropped. The L30 view stars the spray shares; the season view stars EV
-    and the gaps and adds LA."""
+    and adds LA. D-127: the Arms, starter-card and Conditions tables carry
+    their own hover definitions now, so the batter-grid assertions scope
+    to the grids whose frame has a Batter column."""
     import json
 
     import streamlit as st
@@ -1316,25 +1449,30 @@ def test_grid_headers_carry_their_hover_definitions(monkeypatch: pytest.MonkeyPa
     at.run()
     assert not at.exception, [str(e.value) for e in at.exception]
 
-    def helps() -> set[str]:
+    def helps(marker: str) -> set[str]:
         names: set[str] = set()
         for element in at.dataframe:
+            if marker not in element.value.columns:
+                continue
             for name, config in json.loads(element.proto.columns).items():
                 if config.get("help"):
                     names.add(name)
         return names
 
-    l30 = helps()
+    l30 = helps("Batter")
     assert "Pull Air % ★" in l30
     assert "Oppo Air % ★" in l30
     assert "LA" not in l30  # a season-view column — no entry on the L30 grids
     assert "EV ★" not in l30
+    # D-127: the starter cards and the Conditions table carry their hovers.
+    assert "BRL%" in helps("Scope")
+    assert "Temp band" in helps("Venue")
 
     toggles = [toggle for toggle in at.toggle if toggle.key == "matchups_season_view"]
     toggles[0].set_value(True)
     at.run()
     assert not at.exception, [str(e.value) for e in at.exception]
-    season = helps()
+    season = helps("Batter")
     assert {"LA", "EV ★"} <= season
     # D-125: the gap columns left the grid, so their hover entries went too.
     assert "xISO-ISO ★" not in season

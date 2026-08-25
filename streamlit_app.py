@@ -641,6 +641,180 @@ _INSUFFICIENT_CSS = "background-color: #7a5c14; color: #ffe9a8"
 # binary/high-K cautions. Green says good for the HR, red says bad for it.
 _VETO_CSS = "background-color: #a41616; color: #ffe9e9"
 
+# ---------------------------------------------------------------------
+# D-127 (PO): researched cell-grading bands on every metric table
+# ---------------------------------------------------------------------
+
+# Six opaque band fills — three green, three red. The extremes ARE the
+# console's existing highlight/veto pair, so a researched "elite" cell and
+# a ratified green read speak one color language; the unfilled theme cell
+# is the neutral middle. Opaque like the pair — the data grid composites
+# alpha backgrounds over white, which read as washed-out blocks.
+_BAND_G3_CSS = _HIGHLIGHT  # elite — dark green (PO: dark green = elite)
+_BAND_G2_CSS = "background-color: #35590f; color: #e2f5c8"  # strong
+_BAND_G1_CSS = "background-color: #2a4418; color: #cfe4b8"  # above average
+_BAND_R1_CSS = "background-color: #4d2620; color: #e8c8c0"  # below average
+_BAND_R2_CSS = "background-color: #77201c; color: #ffd9d4"  # poor
+_BAND_R3_CSS = _VETO_CSS  # very poor — dark red (PO: dark red = very poor)
+
+
+class _BandSpec(NamedTuple):
+    """One metric's six researched bucket edges in its raw units.
+
+    ``direction == "high"``: bigger is better for the home run — a value at
+    or above g3/g2/g1 lands the elite/strong/above-average green, a value
+    under r1/r2/r3 the below-average/poor/very-poor red, and anything
+    between r1 and g1 stays neutral. ``"low"`` mirrors it (whiff, GB%).
+    ``kind`` drives the caption formatting: "pct" prints the fraction
+    edges as percents, "avg" as three-digit rates, "num" plain.
+
+    The edges are researched baselines — 2025 league figures, with the
+    ratified v2.2 line as the edge where one exists — NOT firing lines.
+    Every edge prints on its surface (D-079) and the per-metric
+    derivations live in DECISIONS D-127.
+    """
+
+    direction: str
+    g3: float
+    g2: float
+    g1: float
+    r1: float
+    r2: float
+    r3: float
+    kind: str = "num"
+
+
+def _band_css(spec: _BandSpec, value: float) -> str | None:
+    """The band fill for one value — None in the neutral middle."""
+    if spec.direction == "high":
+        if value >= spec.g3:
+            return _BAND_G3_CSS
+        if value >= spec.g2:
+            return _BAND_G2_CSS
+        if value >= spec.g1:
+            return _BAND_G1_CSS
+        if value < spec.r3:
+            return _BAND_R3_CSS
+        if value < spec.r2:
+            return _BAND_R2_CSS
+        if value < spec.r1:
+            return _BAND_R1_CSS
+        return None
+    if value <= spec.g3:
+        return _BAND_G3_CSS
+    if value <= spec.g2:
+        return _BAND_G2_CSS
+    if value <= spec.g1:
+        return _BAND_G1_CSS
+    if value > spec.r3:
+        return _BAND_R3_CSS
+    if value > spec.r2:
+        return _BAND_R2_CSS
+    if value > spec.r1:
+        return _BAND_R1_CSS
+    return None
+
+
+# The batter-grid scale (Matchups, both views). Derivations (2025 league
+# research, DECISIONS D-127): league average EV 88.8 mph, the v2.2
+# power-profile line at 91 as the elite edge; barrels ≈ 5.8% of plate
+# appearances league-wide (8.6% of batted balls over ~0.75 BBE per PA);
+# hard-hit ≈ 40% league; AVG .245 / SLG .404 / ISO .158 / wOBA .313 with
+# xwOBA tracking it; pull-air ≈ 31% of measurable air balls (17.8% of
+# batted balls pulled in the air over a 57.6% air share) with the elite
+# edge past the ratified 40% spray line; whiff 25.3% of swings with the
+# ratified ≤ 20% unlock anchor inside the strong band. Oppo Air % carries
+# no quality scale — a fit read against the park, not a grade — and the
+# counting columns are volume, not quality: both stay neutral, and the
+# caption says so.
+_GRID_BANDS: dict[str, _BandSpec] = {
+    "EV": _BandSpec("high", 91, 90, 89, 88, 87, 85.5),
+    "LA": _BandSpec("high", 17, 14.5, 12.5, 10.5, 8.5, 6),
+    "Barrel/PA %": _BandSpec("high", 0.09, 0.07, 0.058, 0.045, 0.032, 0.02, "pct"),
+    "Hard-Hit %": _BandSpec("high", 0.52, 0.46, 0.42, 0.36, 0.32, 0.28, "pct"),
+    "AVG": _BandSpec("high", 0.285, 0.265, 0.252, 0.235, 0.220, 0.205, "avg"),
+    "SLG": _BandSpec("high", 0.500, 0.450, 0.420, 0.380, 0.350, 0.310, "avg"),
+    "ISO": _BandSpec("high", 0.240, 0.200, 0.170, 0.140, 0.115, 0.090, "avg"),
+    "Pull Air %": _BandSpec("high", 0.43, 0.38, 0.33, 0.27, 0.22, 0.17, "pct"),
+    "xwOBA": _BandSpec("high", 0.370, 0.345, 0.325, 0.300, 0.280, 0.260, "avg"),
+    "Swing-Str %": _BandSpec("low", 0.18, 0.21, 0.24, 0.27, 0.30, 0.33, "pct"),
+}
+
+# The pitcher scale (the Arms tab and the starter header cards) — read as
+# vulnerability: the greener the cell, the more forgiving the arm. League
+# 2025: HR/9 ≈ 1.16 between the ratified gas (≥ 1.50, the elite edge) and
+# suppressor (≤ 0.80, inside the poor band) lines; barrels 8.6% of batted
+# balls; average LA allowed ≈ 12° between the ratified fly-vulnerable
+# (≥ 18°, the elite edge) and ground-ball (≤ 8°) lines; ISO .158; the air
+# share (fly balls plus line drives) 50.5%; the ground-ball share 42.4%
+# between the ratified < 40% gas ceiling and the ≥ 50% profile line
+# (extreme ≥ 55%, the very-poor edge).
+_PITCHER_BANDS: dict[str, _BandSpec] = {
+    "wOBA": _BandSpec("high", 0.350, 0.330, 0.320, 0.300, 0.285, 0.270, "avg"),
+    "xwOBA": _BandSpec("high", 0.350, 0.330, 0.320, 0.300, 0.285, 0.270, "avg"),
+    "HR/9": _BandSpec("high", 1.50, 1.30, 1.15, 1.00, 0.90, 0.70),
+    "BRL%": _BandSpec("high", 0.110, 0.095, 0.080, 0.070, 0.055, 0.040, "pct"),
+    "LA": _BandSpec("high", 18, 15, 13, 11, 9, 6),
+    "ISO": _BandSpec("high", 0.190, 0.170, 0.155, 0.140, 0.120, 0.100, "avg"),
+    "xISO": _BandSpec("high", 0.190, 0.170, 0.155, 0.140, 0.120, 0.100, "avg"),
+    "Air %": _BandSpec("high", 0.56, 0.52, 0.48, 0.44, 0.40, 0.35, "pct"),
+    "GB %": _BandSpec("low", 0.35, 0.39, 0.42, 0.46, 0.50, 0.55, "pct"),
+}
+
+# The Conditions scale: the hand-split HR factor between the ratified park
+# lines (boost ≥ 110, strong ≥ 115 — the strong and elite edges; wrong-side
+# ≤ 90, strong ≤ 85 — the poor and very-poor edges).
+_FACTOR_BAND = _BandSpec("high", 115, 110, 104, 96, 90, 85)
+
+# The six ratified temperature awards worn as the six bands — the one
+# v2.2-ratified color scale on the board (D-121's bands, D-127's colors).
+_TEMP_AWARD_CSS = {
+    "0": _BAND_R3_CSS,
+    "0.25": _BAND_R2_CSS,
+    "0.5": _BAND_R1_CSS,
+    "1": _BAND_G1_CSS,
+    "1.25": _BAND_G2_CSS,
+    "1.5": _BAND_G3_CSS,
+}
+
+
+def _band_scale_text(spec: _BandSpec) -> str:
+    """One metric's six edges as caption/hover text (D-079): 'elite ≥ 91 ·
+    strong ≥ 90 · above avg ≥ 89 · below avg < 88 · poor < 87 · very poor
+    < 85.5' — the inequality flips for a lower-is-better metric."""
+
+    def edge(value: float) -> str:
+        if spec.kind == "pct":
+            return f"{value * 100:g}%"
+        if spec.kind == "avg":
+            text = f"{value:.3f}"
+            return text[1:] if text.startswith("0") else text
+        return f"{value:g}"
+
+    green, red = ("≤", ">") if spec.direction == "low" else ("≥", "<")
+    return (
+        f"elite {green} {edge(spec.g3)} · strong {green} {edge(spec.g2)} · "
+        f"above avg {green} {edge(spec.g1)} · below avg {red} {edge(spec.r1)} · "
+        f"poor {red} {edge(spec.r2)} · very poor {red} {edge(spec.r3)}"
+    )
+
+
+def _apply_bands(
+    styles: dict[str, str],
+    bands: dict[str, _BandSpec],
+    values: dict[str, Decimal | None],
+) -> None:
+    """Fill the still-unstyled valued cells with their researched band
+    (D-127). Every existing style wins — a named absence, the amber
+    INSUFFICIENT advisory and the ratified green all outrank a bucket."""
+    for column, raw in values.items():
+        if raw is None or column in styles:
+            continue
+        css = _band_css(bands[column], float(raw))
+        if css is not None:
+            styles[column] = css
+
+
 # Neon-green money tag (D-094): a "$" beside a shortlist batter who homered
 # in his most recent game day on or before this slate. Text shadow gives the
 # neon glow; no background, so the cell keeps its theme fill.
@@ -2228,6 +2402,20 @@ def _arms_season_metrics(
         for column in ("BRL%", "LA"):
             if texts[column] != "—":
                 styles[column] = _INSUFFICIENT_CSS
+    # D-127 (PO): the researched vulnerability bands fill the rest.
+    _apply_bands(
+        styles,
+        _PITCHER_BANDS,
+        {
+            "wOBA": reads.woba,
+            "xwOBA": reads.expected_woba,
+            "HR/9": reads.home_run_per_nine,
+            "BRL%": reads.barrel_share,
+            "LA": reads.avg_launch_angle,
+            "ISO": reads.iso,
+            "xISO": reads.expected_iso,
+        },
+    )
     return texts, styles
 
 
@@ -2269,6 +2457,20 @@ def _arms_recent_metrics(
     # classified count, not the looser BBE sample.
     if 0 < line.classified_batted_balls < _MIN_BBE_CONTACT and texts["GB %"] != "—":
         styles["GB %"] = _INSUFFICIENT_CSS
+    # D-127 (PO): the researched vulnerability bands fill the rest.
+    _apply_bands(
+        styles,
+        _PITCHER_BANDS,
+        {
+            "wOBA": line.woba,
+            "xwOBA": line.expected_woba,
+            "BRL%": line.barrel_share,
+            "LA": line.avg_launch_angle,
+            "ISO": line.iso,
+            "Air %": line.air_ball_share,
+            "GB %": line.ground_ball_share,
+        },
+    )
     return texts, styles
 
 
@@ -2307,7 +2509,12 @@ def _render_arms(board: SlateBoard) -> None:
         "pitching game log (v2.2, D-123): a last start at 100+ pitches is "
         "named a workload flag — a fact, never a cap claim, and a cap is "
         "only a cap if the team announced one. Fewer than three counts "
-        "means fewer starts in the 31-day record."
+        "means fewer starts in the 31-day record. **Cell colors (D-127, "
+        "PO):** the metric cells grade vulnerability on the researched "
+        "2025 scale — greener is more forgiving, three greens to dark at "
+        "elite, three reds to dark at very poor; the ratified green reads "
+        "above outrank a band, and an amber INSUFFICIENT cell or a named "
+        "absence outranks both. The edges: " + _PITCHER_SCALE_TEXT + "."
     )
     text_rows: list[dict[str, str]] = []
     style_rows: list[dict[str, str]] = []
@@ -2362,9 +2569,11 @@ def _render_arms(board: SlateBoard) -> None:
             texts = _insert_after(texts, "K", metric_texts)
             text_rows.append(texts)
             style_rows.append({**_absence_styles(texts), **metric_styles})
+    arms_frame = pd.DataFrame(text_rows)
     st.dataframe(
-        styled_text_frame(pd.DataFrame(text_rows), pd.DataFrame(style_rows)),
+        styled_text_frame(arms_frame, pd.DataFrame(style_rows)),
         hide_index=True,
+        column_config=_column_help(arms_frame.columns, _ARMS_HELP),
         key="live_arms",
     )
 
@@ -2419,34 +2628,165 @@ _MATCHUPS_HELP: dict[str, str] = {
     "HR": "Home runs over the scope.",
     "EV": (
         "Average exit velocity in mph. The v2.2 power profile reads "
-        "≥ 91 mph with a bat speed ≥ 73 mph."
+        "≥ 91 mph with a bat speed ≥ 73 mph. "
+        f"Cell colors (researched 2025 baselines, D-127): {_band_scale_text(_GRID_BANDS['EV'])}."
     ),
     "LA": (
         "Season average launch angle — context, not a firing line: v2.2 "
-        "reads the share of contact above the 18° HR floor, never the average."
+        "reads the share of contact above the 18° HR floor, never the average. "
+        f"Cell colors (researched 2025 baselines, D-127): {_band_scale_text(_GRID_BANDS['LA'])}."
     ),
-    "Barrel/PA %": "Barrels per plate appearance over the scope.",
-    "Hard-Hit %": "Share of batted balls at 95+ mph.",
-    "AVG": "Batting average over the scope.",
-    "SLG": "Slugging over the scope.",
-    "ISO": "Isolated power — slugging minus batting average — over the scope.",
+    "Barrel/PA %": (
+        "Barrels per plate appearance over the scope. "
+        f"Cell colors (researched 2025 baselines, D-127): "
+        f"{_band_scale_text(_GRID_BANDS['Barrel/PA %'])}."
+    ),
+    "Hard-Hit %": (
+        "Share of batted balls at 95+ mph. "
+        f"Cell colors (researched 2025 baselines, D-127): "
+        f"{_band_scale_text(_GRID_BANDS['Hard-Hit %'])}."
+    ),
+    "AVG": (
+        "Batting average over the scope. "
+        f"Cell colors (researched 2025 baselines, D-127): {_band_scale_text(_GRID_BANDS['AVG'])}."
+    ),
+    "SLG": (
+        "Slugging over the scope. "
+        f"Cell colors (researched 2025 baselines, D-127): {_band_scale_text(_GRID_BANDS['SLG'])}."
+    ),
+    "ISO": (
+        "Isolated power — slugging minus batting average — over the scope. "
+        f"Cell colors (researched 2025 baselines, D-127): {_band_scale_text(_GRID_BANDS['ISO'])}."
+    ),
     "Robbed HR": (
         "375+ ft balls that stayed in the park, last 7 days — a raw count, never a rate."
     ),
     "Pull Air %": (
         "Share of measurable air balls pulled — ≥ 40% with a boosting "
-        "same-side park factor reads the pull-air match (v2.2)."
+        "same-side park factor reads the pull-air match (v2.2). "
+        f"Cell colors (researched 2025 baselines, D-127): "
+        f"{_band_scale_text(_GRID_BANDS['Pull Air %'])}."
     ),
     "Oppo Air %": (
         "Share of measurable air balls to the opposite field — over 20% "
-        "reads against the opposite-side factor (v2.2)."
+        "reads against the opposite-side factor (v2.2). No cell colors: a "
+        "fit read against the park, not a quality grade (D-127)."
     ),
-    "xwOBA": "Expected wOBA from contact quality over the scope.",
-    "Swing-Str %": "Whiffs per swing over the scope.",
+    "xwOBA": (
+        "Expected wOBA from contact quality over the scope. "
+        f"Cell colors (researched 2025 baselines, D-127): {_band_scale_text(_GRID_BANDS['xwOBA'])}."
+    ),
+    "Swing-Str %": (
+        "Whiffs per swing over the scope. "
+        f"Cell colors (researched 2025 baselines, D-127): "
+        f"{_band_scale_text(_GRID_BANDS['Swing-Str %'])}."
+    ),
     "Grade": "The provisional v1 grade — always the L30 computation, whichever view shows.",
     "Total": "The provisional v1 model's total score.",
     "Lineup": "'est.' marks an estimated lineup.",
 }
+
+
+def _pitcher_help(definition: str, column: str) -> str:
+    """One pitcher-metric hover: its definition plus the vulnerability
+    color scale (D-127) — greener cells are more forgiving arms."""
+    return (
+        f"{definition} Cell colors read vulnerability — greener is more "
+        f"forgiving (researched 2025 baselines, D-127): "
+        f"{_band_scale_text(_PITCHER_BANDS[column])}."
+    )
+
+
+# D-111's starter header-card columns on hover (D-124's pattern, D-127's
+# color scales).
+_SP_HELP: dict[str, str] = {
+    "Scope": ("The row's window and samples — PA/BF and BBE over the named scope."),
+    "wOBA": _pitcher_help("Weighted on-base average allowed over the scope.", "wOBA"),
+    "xwOBA": _pitcher_help("Expected wOBA allowed from contact quality.", "xwOBA"),
+    "HR": "Home runs allowed over the scope.",
+    "HR/9": _pitcher_help(
+        "Home runs allowed per nine innings — a season read; the L30 scope publishes no innings.",
+        "HR/9",
+    ),
+    "BRL%": _pitcher_help("Barrels allowed per batted ball.", "BRL%"),
+    "LA": _pitcher_help("Average launch angle allowed.", "LA"),
+    "ISO": _pitcher_help("Isolated power allowed over the scope.", "ISO"),
+    "xISO": _pitcher_help(
+        "Expected isolated power allowed — a season read; the L30 scope "
+        "publishes no per-event expected SLG.",
+        "xISO",
+    ),
+}
+
+# The Arms tab's full column set on hover — the card metrics plus the
+# identity, workload and L30-only columns.
+_ARMS_HELP: dict[str, str] = {
+    **_SP_HELP,
+    "Game": "Tonight's matchup.",
+    "Pitcher": "The expected starter — TBD until probables post.",
+    "Team": "His club on this slate.",
+    "Throws": "Throwing hand.",
+    "ERA": "Earned run average over the season.",
+    "WHIP": "Walks plus hits per inning over the season.",
+    "GS": "Games started over the season.",
+    "K": "Strikeouts over the season.",
+    "PA": "Plate appearances against over the scope — the rates' sample (D-014).",
+    "BBE": "Batted-ball events against over the scope — the contact reads' sample (D-014).",
+    "Air %": _pitcher_help(
+        "Fly-ball-plus-line-drive share of the window's batted balls against "
+        "— an L30 read; the season board publishes no air split.",
+        "Air %",
+    ),
+    "GB %": _pitcher_help(
+        "Ground-ball share of the window's classified batted balls against — an L30 read (D-116).",
+        "GB %",
+    ),
+    "Arsenal": "The pitches he actually throws, at or above the qualifying usage share.",
+    "Last start": "The workload line for his most recent start (D-123).",
+    "Last 3 starts": "The workload line across his last three starts (D-123).",
+}
+
+# The Conditions columns on hover (D-124's pattern, D-127's color scales).
+_CONDITIONS_HELP: dict[str, str] = {
+    "Game": "Tonight's matchup.",
+    "Venue": "The ballpark.",
+    "Type": "Open air, retractable roof or fixed roof.",
+    "HR factor (LHB)": (
+        "The left-handed home-run factor with its plate-appearance sample: "
+        "100 is neutral. "
+        f"Cell colors (the ratified park lines, D-127): {_band_scale_text(_FACTOR_BAND)}."
+    ),
+    "HR factor (RHB)": (
+        "The right-handed home-run factor with its plate-appearance sample: "
+        "100 is neutral. "
+        f"Cell colors (the ratified park lines, D-127): {_band_scale_text(_FACTOR_BAND)}."
+    ),
+    "n": "The left-handed factor's plate-appearance sample (D-014).",
+    "n ": "The right-handed factor's plate-appearance sample (D-014).",
+    "Temp °F": "The start-time reading; a roofed venue grades at an assumed 72°F, labelled.",
+    "Temp band": (
+        "The v2.2 temperature band and its raw award — the cell wears the "
+        "award's color: <45 dark red · 45-64 red · 65-74 light red · "
+        "75-84 light green · 85-89 green · ≥90 dark green (ratified, D-121/D-127)."
+    ),
+    "Humidity": "A secondary modifier, never a standalone badge.",
+    "Wind": (
+        "The raw forecast reading — green when the wind helps at a "
+        "wind-receptive park, red when it hurts (D-122)."
+    ),
+    "Wind recept.": (
+        "The modelled HR-effect sensitivity to wind (Ballpark Pal, display only — it never grades)."
+    ),
+}
+
+# D-127's caption fragments, built once from the registries so a moved
+# edge can never drift from its printed line (D-079).
+_GRID_SCALE_TEXT = "; ".join(
+    f"{name} — {_band_scale_text(spec)}" for name, spec in _GRID_BANDS.items()
+)
+_PITCHER_SCALE_TEXT = "; ".join(
+    f"{name} — {_band_scale_text(spec)}" for name, spec in _PITCHER_BANDS.items()
+)
 
 _SLUGGERS_HELP: dict[str, str] = {
     "Batter": "The batter's name.",
@@ -2561,6 +2901,23 @@ def _grid_line_cells(
                 styles[column] = _REASON_CSS
             else:
                 texts[column] = text
+        # D-127 (PO): the researched bands grade every valued rate cell.
+        # Oppo Air % stays neutral — a fit read, not a quality grade.
+        _apply_bands(
+            styles,
+            _GRID_BANDS,
+            {
+                "EV": line.exit_velocity,
+                "Barrel/PA %": line.barrel_per_pa,
+                "Hard-Hit %": line.hard_hit_share,
+                "AVG": line.batting_average,
+                "SLG": line.slugging,
+                "ISO": line.iso,
+                "Pull Air %": line.pull_air_share,
+                "xwOBA": line.expected_woba,
+                "Swing-Str %": line.whiff_share,
+            },
+        )
     if include_gaps:
         # D-124: the season Statcast board's average launch angle, after EV.
         # Context, never a firing line — v2.2 reads the share of contact
@@ -2571,6 +2928,11 @@ def _grid_line_cells(
             styles["LA"] = _REASON_CSS
         else:
             texts = _insert_after(texts, "EV", {"LA": f"{float(launch_angle):.1f}°"})
+            # D-127: an average carries no firing line, but it still wears
+            # its researched bucket (the edges print in the caption).
+            css = _band_css(_GRID_BANDS["LA"], float(launch_angle))
+            if css is not None:
+                styles.setdefault("LA", css)
         # D-125 (PO): the D-110 regression gaps no longer grid — they read
         # as Sluggers tags with reliability bands and a home-park rider.
         # ISO and xwOBA themselves stay (PO: keep both).
@@ -2635,6 +2997,20 @@ def _sp_season_row(reads: PitcherSeasonReads | None) -> tuple[dict[str, str], di
                 styles[column] = _INSUFFICIENT_CSS
         styles["Scope"] = _INSUFFICIENT_CSS
         label += " · INSUFFICIENT"
+    # D-127 (PO): the researched vulnerability bands fill the rest.
+    _apply_bands(
+        styles,
+        _PITCHER_BANDS,
+        {
+            "wOBA": reads.woba,
+            "xwOBA": reads.expected_woba,
+            "HR/9": reads.home_run_per_nine,
+            "BRL%": reads.barrel_share,
+            "LA": reads.avg_launch_angle,
+            "ISO": reads.iso,
+            "xISO": reads.expected_iso,
+        },
+    )
     return {"Scope": label, **texts}, styles
 
 
@@ -2683,6 +3059,18 @@ def _sp_recent_row(
                 styles[column] = _INSUFFICIENT_CSS
         styles["Scope"] = _INSUFFICIENT_CSS
         full_label += " · INSUFFICIENT"
+    # D-127 (PO): the researched vulnerability bands fill the rest.
+    _apply_bands(
+        styles,
+        _PITCHER_BANDS,
+        {
+            "wOBA": line.woba,
+            "xwOBA": line.expected_woba,
+            "BRL%": line.barrel_share,
+            "LA": line.avg_launch_angle,
+            "ISO": line.iso,
+        },
+    )
     return {"Scope": full_label, **texts}, styles
 
 
@@ -2703,12 +3091,14 @@ def _sp_card(card: PitcherCard | None, team: str, *, l30: bool) -> None:
         _sp_recent_row("vs L (L30)", card.recent_vs_left, vulnerability_floor=True),
         _sp_recent_row("vs R (L30)", card.recent_vs_right, vulnerability_floor=True),
     ]
+    sp_frame = pd.DataFrame([row for row, _ in rows])
     st.dataframe(
         styled_text_frame(
-            pd.DataFrame([row for row, _ in rows]),
+            sp_frame,
             pd.DataFrame([style for _, style in rows]),
         ),
         hide_index=True,
+        column_config=_column_help(sp_frame.columns, _SP_HELP),
         key=f"sp_card_{card.player_id}_{'l30' if l30 else 'season'}",
     )
     # v2.2's thin-sample caution (D-123, SP-3): a window spanning at most
@@ -2797,6 +3187,20 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
         "share of contact above the 18° HR launch floor, never the "
         "average, and the season boards publish no share."
     )
+    st.caption(
+        "**Cell colors (D-127, PO):** every rate cell wears one of six "
+        "researched bands — three greens, dark green at elite; three "
+        "reds, dark red at very poor; the unfilled cell neutral — graded "
+        "against 2025 league baselines (derivations in DECISIONS D-127); "
+        "where an edge is a ratified v2.2 line the column's hover says "
+        "so. The edges: "
+        + _GRID_SCALE_TEXT
+        + ". Oppo Air % stays neutral — a fit read against the park, not "
+        "a quality grade — and the counting columns (AB, H, Barrels, HR, "
+        "Robbed HR) are volume, not quality, so they carry no color. An "
+        "amber INSUFFICIENT cell and a named absence always outrank a "
+        "band."
+    )
     season_view = st.toggle(
         "Season view — every column reads the season sources; the grade stays L30",
         value=False,
@@ -2839,7 +3243,11 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
                 "and no per-event expected SLG, so HR/9 and xISO stay "
                 "season reads and the HR count shows instead. Amber: below "
                 "the ratified floor — 80 BF / 40 BBE on a side row, 15 BBE "
-                "on contact reads — value shown, advisory attached (D-068)."
+                "on contact reads — value shown, advisory attached (D-068). "
+                "**Cell colors (D-127, PO):** the metric cells grade "
+                "vulnerability on the researched 2025 scale — greener is "
+                "more forgiving; the ratified green reads above outrank a "
+                "band. The edges: " + _PITCHER_SCALE_TEXT + "."
             )
             for label, batters, opposing_card in (
                 ("Away", game.away_batters, game.home_pitcher),
@@ -2932,10 +3340,16 @@ _TEMP_BANDS: tuple[tuple[Decimal, str, str], ...] = (
 )
 
 
+def _temp_band_entry(temp_f: Decimal) -> tuple[str, str]:
+    """(edges, raw award) of the v2.2 band one reading lands in."""
+    _, edges, raw = next(band for band in _TEMP_BANDS if temp_f < band[0])
+    return edges, raw
+
+
 def _temp_band(temp_f: Decimal) -> str:
     """The v2.2 temperature-band label for one reading — '{edges} → {raw}',
     with the cap named when the raw band exceeds the component max."""
-    _, edges, raw = next(band for band in _TEMP_BANDS if temp_f < band[0])
+    edges, raw = _temp_band_entry(temp_f)
     return f"{edges} → {raw}" + (" · capped at 1" if Decimal(raw) > 1 else "")
 
 
@@ -2990,7 +3404,15 @@ def _render_conditions(board: SlateBoard) -> None:
         "direction — the Wind cell goes green when the current wind helps "
         "at a wind-receptive park (receptiveness at or past ±1) and red "
         "when it hurts, only with ≥ 4 mph resolved along the park axis; "
-        "under either line it stays neutral."
+        "under either line it stays neutral. **Cell colors (D-127, PO):** "
+        "the factor cells wear six researched bands whose edges ARE the "
+        "ratified park lines — "
+        + _band_scale_text(_FACTOR_BAND)
+        + " — and the Temp band cell wears its award's color, the one "
+        "v2.2-ratified color scale on the board: <45 dark red · 45-64 "
+        "red · 65-74 light red · 75-84 light green · 85-89 green · ≥90 "
+        "dark green. The sample columns carry no color — a count is "
+        "volume, not quality."
     )
     text_rows: list[dict[str, str]] = []
     style_rows: list[dict[str, str]] = []
@@ -3020,6 +3442,13 @@ def _render_conditions(board: SlateBoard) -> None:
                 styles[column] = _REASON_CSS
             else:
                 texts[column] = f"{float(value):.0f}"
+                # D-127 (PO): the factor cells wear the researched band —
+                # its edges are the ratified park lines. The sample
+                # columns stay neutral (a count is volume, not quality).
+                if column in ("HR factor (LHB)", "HR factor (RHB)"):
+                    css = _band_css(_FACTOR_BAND, float(value))
+                    if css is not None:
+                        styles[column] = css
         # The weather cells (v2.2, D-121): the reading, the band it lands
         # in, and the secondary modifiers. A roof feeds the assumed 72°F —
         # labelled in the cell, never dressed as a forecast; a missing
@@ -3033,6 +3462,9 @@ def _render_conditions(board: SlateBoard) -> None:
         elif temp is not None:
             texts["Temp °F"] = f"{float(temp):.0f}"
             texts["Temp band"] = _temp_band(temp)
+            # D-127 (PO): the band cell wears its ratified award's color —
+            # the six v2.2 temperature bands ARE the six color bands.
+            styles["Temp band"] = _TEMP_AWARD_CSS[_temp_band_entry(temp)[1]]
         else:
             texts["Temp °F"] = "source unavailable"
             styles["Temp °F"] = _REASON_CSS
@@ -3074,9 +3506,11 @@ def _render_conditions(board: SlateBoard) -> None:
             styles["Wind recept."] = _REASON_CSS
         text_rows.append(texts)
         style_rows.append(styles)
+    conditions_frame = pd.DataFrame(text_rows)
     st.dataframe(
-        styled_text_frame(pd.DataFrame(text_rows), pd.DataFrame(style_rows)),
+        styled_text_frame(conditions_frame, pd.DataFrame(style_rows)),
         hide_index=True,
+        column_config=_column_help(conditions_frame.columns, _CONDITIONS_HELP),
         key="live_conditions",
     )
     if board.diagnostics:
