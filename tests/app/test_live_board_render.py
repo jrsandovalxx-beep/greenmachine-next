@@ -1076,8 +1076,8 @@ def test_sp_recent_row_names_the_two_month_absences() -> None:
     assert row["Hard-Hit %"] == "50.0%"
     assert styles["HR/9"] == streamlit_app._REASON_CSS
     assert styles["xISO"] == streamlit_app._REASON_CSS
-    # Below the ratified vulnerability floor (80 BF / 40 BBE): amber, with
-    # the values still visible.
+    # Below the ratified vulnerability floor (50 BF / 30 BBE; D-134): amber,
+    # with the values still visible.
     assert styles["xwOBA"] == streamlit_app._INSUFFICIENT_CSS
     assert row["xwOBA"] == ".310"
     # An empty scope names itself.
@@ -1087,11 +1087,11 @@ def test_sp_recent_row_names_the_two_month_absences() -> None:
 
 
 def test_sp_recent_row_at_the_floor_carries_no_advisory() -> None:
-    """D-111: exactly 80 BF and 40 BBE meets the floor — the amber is for
-    below the line, never at it. The researched bands still grade."""
+    """D-111 + D-134: exactly 50 BF and 30 BBE meets the floor — the amber
+    is for below the line, never at it. The researched bands still grade."""
     import streamlit_app
 
-    line = dataclasses.replace(_sp_line(), plate_appearances=80, batted_balls=40)
+    line = dataclasses.replace(_sp_line(), plate_appearances=50, batted_balls=30)
     row, styles = streamlit_app._sp_recent_row("vs R (2M)", line, vulnerability_floor=True)
     assert "INSUFFICIENT" not in row["Scope"]
     assert streamlit_app._INSUFFICIENT_CSS not in styles.values()
