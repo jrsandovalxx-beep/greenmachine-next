@@ -97,6 +97,7 @@ from greenmachine.live.form import FormSection, FormValue
 from greenmachine.live.grading import QUALIFYING_USAGE_SHARE, ROOFED_VENUE_NEUTRAL_FAHRENHEIT
 from greenmachine.live.mlb_api import FetchFailure, GameLogEntry, MlbStatsApi
 from greenmachine.live.pipeline import (
+    MATCHUP_WINDOW_DAYS,
     SEASON_IDS_PER_REQUEST,
     BatterCard,
     BatterGridLine,
@@ -593,8 +594,10 @@ def _humidity_lookup(diagnostics: list[str]) -> object:
 
 
 @st.cache_data(ttl=BOARD_TTL_SECONDS, show_spinner=False)
-def live_board(slate_iso: str) -> SlateBoard | FetchFailure:
-    """Assemble and grade the slate; cached so a rerun is not a refetch."""
+def live_board(slate_iso: str, batter_window_days: int) -> SlateBoard | FetchFailure:
+    """Assemble and grade the slate; cached so a rerun is not a refetch.
+    D-128 (PO): the cache key is the slate AND the Matchups tab's batter
+    window — a new window is a fresh build, exactly like a new date."""
     api, savant = live_mlb_adapters()
     slate_date = date.fromisoformat(slate_iso)
     year = slate_date.year
@@ -609,6 +612,7 @@ def live_board(slate_iso: str) -> SlateBoard | FetchFailure:
         slate_date=slate_date,
         as_of=datetime.now(UTC),
         config=production_config(),
+        batter_window_days=batter_window_days,
         fetch_day_events=fetch_day,  # type: ignore[arg-type]
         temperature_for=_temperature_lookup(weather_diagnostics),  # type: ignore[arg-type]
         park_factors=park_factor_table(),
@@ -617,6 +621,30 @@ def live_board(slate_iso: str) -> SlateBoard | FetchFailure:
     )
     LIVE_WEATHER_DIAGNOSTICS[slate_iso] = weather_diagnostics
     return board
+
+
+# D-128 (PO): the Matchups tab's timeframe selector — the year choice
+# returns the grid to the season sources; the recent window counts back
+# in weeks (to 12) or months (to 3). The widget keys live in session
+# state and the board build resolves the window BEFORE any widget
+# renders, so a first run builds the default thirty-day record and a
+# changed selector rebuilds on the rerun — no selectboxes anywhere.
+_MATCHUPS_SEASON_LABEL = "2026 season"
+_MATCHUPS_RECENT_LABEL = "Recent window"
+
+
+def _matchups_window_days() -> int:
+    """The batter window behind the board build (D-128): the default
+    thirty days when the selector shows the season view (the grade's
+    ratified L30 basis) or before the widget first renders; the
+    selector's own count otherwise — weeks times seven, months capped at
+    three (times thirty)."""
+    if st.session_state.get("matchups_view_mode") != _MATCHUPS_RECENT_LABEL:
+        return MATCHUP_WINDOW_DAYS
+    count = int(st.session_state.get("matchups_window_count", 4))
+    if st.session_state.get("matchups_window_unit") == "months":
+        return min(count, 3) * 30
+    return count * 7
 
 
 _NOT_EVALUABLE = "not evaluable"
@@ -744,18 +772,22 @@ _GRID_BANDS: dict[str, _BandSpec] = {
 # vulnerability: the greener the cell, the more forgiving the arm. League
 # 2025: HR/9 ≈ 1.16 between the ratified gas (≥ 1.50, the elite edge) and
 # suppressor (≤ 0.80, inside the poor band) lines; barrels 8.6% of batted
-# balls; average LA allowed ≈ 12° between the ratified fly-vulnerable
-# (≥ 18°, the elite edge) and ground-ball (≤ 8°) lines; ISO .158; the air
-# share (fly balls plus line drives) 50.5%; the ground-ball share 42.4%
-# between the ratified < 40% gas ceiling and the ≥ 50% profile line
-# (extreme ≥ 55%, the very-poor edge).
+# balls; hard-hit ≈ 40% of batted balls (the same contact-quality league
+# mean as the batter scale, mirrored around it: a full band above 40% is
+# elite forgiving, the observed team spread bottoms out near 38% so the
+# red edges sit just under it); average LA allowed ≈ 12° between the
+# ratified fly-vulnerable (≥ 18°, the elite edge) and ground-ball (≤ 8°)
+# lines; ISO .158; the air share (fly balls plus line drives) 50.5%; the
+# ground-ball share 42.4% between the ratified < 40% gas ceiling and the
+# ≥ 50% profile line (extreme ≥ 55%, the very-poor edge). D-128 (PO):
+# wOBA and ISO left the pitcher tables — xwOBA and xISO stay — so their
+# specs left the registry with them, and Hard-Hit % joined.
 _PITCHER_BANDS: dict[str, _BandSpec] = {
-    "wOBA": _BandSpec("high", 0.350, 0.330, 0.320, 0.300, 0.285, 0.270, "avg"),
     "xwOBA": _BandSpec("high", 0.350, 0.330, 0.320, 0.300, 0.285, 0.270, "avg"),
     "HR/9": _BandSpec("high", 1.50, 1.30, 1.15, 1.00, 0.90, 0.70),
     "BRL%": _BandSpec("high", 0.110, 0.095, 0.080, 0.070, 0.055, 0.040, "pct"),
+    "Hard-Hit %": _BandSpec("high", 0.46, 0.43, 0.40, 0.37, 0.34, 0.30, "pct"),
     "LA": _BandSpec("high", 18, 15, 13, 11, 9, 6),
-    "ISO": _BandSpec("high", 0.190, 0.170, 0.155, 0.140, 0.120, 0.100, "avg"),
     "xISO": _BandSpec("high", 0.190, 0.170, 0.155, 0.140, 0.120, 0.100, "avg"),
     "Air %": _BandSpec("high", 0.56, 0.52, 0.48, 0.44, 0.40, 0.35, "pct"),
     "GB %": _BandSpec("low", 0.35, 0.39, 0.42, 0.46, 0.50, 0.55, "pct"),
@@ -1082,11 +1114,13 @@ def _card_tag_lists(
             vetoes.append(f"high-K profile: K% {float(k_share) * 100:.1f} ({pa} PA)")
         elif k_share >= _BINARY_K_SHARE:
             vetoes.append(f"binary K profile: K% {float(k_share) * 100:.1f} ({pa} PA)")
-    # v2.2 pitcher-side reads (D-114): HR/9 is a season-scope read (the L30
-    # window publishes no innings); the ground-ball share reads the L30
-    # event record because the season boards publish no GB%. D-116 (PO):
-    # the GB% number itself lives on the Arms tab only — these tags keep
-    # their firing conditions but never quote the share.
+    # v2.2 pitcher-side reads (D-114): HR/9 is a season-scope read (the
+    # event record publishes no innings); the ground-ball share reads the
+    # event record because the season boards publish no GB% — the last two
+    # months since D-128 (PO) rewindowed the starter's recent reads; the
+    # firing conditions are unchanged. D-116 (PO): the GB% number itself
+    # lives on the Arms tab only — these tags keep their firing conditions
+    # but never quote the share.
     if opposing is not None:
         reads = opposing.season_reads
         hr9 = reads.home_run_per_nine if reads is not None else None
@@ -1095,7 +1129,7 @@ def _card_tag_lists(
         gb_share = recent.ground_ball_share if recent is not None else None
         if gb_share is not None and gb_share >= _GB_PROFILE_SHARE_LINE:
             extreme = "extreme " if gb_share >= _GB_PROFILE_EXTREME_LINE else ""
-            vetoes.append(f"air allowed: low — {extreme}ground-ball profile (L30 record)")
+            vetoes.append(f"air allowed: low — {extreme}ground-ball profile (2-month record)")
         elif season_la is not None and season_la <= _GB_PROFILE_LA_LINE:
             vetoes.append(
                 f"air allowed: low — ground-ball profile (avg LA {float(season_la):.1f}°, season)"
@@ -1601,18 +1635,6 @@ def _form_section_frames(form: FormSection) -> tuple[pd.DataFrame, pd.DataFrame]
     return pd.DataFrame([texts]), pd.DataFrame([styles])
 
 
-# Every selectable grid's key carries this epoch. Dismissing the detail dialog
-# bumps it, so the grids remount under fresh keys with empty selections —
-# otherwise the dismissed dialog reopens on the next rerun, because a data
-# grid's row selection persists in the widget's state.
-def _selection_epoch() -> int:
-    return int(st.session_state.get("selection_epoch", 0))
-
-
-def _bump_selection_epoch() -> None:
-    st.session_state["selection_epoch"] = _selection_epoch() + 1
-
-
 _BB_TYPE_CODES = {
     "ground_ball": "GB",
     "fly_ball": "FB",
@@ -1908,11 +1930,12 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
     D-068 form section, and the recent exit-velocity sheet behind the
     pitch-mix threshold toggle.
 
-    Reachable from the Sluggers and Matchups row selections (D-078), it is
-    also the D-080 expanded matchup view: the batter's per-pitch table
-    against the starter's side over L30 (D-088), the pitcher's season-long
-    Arsenal with its side filter and last-season fallback (D-087), and one
-    threshold slider driving every table and the event log.
+    Reachable from the Sluggers and Matchups More buttons (D-078/D-128),
+    it is also the D-080 expanded matchup view: the batter's per-pitch
+    table against the starter's side over the selected matchup window
+    (D-088/D-128), the pitcher's season-long Arsenal with its side filter
+    and last-season fallback (D-087), and one threshold slider driving
+    every table and the event log.
     """
     st.markdown(f"**{card.full_name}** — {card.team}")
 
@@ -2151,8 +2174,8 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
             st.caption(
                 f"Stuff drift — primary pitch {drift.pitch_name}: whiff "
                 f"{float(drift.whiff_season) * 100:.0f}% season → "
-                f"{whiff_window_text} L30 ({drift.pitches_in_window} pitches "
-                f"L30), usage {float(drift.usage_season) * 100:.0f}% → "
+                f"{whiff_window_text} 2M ({drift.pitches_in_window} pitches "
+                f"2M), usage {float(drift.usage_season) * 100:.0f}% → "
                 f"{usage_window_text}."
             )
     if pitcher is not None:
@@ -2182,7 +2205,7 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
     st.dataframe(styled_text_frame(sheet, sheet_styles), hide_index=True)
 
 
-@st.dialog("Batter detail", width="large", on_dismiss=_bump_selection_epoch)
+@st.dialog("Batter detail", width="large")
 def _batter_detail_dialog(card: BatterCard, game: GameCard | None) -> None:
     _render_batter_detail(card, game)
 
@@ -2205,13 +2228,14 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "appearances AND an arsenal-wide whiff ≤ 20%, both; without that "
         "matchup K% ≥ 28% reads binary and ≥ 30% is the high-K caution. "
         "Pitcher reads: low-whiff arm at whiff ≤ 20%; gas at season HR/9 "
-        "≥ 1.50 with an L30 ground-ball share under 40% of classified BBE; "
-        "fly-ball vulnerable at a season avg launch angle allowed ≥ 18°; "
-        "the ground-ball profile at an L30 ground-ball share ≥ 50% "
-        "(extreme ≥ 55%) or a season avg LA allowed ≤ 8°; the suppressor "
-        "at season HR/9 ≤ 0.80. The season boards publish no ground-ball "
-        "share, so that read is L30-only — and the GB% value itself reads "
-        "on the Arms tab, L30 view only (D-116). Batter reads (v2.2, D-115): the "
+        "≥ 1.50 with a two-month ground-ball share under 40% of classified "
+        "BBE; fly-ball vulnerable at a season avg launch angle allowed "
+        "≥ 18°; the ground-ball profile at a two-month ground-ball share "
+        "≥ 50% (extreme ≥ 55%) or a season avg LA allowed ≤ 8°; the "
+        "suppressor at season HR/9 ≤ 0.80. The season boards publish no "
+        "ground-ball share, so that read is recent-only — the last two "
+        "months since D-128 (PO) — and the GB% value itself reads on the "
+        "Arms tab, recent view only (D-116). Batter reads (v2.2, D-115): the "
         "x-gap flag is under-performance evidence — xISO-ISO ≥ +.050 or "
         "xwOBA-wOBA ≥ +.015, both sides of a gap off the same "
         "expected-statistics board — descriptive, not predictive, with a "
@@ -2338,24 +2362,26 @@ def _absence_styles(texts: dict[str, str]) -> dict[str, str]:
     return {column: _REASON_CSS for column, text in texts.items() if text in _ABSENCE_TEXTS}
 
 
+# D-128 (PO): the pitcher tables drop wOBA and ISO (xwOBA and xISO stay)
+# and add Hard-Hit %.
 _ARMS_METRIC_COLUMNS = (
     "PA",
     "BBE",
-    "wOBA",
     "xwOBA",
     "HR",
     "HR/9",
     "BRL%",
+    "Hard-Hit %",
     "LA",
-    "ISO",
     "xISO",
     "Air %",
 )
 
-# D-116 (PO): GB% lives on the Arms tab's L30 view only — the season scope
-# does not carry the column at all, since no season board publishes the
-# split. Air % stays on both scopes (season names its absence) because it
-# predates the ruling.
+# D-116 (PO): GB% lives on the Arms tab's recent view only — the season
+# scope does not carry the column at all, since no season board publishes
+# the split. Air % stays on both scopes (season names its absence) because
+# it predates the ruling. D-128 (PO): the recent read is the last two
+# months now.
 _ARMS_RECENT_METRIC_COLUMNS = (*_ARMS_METRIC_COLUMNS, "GB %")
 
 
@@ -2364,42 +2390,37 @@ def _arms_season_metrics(
 ) -> tuple[dict[str, str], dict[str, str]]:
     """The season starter-metric columns on the Arms tab (D-111): samples
     as their own columns (D-014), every absence named, green only on the
-    digest's two pitcher-vulnerability reads, amber contact reads below the
-    ratified 15-BBE floor (D-068)."""
+    digest's pitcher-vulnerability read, amber contact reads below the
+    ratified 15-BBE floor (D-068). D-128 (PO): wOBA and ISO left the
+    pitcher tables — xwOBA and xISO stay — and Hard-Hit % joined, so the
+    wOBA-over-xwOBA highlight went with its column."""
     if reads is None:
         dash = {column: "—" for column in _ARMS_METRIC_COLUMNS}
         return dash, {column: _REASON_CSS for column in dash}
     texts = {
         "PA": str(reads.plate_appearances) if reads.plate_appearances else "—",
         "BBE": str(reads.batted_ball_events) if reads.batted_ball_events else "—",
-        "wOBA": _avg_text(reads.woba),
         "xwOBA": _avg_text(reads.expected_woba),
         "HR": str(reads.home_runs) if reads.home_runs is not None else "—",
         "HR/9": (
             f"{float(reads.home_run_per_nine):.2f}" if reads.home_run_per_nine is not None else "—"
         ),
         "BRL%": _pct_text(reads.barrel_share),
+        "Hard-Hit %": _pct_text(reads.hard_hit_share),
         "LA": (
             f"{float(reads.avg_launch_angle):.1f}°" if reads.avg_launch_angle is not None else "—"
         ),
-        "ISO": _avg_text(reads.iso),
         "xISO": _avg_text(reads.expected_iso),
         # The season Statcast board against publishes no air-ball split
         # (its fbld/gb columns are exit velocities) — the season air share
-        # names its absence; the L30 events carry the real split.
+        # names its absence; the recent events carry the real split.
         "Air %": "—",
     }
     styles = {column: _REASON_CSS for column, text in texts.items() if text == "—"}
-    if (
-        reads.woba is not None
-        and reads.expected_woba is not None
-        and reads.woba > reads.expected_woba
-    ):
-        styles["wOBA"] = _HIGHLIGHT
     if reads.home_run_per_nine is not None and reads.home_run_per_nine >= _HR9_LINE:
         styles["HR/9"] = _HIGHLIGHT
     if 0 < reads.batted_ball_events < _MIN_BBE_CONTACT:
-        for column in ("BRL%", "LA"):
+        for column in ("BRL%", "Hard-Hit %", "LA"):
             if texts[column] != "—":
                 styles[column] = _INSUFFICIENT_CSS
     # D-127 (PO): the researched vulnerability bands fill the rest.
@@ -2407,12 +2428,11 @@ def _arms_season_metrics(
         styles,
         _PITCHER_BANDS,
         {
-            "wOBA": reads.woba,
             "xwOBA": reads.expected_woba,
             "HR/9": reads.home_run_per_nine,
             "BRL%": reads.barrel_share,
+            "Hard-Hit %": reads.hard_hit_share,
             "LA": reads.avg_launch_angle,
-            "ISO": reads.iso,
             "xISO": reads.expected_iso,
         },
     )
@@ -2422,35 +2442,32 @@ def _arms_season_metrics(
 def _arms_recent_metrics(
     line: PitcherRecentLine | None,
 ) -> tuple[dict[str, str], dict[str, str]]:
-    """The L30 starter-metric columns on the Arms tab (D-111): the kept
-    events' figures with their BF/BBE samples. The scope publishes no
-    innings and no per-event expected SLG, so HR/9 and xISO name their
-    absences and the HR count shows instead; amber contact reads below the
-    ratified 15-BBE floor (D-068)."""
+    """The recent-form starter-metric columns on the Arms tab (D-111) —
+    the last two months of kept events since D-128 (PO), L30 before. The
+    scope publishes no innings and no per-event expected SLG, so HR/9 and
+    xISO name their absences and the HR count shows instead; amber contact
+    reads below the ratified 15-BBE floor (D-068)."""
     if line is None:
         dash = {column: "—" for column in _ARMS_RECENT_METRIC_COLUMNS}
         return dash, {column: _REASON_CSS for column in dash}
     texts = {
         "PA": str(line.plate_appearances),
         "BBE": str(line.batted_balls),
-        "wOBA": _avg_text(line.woba),
         "xwOBA": _avg_text(line.expected_woba),
         "HR": str(line.home_runs),
         "HR/9": "—",
         "BRL%": _pct_text(line.barrel_share),
+        "Hard-Hit %": _pct_text(line.hard_hit_share),
         "LA": (
             f"{float(line.avg_launch_angle):.1f}°" if line.avg_launch_angle is not None else "—"
         ),
-        "ISO": _avg_text(line.iso),
         "xISO": "—",
         "Air %": _pct_text(line.air_ball_share),
         "GB %": _pct_text(line.ground_ball_share),
     }
     styles = {column: _REASON_CSS for column, text in texts.items() if text == "—"}
-    if line.woba is not None and line.expected_woba is not None and line.woba > line.expected_woba:
-        styles["wOBA"] = _HIGHLIGHT
     if 0 < line.batted_balls < _MIN_BBE_CONTACT:
-        for column in ("BRL%", "LA"):
+        for column in ("BRL%", "Hard-Hit %", "LA"):
             if texts[column] != "—":
                 styles[column] = _INSUFFICIENT_CSS
     # GB % shares over classified batted balls, so its floor reads the
@@ -2462,11 +2479,10 @@ def _arms_recent_metrics(
         styles,
         _PITCHER_BANDS,
         {
-            "wOBA": line.woba,
             "xwOBA": line.expected_woba,
             "BRL%": line.barrel_share,
+            "Hard-Hit %": line.hard_hit_share,
             "LA": line.avg_launch_angle,
-            "ISO": line.iso,
             "Air %": line.air_ball_share,
             "GB %": line.ground_ball_share,
         },
@@ -2479,42 +2495,45 @@ def _render_arms(board: SlateBoard) -> None:
         "Expected starters with their season line and the arsenal they actually "
         "throw (pitch types at or above the qualifying usage share)."
     )
-    l30_view = st.toggle(
-        "L30 starter metrics — the metric columns read the last 30 days of "
-        "kept events; season is the default",
+    recent_view = st.toggle(
+        "Recent form — the metric columns read the last 2 months of kept "
+        "events; season is the default",
         value=False,
-        key="arms_l30_view",
+        key="arms_recent_view",
         help=(
-            "D-111. Season metrics read the expected-statistics and Statcast "
-            "boards against plus the statsapi season line. L30 reads the "
-            "window's kept pitch events: it publishes no innings (HR/9 stays "
-            "a season read, the HR count shows) and no per-event expected "
-            "SLG (xISO stays a season read). The L30 view also adds the GB % "
-            "column (D-116)."
+            "D-111, rewindowed by D-128 (PO): the recent-form read is the "
+            "last two months. Season metrics read the expected-statistics "
+            "and Statcast boards against plus the statsapi season line. The "
+            "event scope publishes no innings (HR/9 stays a season read, "
+            "the HR count shows) and no per-event expected SLG (xISO stays "
+            "a season read). The recent view also adds the GB % column "
+            "(D-116)."
         ),
     )
     st.caption(
         "Starter metrics (D-111): green marks the digest's "
-        "pitcher-vulnerability reads only — HR/9 ≥ 1.5 (season, v2.2) and wOBA "
-        "above xwOBA. Amber: contact reads below the ratified 15-BBE floor — "
-        "value shown, advisory attached (D-068). PA and BBE carry every "
-        "rate's sample (D-014). Air % is the fly-ball-plus-line-drive share "
-        "of the window's batted balls against — the ground-ball profile's "
-        "air mirror; the season board publishes no air split, so the "
-        "season scope names the absence and Air % reads L30 only. GB % is "
-        "the ground-ball share of the window's classified batted balls "
-        "against — the ground-ball profile's own number; it reads L30 "
-        "only and the season scope does not carry the column (D-116). "
-        "Last start and Last 3 starts are the raw workload facts off the "
-        "pitching game log (v2.2, D-123): a last start at 100+ pitches is "
-        "named a workload flag — a fact, never a cap claim, and a cap is "
-        "only a cap if the team announced one. Fewer than three counts "
-        "means fewer starts in the 31-day record. **Cell colors (D-127, "
-        "PO):** the metric cells grade vulnerability on the researched "
-        "2025 scale — greener is more forgiving, three greens to dark at "
-        "elite, three reds to dark at very poor; the ratified green reads "
-        "above outrank a band, and an amber INSUFFICIENT cell or a named "
-        "absence outranks both. The edges: " + _PITCHER_SCALE_TEXT + "."
+        "pitcher-vulnerability read — HR/9 ≥ 1.5 (season, v2.2). Amber: "
+        "contact reads below the ratified 15-BBE floor — value shown, "
+        "advisory attached (D-068). PA and BBE carry every rate's sample "
+        "(D-014). Per the PO (D-128) the pitcher tables drop wOBA and ISO "
+        "— xwOBA and xISO stay — and add Hard-Hit %, the 95+ mph share of "
+        "batted balls against. Air % is the fly-ball-plus-line-drive share "
+        "of the recent record's batted balls against — the ground-ball "
+        "profile's air mirror; the season board publishes no air split, so "
+        "the season scope names the absence and Air % reads recent only. "
+        "GB % is the ground-ball share of the recent record's classified "
+        "batted balls against — the ground-ball profile's own number; it "
+        "reads recent only and the season scope does not carry the column "
+        "(D-116). Last start and Last 3 starts are the raw workload facts "
+        "off the pitching game log (v2.2, D-123): a last start at 100+ "
+        "pitches is named a workload flag — a fact, never a cap claim, and "
+        "a cap is only a cap if the team announced one. Fewer than three "
+        "counts means fewer starts in the 31-day record. **Cell colors "
+        "(D-127, PO):** the metric cells grade vulnerability on the "
+        "researched 2025 scale — greener is more forgiving, three greens "
+        "to dark at elite, three reds to dark at very poor; the ratified "
+        "green reads above outrank a band, and an amber INSUFFICIENT cell "
+        "or a named absence outranks both. The edges: " + _PITCHER_SCALE_TEXT + "."
     )
     text_rows: list[dict[str, str]] = []
     style_rows: list[dict[str, str]] = []
@@ -2563,7 +2582,7 @@ def _render_arms(board: SlateBoard) -> None:
             texts["Last 3 starts"] = last_three_text
             metric_texts, metric_styles = (
                 _arms_recent_metrics(card.recent_overall)
-                if l30_view
+                if recent_view
                 else _arms_season_metrics(card.season_reads)
             )
             texts = _insert_after(texts, "K", metric_texts)
@@ -2608,8 +2627,8 @@ def _insert_after(texts: dict[str, str], after: str, additions: dict[str, str]) 
 
 # D-124: the star marks a metric carrying a ratified v2.2 firing line — the
 # season view stars the power-profile EV and the two regression gaps, the
-# L30 mix view stars the two spray shares. One source of truth: the grid's
-# own rename and the hover-help config both read these maps.
+# recent-window view stars the two spray shares. One source of truth: the
+# grid's own rename and the hover-help config both read these maps.
 # D-125 (PO): the gap columns left the grid, so EV is the season view's
 # only starred metric — the regression reads live as Sluggers tags.
 _GRID_STARS_SEASON = {"EV": "EV ★"}
@@ -2659,18 +2678,32 @@ _MATCHUPS_HELP: dict[str, str] = {
         f"Cell colors (researched 2025 baselines, D-127): {_band_scale_text(_GRID_BANDS['ISO'])}."
     ),
     "Robbed HR": (
-        "375+ ft balls that stayed in the park, last 7 days — a raw count, never a rate."
+        "375+ ft balls that stayed in the park — a raw count, never a "
+        "rate. Always the last 7 days, even on the season view (D-128, "
+        "PO): the season sources publish no per-ball distances, so the "
+        "count keeps its event-record basis on both views."
     ),
     "Pull Air %": (
-        "Share of measurable air balls pulled — ≥ 40% with a boosting "
-        "same-side park factor reads the pull-air match (v2.2). "
+        "Recent view: share of measurable air balls pulled, signed spray "
+        "(the ratified v2.2 read — ≥ 40% with a boosting same-side park "
+        "factor reads the pull-air match). Season view: Savant's "
+        "published pull-air bucket, rebased per air ball (D-128, PO). "
         f"Cell colors (researched 2025 baselines, D-127): "
         f"{_band_scale_text(_GRID_BANDS['Pull Air %'])}."
     ),
+    "Straight Air %": (
+        "The third air profile (D-128, PO). Recent view: air balls "
+        "within 15° of dead center over the measurable-air set — a "
+        "near-center ball also counts in its signed side column. Season "
+        "view: Savant's published straight-away bucket, rebased per air "
+        "ball. No cell colors: a fit read, not a quality grade."
+    ),
     "Oppo Air %": (
-        "Share of measurable air balls to the opposite field — over 20% "
-        "reads against the opposite-side factor (v2.2). No cell colors: a "
-        "fit read against the park, not a quality grade (D-127)."
+        "Recent view: share of measurable air balls to the opposite "
+        "field, signed spray — over 20% reads against the opposite-side "
+        "factor (v2.2). Season view: Savant's published oppo-air bucket, "
+        "rebased per air ball (D-128, PO). No cell colors: a fit read "
+        "against the park, not a quality grade (D-127)."
     ),
     "xwOBA": (
         "Expected wOBA from contact quality over the scope. "
@@ -2681,7 +2714,10 @@ _MATCHUPS_HELP: dict[str, str] = {
         f"Cell colors (researched 2025 baselines, D-127): "
         f"{_band_scale_text(_GRID_BANDS['Swing-Str %'])}."
     ),
-    "Grade": "The provisional v1 grade — always the L30 computation, whichever view shows.",
+    "Grade": (
+        "The provisional v1 grade — the L30 computation on the season view; "
+        "on a recent window it reads the same window the columns read (D-128)."
+    ),
     "Total": "The provisional v1 model's total score.",
     "Lineup": "'est.' marks an estimated lineup.",
 }
@@ -2698,28 +2734,30 @@ def _pitcher_help(definition: str, column: str) -> str:
 
 
 # D-111's starter header-card columns on hover (D-124's pattern, D-127's
-# color scales).
+# color scales). D-128 (PO): wOBA and ISO left the pitcher tables, and
+# Hard-Hit % joined.
 _SP_HELP: dict[str, str] = {
     "Scope": ("The row's window and samples — PA/BF and BBE over the named scope."),
-    "wOBA": _pitcher_help("Weighted on-base average allowed over the scope.", "wOBA"),
     "xwOBA": _pitcher_help("Expected wOBA allowed from contact quality.", "xwOBA"),
     "HR": "Home runs allowed over the scope.",
     "HR/9": _pitcher_help(
-        "Home runs allowed per nine innings — a season read; the L30 scope publishes no innings.",
+        "Home runs allowed per nine innings — a season read; the event scope publishes no innings.",
         "HR/9",
     ),
     "BRL%": _pitcher_help("Barrels allowed per batted ball.", "BRL%"),
+    "Hard-Hit %": _pitcher_help(
+        "Share of batted balls against at 95+ mph (D-128, PO).", "Hard-Hit %"
+    ),
     "LA": _pitcher_help("Average launch angle allowed.", "LA"),
-    "ISO": _pitcher_help("Isolated power allowed over the scope.", "ISO"),
     "xISO": _pitcher_help(
-        "Expected isolated power allowed — a season read; the L30 scope "
+        "Expected isolated power allowed — a season read; the event scope "
         "publishes no per-event expected SLG.",
         "xISO",
     ),
 }
 
 # The Arms tab's full column set on hover — the card metrics plus the
-# identity, workload and L30-only columns.
+# identity, workload and recent-only columns.
 _ARMS_HELP: dict[str, str] = {
     **_SP_HELP,
     "Game": "Tonight's matchup.",
@@ -2733,12 +2771,14 @@ _ARMS_HELP: dict[str, str] = {
     "PA": "Plate appearances against over the scope — the rates' sample (D-014).",
     "BBE": "Batted-ball events against over the scope — the contact reads' sample (D-014).",
     "Air %": _pitcher_help(
-        "Fly-ball-plus-line-drive share of the window's batted balls against "
-        "— an L30 read; the season board publishes no air split.",
+        "Fly-ball-plus-line-drive share of the recent record's batted balls "
+        "against — a two-month read (D-128); the season board publishes no "
+        "air split.",
         "Air %",
     ),
     "GB %": _pitcher_help(
-        "Ground-ball share of the window's classified batted balls against — an L30 read (D-116).",
+        "Ground-ball share of the recent record's classified batted balls "
+        "against — a two-month read (D-116/D-128).",
         "GB %",
     ),
     "Arsenal": "The pitches he actually throws, at or above the qualifying usage share.",
@@ -2854,6 +2894,7 @@ def _grid_line_cells(
             "ISO": "—",
             "Robbed HR": "—",
             "Pull Air %": "—",
+            "Straight Air %": "—",
             "Oppo Air %": "—",
             "xwOBA": "—",
             "Swing-Str %": "—",
@@ -2873,6 +2914,11 @@ def _grid_line_cells(
             "ISO": _avg_text(line.iso) if line.iso is not None else None,
             "Pull Air %": (
                 _pct_text(line.pull_air_share) if line.pull_air_share is not None else None
+            ),
+            # D-128 (PO): the third air profile — pull, straight and oppo
+            # read the identical measurable-air denominator.
+            "Straight Air %": (
+                _pct_text(line.straight_air_share) if line.straight_air_share is not None else None
             ),
             "Oppo Air %": (
                 _pct_text(line.oppo_air_share) if line.oppo_air_share is not None else None
@@ -2902,7 +2948,8 @@ def _grid_line_cells(
             else:
                 texts[column] = text
         # D-127 (PO): the researched bands grade every valued rate cell.
-        # Oppo Air % stays neutral — a fit read, not a quality grade.
+        # Straight Air % and Oppo Air % stay neutral — fit reads, not
+        # quality grades (D-127/D-128).
         _apply_bands(
             styles,
             _GRID_BANDS,
@@ -2945,19 +2992,20 @@ def _grid_line_cells(
     return texts, styles
 
 
-# D-111's starter header card: the overall row (Season, or L30 on the
-# toggle) plus the two always-L30 side rows, with the drawn stadium between
-# the two starters' cards.
-_SP_CARD_COLUMNS = ("Scope", "wOBA", "xwOBA", "HR", "HR/9", "BRL%", "LA", "ISO", "xISO")
+# D-111's starter header card: the overall row (Season, or the last two
+# months on the recent-form toggle) plus the two always-recent side rows,
+# with the drawn stadium between the two starters' cards. D-128 (PO): the
+# pitcher tables drop wOBA and ISO — xwOBA and xISO stay — and add
+# Hard-Hit %.
+_SP_CARD_COLUMNS = ("Scope", "xwOBA", "HR", "HR/9", "BRL%", "Hard-Hit %", "LA", "xISO")
 
 
 def _sp_season_row(reads: PitcherSeasonReads | None) -> tuple[dict[str, str], dict[str, str]]:
     """The season-scope row of a starter header card (D-111). Samples ride
     the Scope label beside the rates they basis (D-014); a missing source's
     cells name the absence, never an invented zero. Green marks only the
-    digest's two pitcher-vulnerability reads; contact reads below the
-    ratified 15-BBE floor keep their values under the amber advisory
-    (D-068)."""
+    digest's pitcher-vulnerability read; contact reads below the ratified
+    15-BBE floor keep their values under the amber advisory (D-068)."""
     dash = {column: "—" for column in _SP_CARD_COLUMNS[1:]}
     if reads is None or (
         not reads.plate_appearances and not reads.batted_ball_events and reads.home_runs is None
@@ -2969,30 +3017,23 @@ def _sp_season_row(reads: PitcherSeasonReads | None) -> tuple[dict[str, str], di
     if reads.innings_text:
         label += f" · {reads.innings_text} IP"
     texts = {
-        "wOBA": _avg_text(reads.woba),
         "xwOBA": _avg_text(reads.expected_woba),
         "HR": str(reads.home_runs) if reads.home_runs is not None else "—",
         "HR/9": (
             f"{float(reads.home_run_per_nine):.2f}" if reads.home_run_per_nine is not None else "—"
         ),
         "BRL%": _pct_text(reads.barrel_share),
+        "Hard-Hit %": _pct_text(reads.hard_hit_share),
         "LA": (
             f"{float(reads.avg_launch_angle):.1f}°" if reads.avg_launch_angle is not None else "—"
         ),
-        "ISO": _avg_text(reads.iso),
         "xISO": _avg_text(reads.expected_iso),
     }
     styles = {column: _REASON_CSS for column, text in texts.items() if text == "—"}
-    if (
-        reads.woba is not None
-        and reads.expected_woba is not None
-        and reads.woba > reads.expected_woba
-    ):
-        styles["wOBA"] = _HIGHLIGHT
     if reads.home_run_per_nine is not None and reads.home_run_per_nine >= _HR9_LINE:
         styles["HR/9"] = _HIGHLIGHT
     if 0 < reads.batted_ball_events < _MIN_BBE_CONTACT:
-        for column in ("BRL%", "LA"):
+        for column in ("BRL%", "Hard-Hit %", "LA"):
             if texts[column] != "—":
                 styles[column] = _INSUFFICIENT_CSS
         styles["Scope"] = _INSUFFICIENT_CSS
@@ -3002,12 +3043,11 @@ def _sp_season_row(reads: PitcherSeasonReads | None) -> tuple[dict[str, str], di
         styles,
         _PITCHER_BANDS,
         {
-            "wOBA": reads.woba,
             "xwOBA": reads.expected_woba,
             "HR/9": reads.home_run_per_nine,
             "BRL%": reads.barrel_share,
+            "Hard-Hit %": reads.hard_hit_share,
             "LA": reads.avg_launch_angle,
-            "ISO": reads.iso,
             "xISO": reads.expected_iso,
         },
     )
@@ -3020,34 +3060,32 @@ def _sp_recent_row(
     *,
     vulnerability_floor: bool = False,
 ) -> tuple[dict[str, str], dict[str, str]]:
-    """One L30 row of a starter header card (D-111) — the toggle's overall
-    row, or an always-L30 side row. The L30 scope publishes no innings and
-    no per-event expected SLG, so HR/9 and xISO name their absences and the
-    HR count shows instead. ``vulnerability_floor`` is the side rows'
-    ratified 80-BF / 40-BBE line; the overall row carries the general
-    15-BBE contact floor. Below a floor the values stay visible under the
-    amber advisory, never hidden (D-068)."""
+    """One recent-form row of a starter header card (D-111) — the toggle's
+    overall row, or an always-recent side row — over the last two months
+    of kept events (D-128, PO; L30 before). The event scope publishes no
+    innings and no per-event expected SLG, so HR/9 and xISO name their
+    absences and the HR count shows instead. ``vulnerability_floor`` is
+    the side rows' ratified 80-BF / 40-BBE line; the overall row carries
+    the general 15-BBE contact floor. Below a floor the values stay
+    visible under the amber advisory, never hidden (D-068)."""
     dash = {column: "—" for column in _SP_CARD_COLUMNS[1:]}
     if line is None:
-        return {"Scope": f"{label} — no L30 record", **dash}, {
+        return {"Scope": f"{label} — no recent record", **dash}, {
             column: _REASON_CSS for column in dash
         }
     full_label = f"{label} — {line.plate_appearances} BF · {line.batted_balls} BBE"
     texts = {
-        "wOBA": _avg_text(line.woba),
         "xwOBA": _avg_text(line.expected_woba),
         "HR": str(line.home_runs),
         "HR/9": "—",
         "BRL%": _pct_text(line.barrel_share),
+        "Hard-Hit %": _pct_text(line.hard_hit_share),
         "LA": (
             f"{float(line.avg_launch_angle):.1f}°" if line.avg_launch_angle is not None else "—"
         ),
-        "ISO": _avg_text(line.iso),
         "xISO": "—",
     }
     styles = {column: _REASON_CSS for column, text in texts.items() if text == "—"}
-    if line.woba is not None and line.expected_woba is not None and line.woba > line.expected_woba:
-        styles["wOBA"] = _HIGHLIGHT
     insufficient = (
         (line.plate_appearances < _VULN_MIN_BF or line.batted_balls < _VULN_MIN_BBE)
         if vulnerability_floor
@@ -3064,19 +3102,19 @@ def _sp_recent_row(
         styles,
         _PITCHER_BANDS,
         {
-            "wOBA": line.woba,
             "xwOBA": line.expected_woba,
             "BRL%": line.barrel_share,
+            "Hard-Hit %": line.hard_hit_share,
             "LA": line.avg_launch_angle,
-            "ISO": line.iso,
         },
     )
     return {"Scope": full_label, **texts}, styles
 
 
-def _sp_card(card: PitcherCard | None, team: str, *, l30: bool) -> None:
+def _sp_card(card: PitcherCard | None, team: str, *, recent: bool) -> None:
     """One starter header card (D-111): name, team, and hand over the scope
-    rows. An unannounced starter names the absence."""
+    rows. An unannounced starter names the absence. D-128 (PO): the
+    recent-form read is the last two months (L30 before)."""
     if card is None:
         st.markdown(f"**{team} starter**")
         st.caption("starter not announced")
@@ -3084,12 +3122,12 @@ def _sp_card(card: PitcherCard | None, team: str, *, l30: bool) -> None:
     throws = f" · throws {card.throws}" if card.throws else ""
     st.markdown(f"**{card.full_name}** — {team}{throws}")
     overall = (
-        _sp_recent_row("L30", card.recent_overall) if l30 else _sp_season_row(card.season_reads)
+        _sp_recent_row("2M", card.recent_overall) if recent else _sp_season_row(card.season_reads)
     )
     rows = [
         overall,
-        _sp_recent_row("vs L (L30)", card.recent_vs_left, vulnerability_floor=True),
-        _sp_recent_row("vs R (L30)", card.recent_vs_right, vulnerability_floor=True),
+        _sp_recent_row("vs L (2M)", card.recent_vs_left, vulnerability_floor=True),
+        _sp_recent_row("vs R (2M)", card.recent_vs_right, vulnerability_floor=True),
     ]
     sp_frame = pd.DataFrame([row for row, _ in rows])
     st.dataframe(
@@ -3099,15 +3137,15 @@ def _sp_card(card: PitcherCard | None, team: str, *, l30: bool) -> None:
         ),
         hide_index=True,
         column_config=_column_help(sp_frame.columns, _SP_HELP),
-        key=f"sp_card_{card.player_id}_{'l30' if l30 else 'season'}",
+        key=f"sp_card_{card.player_id}_{'recent' if recent else 'season'}",
     )
     # v2.2's thin-sample caution (D-123, SP-3): a window spanning at most
-    # two starts names itself beside the L30 hand splits.
+    # two starts names itself beside the hand splits.
     workload = card.workload
     if workload is not None and workload.thin_sample:
         count = workload.starts_in_window
         st.caption(
-            f"L30 record: {count} start" + ("" if count == 1 else "s") + " — a thin "
+            f"2-month record: {count} start" + ("" if count == 1 else "s") + " — a thin "
             "sample: check who he faced."
         )
 
@@ -3167,19 +3205,26 @@ def _stadium_panel(game: GameCard) -> None:
 
 
 def _render_matchups(board: SlateBoard) -> BatterCard | None:
+    window_days = _matchups_window_days()
+    season_view = st.session_state.get("matchups_view_mode") != _MATCHUPS_RECENT_LABEL
     st.caption(
-        "One row per batter against the expected starter's mix — pitches at "
-        "or above a 14% usage share over the named window (D-079). Every "
-        "column is computed over that scope; the grade is always the L30 "
-        "computation, whichever view is showing. Select a batter row to "
-        "open their recent-form detail. Hover any column header for its "
-        "one-line definition. A **★** on a header marks a metric carrying "
-        "a ratified v2.2 firing line (D-124) — L30 view: Pull Air % at "
-        "≥ 40% of measurable air balls with a boosting same-side park "
-        "factor reads the pull-air match, Oppo Air % over 20% reads "
-        "against the opposite-side factor (D-120); season view: EV at "
-        "≥ 91 mph with a bat speed ≥ 73 mph reads the power profile. "
-        "The regression gaps (xISO-ISO, xwOBA-wOBA) "
+        "One row per batter against the expected starter's mix — his "
+        "whole season mix off the arsenal board (D-128, PO), pitches at "
+        "or above a 14% usage share, with the scope actually used named "
+        "under each game. The grid's window is yours below: the 2026 "
+        "season sources by default, or a recent window counted in weeks "
+        "(to 12) or months (to 3) — the grade stays the L30 computation "
+        "on the season view and follows the window otherwise. A wider "
+        "window takes longer to build the first time (each day is one "
+        "fetch; the board then caches). Tap a batter's **More** button "
+        "under his grid to open his recent-form detail. Hover any column "
+        "header for its one-line definition. A **★** on a header marks a "
+        "metric carrying a ratified v2.2 firing line (D-124) — recent "
+        "view: Pull Air % at ≥ 40% of measurable air balls with a "
+        "boosting same-side park factor reads the pull-air match, Oppo "
+        "Air % over 20% reads against the opposite-side factor (D-120); "
+        "season view: EV at ≥ 91 mph with a bat speed ≥ 73 mph reads "
+        "the power profile. The regression gaps (xISO-ISO, xwOBA-wOBA) "
         "no longer grid — they read as Sluggers tags with a reliability "
         "band and a home-park rider (D-125, PO); ISO and xwOBA themselves "
         "stay. The season view's LA is the batter's season average "
@@ -3195,59 +3240,98 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
         "where an edge is a ratified v2.2 line the column's hover says "
         "so. The edges: "
         + _GRID_SCALE_TEXT
-        + ". Oppo Air % stays neutral — a fit read against the park, not "
-        "a quality grade — and the counting columns (AB, H, Barrels, HR, "
-        "Robbed HR) are volume, not quality, so they carry no color. An "
-        "amber INSUFFICIENT cell and a named absence always outrank a "
-        "band."
+        + ". Straight Air % and Oppo Air % stay neutral — fit reads "
+        "against the park, not quality grades — and the counting columns "
+        "(AB, H, Barrels, HR, Robbed HR) are volume, not quality, so "
+        "they carry no color. An amber INSUFFICIENT cell and a named "
+        "absence always outrank a band."
     )
-    season_view = st.toggle(
-        "Season view — every column reads the season sources; the grade stays L30",
-        value=False,
-        key="matchups_season_view",
-        help=(
-            "D-079's toggle. Season Robbed HR, Pull Air % and Oppo Air % "
-            "have no published source, so those cells name the absence."
-        ),
-    )
+    mode_col, count_col, unit_col = st.columns([3, 2, 2])
+    with mode_col:
+        mode = st.radio(
+            "Batter window",
+            (_MATCHUPS_SEASON_LABEL, _MATCHUPS_RECENT_LABEL),
+            key="matchups_view_mode",
+            horizontal=True,
+            help=(
+                "D-128 (PO). The year reads every batter's season sources. "
+                "The recent window reads his events against the starter's "
+                "qualifying mix over the counted days — the grade follows "
+                "that window (it stays L30 on the season view)."
+            ),
+        )
+    recent = mode == _MATCHUPS_RECENT_LABEL
+    with count_col:
+        st.number_input(
+            "How far back",
+            min_value=1,
+            max_value=12,
+            value=4,
+            step=1,
+            key="matchups_window_count",
+            disabled=not recent,
+            help="1-12 weeks, or 1-3 months.",
+        )
+    with unit_col:
+        st.radio(
+            "Counted in",
+            ("weeks", "months"),
+            key="matchups_window_unit",
+            horizontal=True,
+            disabled=not recent,
+        )
+    if recent:
+        st.caption(
+            f"Reading the last {window_days} days"
+            + (
+                " — months cap at 3, so the counter reads 3."
+                if st.session_state.get("matchups_window_unit") == "months"
+                and int(st.session_state.get("matchups_window_count", 4)) > 3
+                else "."
+            )
+        )
     selected: BatterCard | None = None
     for game in board.games:
         pitchers = " vs ".join(
             card.full_name if card else "TBD" for card in (game.away_pitcher, game.home_pitcher)
         )
         with st.expander(f"{game.away_team} at {game.home_team} — {game.venue_name} · {pitchers}"):
-            sp_l30 = st.toggle(
-                "Starter metrics: L30 — season is the default",
+            sp_recent = st.toggle(
+                "Starter metrics: recent form (last 2 months) — season is the default",
                 value=False,
-                key=f"sp_l30_{game.game_pk}",
+                key=f"sp_recent_{game.game_pk}",
                 help=(
-                    "D-111. The overall row flips from the season boards to "
-                    "the starter's last 30 days of kept pitch events. The "
-                    "side rows always read that L30 window."
+                    "D-111, rewindowed by D-128 (PO). The overall row flips "
+                    "from the season boards to the starter's last two "
+                    "months of kept pitch events. The side rows always "
+                    "read that two-month window."
                 ),
             )
             away_column, field_column, home_column = st.columns([5, 4, 5])
             with away_column:
-                _sp_card(game.away_pitcher, game.away_team, l30=sp_l30)
+                _sp_card(game.away_pitcher, game.away_team, recent=sp_recent)
             with field_column:
                 _stadium_panel(game)
             with home_column:
-                _sp_card(game.home_pitcher, game.home_team, l30=sp_l30)
+                _sp_card(game.home_pitcher, game.home_team, recent=sp_recent)
             st.caption(
                 "Starter cards (D-111): the overall row reads the season "
                 "boards (expected-statistics and Statcast boards against, "
-                "statsapi season line) or, on the toggle, the last 30 days "
-                "of kept events; the side rows always read that L30 window. "
-                "Green marks only the digest's pitcher-vulnerability reads — "
-                "HR/9 ≥ 1.5 (v2.2) and wOBA above xwOBA. L30 publishes no innings "
-                "and no per-event expected SLG, so HR/9 and xISO stay "
-                "season reads and the HR count shows instead. Amber: below "
-                "the ratified floor — 80 BF / 40 BBE on a side row, 15 BBE "
-                "on contact reads — value shown, advisory attached (D-068). "
-                "**Cell colors (D-127, PO):** the metric cells grade "
-                "vulnerability on the researched 2025 scale — greener is "
-                "more forgiving; the ratified green reads above outrank a "
-                "band. The edges: " + _PITCHER_SCALE_TEXT + "."
+                "statsapi season line) or, on the toggle, the last two "
+                "months of kept events (D-128, PO); the side rows always "
+                "read that two-month window. Green marks only the digest's "
+                "pitcher-vulnerability read — HR/9 ≥ 1.5 (v2.2). The "
+                "event scope publishes no innings and no per-event "
+                "expected SLG, so HR/9 and xISO stay season reads and the "
+                "HR count shows instead. Per the PO (D-128) the pitcher "
+                "tables drop wOBA and ISO — xwOBA and xISO stay — and add "
+                "Hard-Hit %, the 95+ mph share of batted balls against. "
+                "Amber: below the ratified floor — 80 BF / 40 BBE on a "
+                "side row, 15 BBE on contact reads — value shown, "
+                "advisory attached (D-068). **Cell colors (D-127, PO):** "
+                "the metric cells grade vulnerability on the researched "
+                "2025 scale — greener is more forgiving; the ratified "
+                "green reads above outrank a band. The edges: " + _PITCHER_SCALE_TEXT + "."
             )
             for label, batters, opposing_card in (
                 ("Away", game.away_batters, game.home_pitcher),
@@ -3266,10 +3350,12 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
                         + (
                             "Columns read the batter's season sources "
                             "(D-110's regression gaps moved to the "
-                            "Sluggers tags, D-125)."
+                            "Sluggers tags, D-125) — except Robbed HR: "
+                            "always the last 7 days of his event record, "
+                            "on both views (D-128, PO)."
                             if season_view
                             else (
-                                "Columns read the batter's last 30 days "
+                                f"Columns read the batter's last {window_days} days "
                                 "against that mix's qualifying pitches — "
                                 "except Robbed HR: 375+ ft balls that "
                                 "stayed in the park, last 7 days."
@@ -3301,24 +3387,31 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
                         styles["Total"] = _REASON_CSS
                     style_rows.append(styles)
                 frame = pd.DataFrame(text_rows)
-                event = st.dataframe(
+                st.dataframe(
                     styled_text_frame(frame, pd.DataFrame(style_rows)),
                     hide_index=True,
-                    on_select="rerun",
-                    selection_mode="single-row",
                     column_config=_column_help(
                         frame.columns,
                         _MATCHUPS_HELP,
                         _GRID_STARS_SEASON if season_view else _GRID_STARS_WINDOW,
                     ),
-                    key=(
-                        f"matchups_{board.official_date}_{game.game_pk}_"
-                        f"{label.lower()}_{_selection_epoch()}"
-                    ),
+                    key=f"matchups_{board.official_date}_{game.game_pk}_{label.lower()}",
                 )
-                rows = event.selection.rows
-                if rows and selected is None:
-                    selected = batters[rows[0]]
+                # D-128 (PO): the detail opens from a named More button
+                # per batter, not a row selection — a 22-column metric
+                # grid cannot carry in-grid buttons, so they sit in rows
+                # of five under their own grid.
+                for row_start in range(0, len(batters), 5):
+                    button_columns = st.columns(5)
+                    for offset, card in enumerate(batters[row_start : row_start + 5]):
+                        if selected is None and button_columns[offset].button(
+                            f"More — {card.full_name}",
+                            key=(
+                                f"more_{board.official_date}_{game.game_pk}_"
+                                f"{label.lower()}_{card.player_id}"
+                            ),
+                        ):
+                            selected = card
     return selected
 
 
@@ -3596,7 +3689,10 @@ def render_live_board() -> None:
         st.subheader(heading)
     blot = st.empty()
     blot.markdown(BLOT_HTML, unsafe_allow_html=True)
-    board = live_board(slate_date.isoformat())
+    # D-128 (PO): the board builds on the Matchups tab's batter window —
+    # the selector's session state is read before its widgets render, so a
+    # changed window rebuilds on the rerun (a fresh build, then cached).
+    board = live_board(slate_date.isoformat(), _matchups_window_days())
     blot.empty()
     if isinstance(board, FetchFailure):
         st.warning(f"The {slate_date.isoformat()} schedule could not be fetched: {board.reason}")

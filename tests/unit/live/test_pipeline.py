@@ -29,6 +29,7 @@ from greenmachine.live.mlb_api import (
 )
 from greenmachine.live.pipeline import _starter_workload, _stuff_drift, build_board
 from greenmachine.live.savant import (
+    BattedBallRow,
     BatTrackingRow,
     ExpectedStatsRow,
     PitchArsenalRow,
@@ -228,6 +229,7 @@ class _FakeSavant:
         pitcher_expected: dict[int, ExpectedStatsRow] | FetchFailure | None = None,
         pitcher_statcast: dict[int, StatcastPitcherRow] | FetchFailure | None = None,
         statcast: dict[int, StatcastBatterRow] | FetchFailure | None = None,
+        batted_ball: dict[int, BattedBallRow] | FetchFailure | None = None,
     ) -> None:
         self._batter_arsenal = batter_arsenal
         self._pitcher_arsenal = pitcher_arsenal
@@ -237,6 +239,14 @@ class _FakeSavant:
         self._pitcher_expected = pitcher_expected
         self._pitcher_statcast = pitcher_statcast
         self._statcast = statcast
+        self._batted_ball = batted_ball
+
+    def fetch_batted_ball(
+        self, *, year: int, minimum: int = 0
+    ) -> dict[int, BattedBallRow] | FetchFailure:
+        if self._batted_ball is not None:
+            return self._batted_ball
+        return {}
 
     def fetch_pitch_arsenal(
         self, *, kind: str, year: int
@@ -918,10 +928,12 @@ def test_batter_matchup_lines_are_side_scoped_over_each_window() -> None:
 
 
 def test_mix_line_counts_only_the_qualifying_mix_pitches() -> None:
-    """D-079: the grid line reads the batter's L30 events against the
+    """D-079: the grid line reads the batter's window events against the
     starter's qualifying (>=14% usage) mix pitches — a fringe pitch the
     starter barely throws never enters a denominator. With no probable
-    named there is no scope and no line (D-081)."""
+    named there is no scope and no line (D-081). D-128 (PO): with no
+    arsenal board at either year the mix falls back to the two-month
+    event record, labelled."""
     pitcher_events = tuple(
         _window_event(batter_id=555, pitcher_id=PITCHER_ID, pitch_type="FF") for _ in range(20)
     ) + tuple(
@@ -933,7 +945,7 @@ def test_mix_line_counts_only_the_qualifying_mix_pitches() -> None:
     board = _build(_FakeApi(), _FakeSavant(), events=pitcher_events + batter_events)
     assert not isinstance(board, FetchFailure)
     away = board.games[0].away_batters[0]
-    assert away.mix_label == "last 30 days"
+    assert away.mix_label == "last 60 days"
     line = away.mix_line
     assert line is not None
     assert line.pitches == 4
@@ -942,13 +954,44 @@ def test_mix_line_counts_only_the_qualifying_mix_pitches() -> None:
     assert board.games[0].home_batters[0].mix_line is None
 
 
-def test_mix_reaches_back_to_l45_only_when_the_window_is_empty() -> None:
-    """D-081: a starter with no pitches in the matchup window extends the
-    read to L45, named on the surface; the extra days are fetched only when
-    some probable needs them."""
+def test_the_mix_reads_the_season_board_first() -> None:
+    """D-128 (PO): the mix scope is the starter's whole season off the
+    arsenal board, labelled "season" — the two-month record and last
+    season's board are fallbacks now. The board's usage decides the
+    qualifying mix even when the event record disagrees."""
+    # The record is all sliders; the board says the curveball is a real
+    # pitch (20% >= the 14% qualifying share) — so the batter's curveball
+    # hits count against the mix.
+    pitcher_events = tuple(
+        _window_event(batter_id=555, pitcher_id=PITCHER_ID, pitch_type="SL") for _ in range(20)
+    )
+    batter_events = tuple(
+        _window_event(pitch_type="CB", event="single", pitcher_id=999) for _ in range(4)
+    )
+    savant = _FakeSavant(
+        pitcher_arsenal=(
+            _arsenal_row(PITCHER_ID, "FF", "0.55", "0.300", "0.25", "0.20"),
+            _arsenal_row(PITCHER_ID, "CB", "0.20", "0.280", "0.22", "0.18"),
+        ),
+    )
+    board = _build(_FakeApi(), savant, events=pitcher_events + batter_events)
+    assert not isinstance(board, FetchFailure)
+    away = board.games[0].away_batters[0]
+    assert away.mix_label == "season"
+    line = away.mix_line
+    assert line is not None
+    assert line.at_bats == 4  # the board's curveball qualifies the scope
+
+
+def test_the_mix_falls_back_to_the_two_month_record_without_a_board() -> None:
+    """D-128 (PO): with no arsenal board at either year the mix reads the
+    two-month event record, labelled. D-081's separate L45 reach is
+    subsumed — the fetch spans sixty-one days on every build, so a pitch
+    thrown forty-five days back still makes the mix and no second fetch
+    ever fires."""
     old_starter_events = (
         _window_event(
-            batter_id=555, pitcher_id=PITCHER_ID, pitch_type="FF", game_date="2026-07-20"
+            batter_id=555, pitcher_id=PITCHER_ID, pitch_type="FF", game_date="2026-07-06"
         ),
     )
     batter_events = (_window_event(pitch_type="FF", event="single", pitcher_id=999),)
@@ -971,33 +1014,179 @@ def test_mix_reaches_back_to_l45_only_when_the_window_is_empty() -> None:
     )
     assert not isinstance(board, FetchFailure)
     away = board.games[0].away_batters[0]
-    assert away.mix_label == "last 45 days"
-    assert min(fetched) == date(2026, 7, 6)  # the reach fetched days 31-45 back
+    assert away.mix_label == "last 60 days"
+    assert min(fetched) == date(2026, 6, 21)  # one 61-day record, no reach
     line = away.mix_line
     assert line is not None
     assert line.at_bats == 1
+    # The same forty-five-day-old event feeds the starter's recent line.
+    starter = board.games[0].home_pitcher
+    assert starter is not None and starter.recent_overall is not None
+    assert starter.recent_overall.plate_appearances == 1
 
-    # No empty-window starter: the reach never fires.
-    fetched.clear()
-    recent_starter = (_window_event(batter_id=555, pitcher_id=PITCHER_ID, pitch_type="FF"),)
-    current_events = recent_starter + batter_events
 
-    def fetch_current_day(day: date) -> tuple[PitchEvent, ...]:
+def test_the_batter_window_parameter_rewindows_the_grid_and_reaches() -> None:
+    """D-128 (PO): the Matchups tab's timeframe selector passes its own
+    batter window — the grid scope and the precomputed dialog reaches
+    follow it, the robbed count keeps its own L7 basis on both lines, and
+    the fetch still spans the two-month pitcher record."""
+    batter_events = (
+        _window_event(
+            pitch_type="FF", event="single", pitcher_id=999, game_date="2026-08-15"
+        ),  # five days back — inside a 14-day window
+        _window_event(
+            pitch_type="FF", event="single", pitcher_id=999, game_date="2026-08-01"
+        ),  # nineteen days back — outside it
+        _window_event(
+            pitch_type="FF",
+            event="field_out",
+            pitcher_id=999,
+            game_date="2026-08-16",
+            hit_distance=Decimal("380"),
+            launch_speed_angle=3,
+        ),  # robbed-shaped, six days back — inside the L7 basis
+    )
+    pitcher_events = tuple(
+        _window_event(batter_id=555, pitcher_id=PITCHER_ID, pitch_type="FF") for _ in range(20)
+    )
+    all_events = batter_events + pitcher_events
+    fetched: list[date] = []
+
+    def fetch_day(day: date) -> tuple[PitchEvent, ...]:
         fetched.append(day)
-        return tuple(e for e in current_events if e.game_date == day.isoformat())
+        return tuple(e for e in all_events if e.game_date == day.isoformat())
 
+    savant = _FakeSavant(
+        pitcher_arsenal=(_arsenal_row(PITCHER_ID, "FF", "0.55", "0.300", "0.25", "0.20"),),
+    )
     board = build_board(
         api=_FakeApi(),  # type: ignore[arg-type]
-        savant=_FakeSavant(),  # type: ignore[arg-type]
+        savant=savant,  # type: ignore[arg-type]
         slate_date=SLATE_DATE,
         as_of=AS_OF,
         config=CONFIG,
-        fetch_day_events=fetch_current_day,
+        batter_window_days=14,
+        fetch_day_events=fetch_day,
         temperature_for=lambda venue: Decimal("78"),
         park_factors=_park_factors(),
     )
     assert not isinstance(board, FetchFailure)
-    assert min(fetched) == date(2026, 7, 21)  # the plain 31-day window only
+    away = board.games[0].away_batters[0]
+    line = away.mix_line
+    assert line is not None
+    assert line.at_bats == 2  # the 14-day scope: the single and the out
+    assert line.robbed_hr_count == 1  # the L7 basis inside the window
+    assert set(away.matchup_lines_by_window) == {7, 14}
+    season_line = away.season_line
+    assert season_line is not None
+    assert season_line.robbed_hr_count == 1  # D-128 (PO): shown on both views
+    assert min(fetched) == date(2026, 6, 21)  # the pitcher reach still governs
+
+
+def test_the_batter_window_cannot_undercut_the_robbed_basis() -> None:
+    """D-128: the robbed count reads window_cutoffs[7], so a batter window
+    under seven days is a programmer error named loudly, never a KeyError."""
+    import pytest
+
+    with pytest.raises(ValueError, match="batter window"):
+        build_board(
+            api=_FakeApi(),  # type: ignore[arg-type]
+            savant=_FakeSavant(),  # type: ignore[arg-type]
+            slate_date=SLATE_DATE,
+            as_of=AS_OF,
+            config=CONFIG,
+            batter_window_days=5,
+            fetch_day_events=lambda day: (),
+            temperature_for=lambda venue: Decimal("78"),
+            park_factors=_park_factors(),
+        )
+
+
+def test_straight_air_share_reads_the_fifteen_degree_band() -> None:
+    """D-128 (PO): the straight-away profile is the air balls within
+    fifteen degrees of dead center over the identical measurable-air
+    denominator. Pull and oppo keep the ratified signed convention, so
+    they partition the set while straight overlaps a near-center ball's
+    signed side — one denominator, not a partition."""
+    from greenmachine.live.pipeline import _batter_grid_line
+
+    # The fixture batter is a lefty: spray < 0 is his pull side.
+    pull = _window_event(hc_x=Decimal("96.9"), hc_y=Decimal("120"))  # -20 deg
+    straight = _window_event(hc_x=Decimal("125.42"), hc_y=Decimal("120"))  # dead center
+    oppo = _window_event(hc_x=Decimal("153.9"), hc_y=Decimal("120"))  # +20 deg
+    overlap = _window_event(
+        hc_x=Decimal("111.6"), hc_y=Decimal("120")
+    )  # -10 deg: pull AND straight
+    line = _batter_grid_line((pull, straight, oppo, overlap), robbed_count=0)
+    assert line is not None
+    assert line.pull_air_share == Decimal("0.5")  # the -20 and the -10
+    assert line.oppo_air_share == Decimal("0.25")
+    assert line.straight_air_share == Decimal("0.5")  # dead center and the -10
+    # Pull and oppo partition; straight's band crosses the signed sides.
+    assert line.pull_air_share + line.oppo_air_share == Decimal("0.75")
+
+
+def test_the_season_line_reads_the_published_air_profiles() -> None:
+    """D-128 (PO): the season view's pull/straight/oppo are Savant's own
+    published buckets off the batted-ball board, rebased pipeline-side to
+    shares of the batter's air balls — published numbers, never a
+    home-built derivation. No board row, no split: named absences."""
+    hitting = {
+        BATTER_ID: SeasonHittingLine(
+            player_id=BATTER_ID,
+            full_name="Covered Batter",
+            bats="L",
+            games=120,
+            plate_appearances=500,
+            at_bats=440,
+            hits=121,
+            home_runs=33,
+            strikeouts=130,
+        )
+    }
+    savant = _FakeSavant(
+        batted_ball={
+            BATTER_ID: BattedBallRow(
+                player_id=BATTER_ID,
+                batted_ball_events=300,
+                air_share=Decimal("0.50"),
+                pull_air_share_of_bbe=Decimal("0.16"),
+                straight_air_share_of_bbe=Decimal("0.19"),
+                oppo_air_share_of_bbe=Decimal("0.15"),
+            )
+        },
+    )
+    board = _build(_FakeApi(hitting=hitting), savant)
+    assert not isinstance(board, FetchFailure)
+    line = board.games[0].away_batters[0].season_line
+    assert line is not None
+    assert line.pull_air_share == Decimal("0.32")  # 0.16 / 0.50
+    assert line.straight_air_share == Decimal("0.38")
+    assert line.oppo_air_share == Decimal("0.30")
+    total = line.pull_air_share + line.straight_air_share + line.oppo_air_share
+    assert total == Decimal(1)  # the published buckets partition air balls
+
+    # An empty air share publishes no split — named absences, never a
+    # divide-by-zero.
+    grounded = _FakeSavant(
+        batted_ball={
+            BATTER_ID: BattedBallRow(
+                player_id=BATTER_ID,
+                batted_ball_events=300,
+                air_share=Decimal("0"),
+                pull_air_share_of_bbe=Decimal("0"),
+                straight_air_share_of_bbe=Decimal("0"),
+                oppo_air_share_of_bbe=Decimal("0"),
+            )
+        },
+    )
+    board = _build(_FakeApi(hitting=hitting), grounded)
+    assert not isinstance(board, FetchFailure)
+    line = board.games[0].away_batters[0].season_line
+    assert line is not None
+    assert line.pull_air_share is None
+    assert line.straight_air_share is None
+    assert line.oppo_air_share is None
 
 
 def test_mix_falls_back_to_the_season_board_when_no_window_pitches() -> None:
@@ -1118,8 +1307,9 @@ def test_season_grid_line_composes_the_season_sources() -> None:
     """D-079's toggle target: the season line reads the hitting line
     (AVG/SLG/ISO from total bases), the statcast board (EV, barrels,
     hard-hit), and the arsenal board (PA-weighted xwOBA, pitch-weighted
-    Swing-Str). The season scope has no per-event record, so the robbed
-    count and the pull-air read stay None."""
+    Swing-Str). The season scope has no per-event record, so the spray
+    reads stay None — while the robbed count rides along on its own L7
+    basis (D-128, PO)."""
     hitting = {
         BATTER_ID: SeasonHittingLine(
             player_id=BATTER_ID,
@@ -1158,8 +1348,11 @@ def test_season_grid_line_composes_the_season_sources() -> None:
     assert line.hard_hit_share == Decimal("0.5")
     assert line.expected_woba == Decimal("0.35")
     assert line.whiff_share == Decimal("0.20")
-    assert line.robbed_hr_count is None
+    # D-128 (PO): the robbed count rides the season line too — always the
+    # L7 basis; the fixture's balls carry no distances, so zero robbed.
+    assert line.robbed_hr_count == 0
     assert line.pull_air_share is None
+    assert line.straight_air_share is None  # no season spray read
     # D-124: the season average launch angle rides the season line off the
     # Statcast board — context only, never a firing line.
     assert line.avg_launch_angle == Decimal("16.4")
@@ -1352,6 +1545,7 @@ def _pitcher_statcast_row() -> StatcastPitcherRow:
         batted_ball_events=100,
         avg_launch_angle=Decimal("12.9"),
         barrel_count=8,
+        hard_hit_count=40,
     )
 
 
@@ -1393,6 +1587,9 @@ def test_the_pitcher_card_carries_the_d111_season_reads() -> None:
     assert reads.plate_appearances == 620
     assert reads.barrel_share == Decimal("0.08")
     assert reads.avg_launch_angle == Decimal("12.9")
+    # D-128 (PO): the hard-hit share against reads the same board's
+    # ev95plus count over its BBE sample.
+    assert reads.hard_hit_share == Decimal("0.4")
     assert reads.batted_ball_events == 100
     assert reads.home_runs == 20
     assert reads.innings_text == "150.1"
@@ -1414,10 +1611,11 @@ def test_innings_notation_is_outs_not_tenths() -> None:
     assert _innings_as_decimal("1.10") is None
 
 
-def test_the_pitcher_l30_lines_read_the_kept_events_by_side() -> None:
-    """D-111: the default slate's kept events all belong to the starter and
-    every one came against a left-handed batter, so his overall and vs-L
-    lines carry the record while vs-R names its empty scope."""
+def test_the_pitcher_recent_lines_read_the_kept_events_by_side() -> None:
+    """D-111, rewindowed by D-128 (PO) to the last two months: the default
+    slate's kept events all belong to the starter and every one came
+    against a left-handed batter, so his overall and vs-L lines carry the
+    record while vs-R names its empty scope."""
     board = _build(_FakeApi(), _FakeSavant())
     assert not isinstance(board, FetchFailure)
     card = board.games[0].home_pitcher
@@ -1427,6 +1625,9 @@ def test_the_pitcher_l30_lines_read_the_kept_events_by_side() -> None:
     assert overall.plate_appearances == MIN_BBE_FORM
     assert overall.batted_balls == MIN_BBE_FORM
     assert overall.barrel_share == Decimal(1)
+    # D-128 (PO): every fixture ball is 96 mph, so the hard-hit share
+    # against is the whole record.
+    assert overall.hard_hit_share == Decimal(1)
     assert overall.avg_launch_angle == Decimal("20")
     assert overall.air_ball_share == Decimal(1)
     assert overall.ground_ball_share == Decimal(0)  # D-114: all fly balls here

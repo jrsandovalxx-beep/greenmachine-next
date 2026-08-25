@@ -2959,3 +2959,103 @@ temp-award colors (65-74 light red, 75-84 light green, 45-64 red), with
 samples and "not covered"/"source unavailable" cells neutral. Full gate
 green on both Pythons (3422 passed, 1 skipped), consistency check
 clean, all four showcase runners clean.
+
+## D-128 - Matchups structure: season-first with a counted recent window, two-month pitcher reads, the third air profile, published numbers over home-built ones
+
+**Decided:** 2026-08-25 · **Status:** shipped (staging)
+
+The change list's Matchups block (items 31-46): the tab loads the
+season view first; the season/recent toggle becomes a timeframe
+selector (a counter up to 3 months or 12 weeks, with the year as the
+way back to the season); the pitcher tables read the season by default
+with a recent-form toggle over the last two months; the pitcher tables
+drop wOBA and ISO (xwOBA and xISO stay) and add Hard-Hit %; robbed HRs
+show even on the season view with a note that the count is L7-based;
+all three batted-ball air profiles grid (pull, straight, oppo); the
+select boxes become "more" buttons; the mix scope is the pitcher's
+whole season mix, with the RHB/LHB side usage confirmed side-correct.
+Item 47 is skipped per the PO's own note.
+
+**Standing data-sourcing directive (PO, 2026-08-25 — applies to every
+future build).** Before building any stat, check whether Baseball
+Savant, FanGraphs, or pybaseball already publishes it: "No need to
+build our own numbers if it's readily available." Baseball Savant is
+the source of truth; FanGraphs and pybaseball are good-enough backups,
+and pybaseball is fully in wherever reasonable. This decision built on
+it: the season view's three air profiles read Savant's published
+batted-ball buckets instead of a home-built split, and the pitcher
+Hard-Hit % reads the Savant pitcher board's own ev95plus count.
+
+**The window.** A "Batter window" radio (2026 season / Recent window)
+plus a counter and a weeks/months unit — no select boxes anywhere. The
+season view is the default and sources the season boards; a recent
+window counts 1-12 weeks or 1-3 months (months clamp at 3, named on
+the surface). The grid's grade stays the L30 computation on the season
+view and follows the shown window on a recent one. The fetch record
+spans max(batter window, 60) days so the pitcher reads never starve —
+a wider window costs one fetch per extra day on the first build, then
+caches per slate-and-window (the caption says so).
+
+**Pitcher reads: two months.** Every pitcher event read — the recent
+lines, the side usage, the pitch sets, the stuff drift — now reads the
+last 60 days of kept events (L30 before). The starter cards' overall
+row flips season/two-month on the toggle; the side rows always read
+the two-month window and are labeled "vs L (2M)" / "vs R (2M)".
+
+**Pitcher tables.** wOBA and ISO left the starter cards and the Arms
+tab; xwOBA and xISO stay. Hard-Hit % joined both scopes — the season
+cell reads the Savant pitcher board's ev95plus count over its BBE
+sample (verified live: the board carries the column), the recent cell
+the 95+ mph share of the two-month record's batted balls against. The
+wOBA-over-xwOBA green died with the wOBA column; HR/9 ≥ 1.5 stays the
+one ratified pitcher-vulnerability green, and D-127's registry grades
+the rest (Hard-Hit % band: elite ≥ 46% / very poor < 30%, mirrored
+around the 2025 league ≈40%).
+
+**The third air profile.** Pull and oppo keep D-071's ratified signed
+spray convention — verified on real data, they partition measurable
+air balls exactly, so a residue "straight" would always read zero.
+Instead: the recent view's Straight Air % is the ±15° band around dead
+center (Statcast's attack-direction convention) over the identical
+measurable-air denominator — a near-center ball counts in its signed
+side column too; one denominator, not a partition, and the hover says
+so. The season view reads Savant's published pull/straight/oppo
+buckets off the batted-ball board — shares of ALL batted balls whose
+sum is the air share, verified live — rebased pipeline-side to shares
+of the batter's air balls. Straight and oppo stay uncolored fit reads.
+
+**Robbed HR on both views.** The 375+ ft count is always the last 7
+days of the event record — the season sources publish no per-ball
+distances — so it shows on the season view too, with the basis named
+in the hover and the scope caption.
+
+**The mix.** Scope precedence is the season arsenal board first
+("season"), then last season's board ("last season"), then the
+two-month event record ("last 60 days") — D-081's L45 reach is
+deleted, subsumed. Verified live: the arsenal board's hand filter is
+inert (identical bytes either way), so no published season per-side
+mix exists; per the PO's documented fallback the side usage stays
+event-derived over the two-month record — side-correct by
+construction, with a pipeline test pinning it.
+
+**More buttons.** Row selection left the grids (a 22-column grid
+cannot carry in-grid buttons); a "More — {name}" button per batter
+sits in rows of five under each grid and opens the same batter detail
+dialog the Sluggers bubbles use.
+
+**Judgment calls, disclosed.** (a) Items 39-vs-44: the pitcher tables
+drop wOBA/ISO while the batter tables keep ISO/xwOBA — read as
+pitcher-only, since 44 names the pitcher tables. (b) The wOBA>xwOBA
+highlight died with its column rather than migrating. (c) The v2.2
+tags that quoted an "L30 record" now read the same two-month record
+the pitcher reads use — thresholds unchanged, texts renamed "(2-month
+record)"/"2M". (d) Season per-side mix has no published board, so the
+fallback above applies. (e) Straight Air %'s recent-view band overlaps
+the signed reads by design — documented on the hover, never summed.
+(f) The default fetch roughly doubles (61 day-queries) — cached per
+slate+window. (g) More buttons in rows of five under each grid.
+(h) On a custom recent window the grade follows the shown window; it
+stays L30 on the season view.
+
+Full gate green on both Pythons (3427 passed, 1 skipped), consistency
+check clean, all four showcase runners clean.

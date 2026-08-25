@@ -176,6 +176,9 @@ class _OutageSavant:
     def fetch_statcast_pitchers(self, *, year: int, minimum: int = 0) -> dict:
         return {}
 
+    def fetch_batted_ball(self, *, year: int, minimum: int = 0) -> dict:
+        return {}
+
 
 def _outage_board() -> SlateBoard:
     """A real board build in which every metric feed failed."""
@@ -341,7 +344,12 @@ def test_main_screen_is_the_shell_plus_the_live_board(_staged_app: SlateBoard) -
     # No demo choosers, and no ranking control anywhere (D-015/D-017).
     assert not at.selectbox
     assert not at.multiselect
-    assert not at.radio
+    # D-128 (PO): the only radios on the board are the Matchups tab's
+    # batter-window selector — scope picks, never a ranking control.
+    assert {radio.key for radio in at.radio} <= {
+        "matchups_view_mode",
+        "matchups_window_unit",
+    }
     markup = "\n".join(element.value for element in at.markdown)
     assert "gm-orb" in markup
     assert "ENVIRONMENT staging" in markup
@@ -867,6 +875,7 @@ def _grid_line(**overrides: object) -> object:
         "iso": Decimal("0.6"),
         "robbed_hr_count": 1,
         "pull_air_share": Decimal("0.4"),
+        "straight_air_share": Decimal("0.3"),
         "oppo_air_share": Decimal("0.25"),
         "expected_woba": Decimal("0.45"),
         "whiff_share": Decimal("0.12"),
@@ -879,8 +888,9 @@ def test_grid_line_cells_render_rates_and_named_absences() -> None:
     """D-079/D-081: a present line renders every column in its display
     shape; a scope missing at every reach states 'no data available', and a
     rate with no denominator is a styled dash — never an invented zero.
-    D-124: the L30 view stars the two spray shares, whose metrics carry
-    ratified v2.2 firing lines."""
+    D-124: the recent view stars the two signed spray shares, whose metrics
+    carry ratified v2.2 firing lines. D-128 (PO): the third air profile —
+    Straight Air % — grids unstarred between them."""
     import streamlit_app
 
     texts, styles = streamlit_app._grid_line_cells(None)
@@ -898,6 +908,7 @@ def test_grid_line_cells_render_rates_and_named_absences() -> None:
         "ISO",
         "Robbed HR",
         "Pull Air % ★",
+        "Straight Air %",
         "Oppo Air % ★",
         "xwOBA",
         "Swing-Str %",
@@ -912,11 +923,12 @@ def test_grid_line_cells_render_rates_and_named_absences() -> None:
     # last 7 days — a raw count, not a rate.
     assert texts["Robbed HR"] == "1"
     assert texts["Pull Air % ★"] == "40.0%"
+    assert texts["Straight Air %"] == "30.0%"
     assert texts["Oppo Air % ★"] == "25.0%"
     assert texts["xwOBA"] == ".450"
     # D-127 (PO): the researched bands grade every valued rate cell —
     # three greens to dark at elite, three reds to dark at very poor. The
-    # counting columns and the Oppo Air % fit read stay neutral.
+    # counting columns and the Straight/Oppo Air % fit reads stay neutral.
     assert styles == {
         "EV": streamlit_app._BAND_G3_CSS,  # 95.5 ≥ 91
         "Barrel/PA %": streamlit_app._BAND_G3_CSS,  # 16.7% ≥ 9%
@@ -928,16 +940,24 @@ def test_grid_line_cells_render_rates_and_named_absences() -> None:
         "xwOBA": streamlit_app._BAND_G3_CSS,  # .450 ≥ .370
         "Swing-Str %": streamlit_app._BAND_G3_CSS,  # 12% ≤ 18%
     }
+    assert "Straight Air %" not in styles
     assert "Oppo Air % ★" not in styles
 
     texts, styles = streamlit_app._grid_line_cells(
-        _grid_line(robbed_hr_count=None, pull_air_share=None, oppo_air_share=None)
+        _grid_line(
+            robbed_hr_count=None,
+            pull_air_share=None,
+            straight_air_share=None,
+            oppo_air_share=None,
+        )
     )
     assert texts["Robbed HR"] == "—"
     assert texts["Pull Air % ★"] == "—"
+    assert texts["Straight Air %"] == "—"
     assert texts["Oppo Air % ★"] == "—"
     assert styles["Robbed HR"] == streamlit_app._REASON_CSS
     assert styles["Pull Air % ★"] == streamlit_app._REASON_CSS
+    assert styles["Straight Air %"] == streamlit_app._REASON_CSS
 
 
 def _sp_reads() -> PitcherSeasonReads:
@@ -950,6 +970,7 @@ def _sp_reads() -> PitcherSeasonReads:
         batted_ball_events=450,
         barrel_share=Decimal("0.08"),
         avg_launch_angle=Decimal("12.9"),
+        hard_hit_share=Decimal("0.42"),
         home_runs=26,
         home_run_per_nine=Decimal("1.50"),
         innings_text="150.1",
@@ -957,40 +978,38 @@ def _sp_reads() -> PitcherSeasonReads:
 
 
 def test_sp_season_row_marks_the_digest_reads_green() -> None:
-    """D-111: green marks only the digest's pitcher-vulnerability reads —
-    HR/9 at or above 1.4 and wOBA above xwOBA — and the samples ride the
-    Scope label beside the rates they basis."""
+    """D-111: green marks only the digest's pitcher-vulnerability read —
+    HR/9 at or above the ratified line — and the samples ride the Scope
+    label beside the rates they basis. D-128 (PO): wOBA and ISO left the
+    pitcher tables — xwOBA and xISO stay — Hard-Hit % joined, and the
+    wOBA-over-xwOBA highlight went with its column."""
     import streamlit_app
 
     row, styles = streamlit_app._sp_season_row(_sp_reads())
     assert row["Scope"] == "Season — 620 PA · 450 BBE · 150.1 IP"
-    assert row["wOBA"] == ".320"
+    assert "wOBA" not in row and "ISO" not in row
     assert row["xwOBA"] == ".297"
     assert row["HR"] == "26"
     assert row["HR/9"] == "1.50"
     assert row["BRL%"] == "8.0%"
+    assert row["Hard-Hit %"] == "42.0%"
     assert row["LA"] == "12.9°"
-    assert row["ISO"] == ".170"
     assert row["xISO"] == ".180"
-    assert styles["wOBA"] == streamlit_app._HIGHLIGHT
     assert styles["HR/9"] == streamlit_app._HIGHLIGHT
     # D-127 (PO): the researched vulnerability bands grade the rest —
     # the "no invented bands" posture is superseded by the PO's
     # color-graded-cells directive, with every edge printed on the
-    # surface (D-079). The ratified green reads keep precedence.
+    # surface (D-079). The ratified green read keeps precedence.
     assert styles["xwOBA"] == streamlit_app._BAND_R1_CSS  # .297 < .300
     assert styles["BRL%"] == streamlit_app._BAND_G1_CSS  # 8.0% ≥ 8%
-    assert styles["ISO"] == streamlit_app._BAND_G2_CSS  # .170 ≥ .170
+    assert styles["Hard-Hit %"] == streamlit_app._BAND_G1_CSS  # 42% ≥ 40%
     assert styles["xISO"] == streamlit_app._BAND_G2_CSS  # .180 ≥ .170
     assert "LA" not in styles  # 12.9° — the neutral middle
-    # On the lines' other side: no ratified green — the researched bands
-    # still grade what the cells are worth (wOBA .290 lands light red,
-    # HR/9 1.39 strong green on the vulnerability scale).
-    flipped = dataclasses.replace(
-        _sp_reads(), woba=Decimal("0.290"), home_run_per_nine=Decimal("1.39")
-    )
+    # On the line's other side: no ratified green — the researched bands
+    # still grade what the cells are worth (HR/9 1.39 lands strong green
+    # on the vulnerability scale).
+    flipped = dataclasses.replace(_sp_reads(), home_run_per_nine=Decimal("1.39"))
     _, styles = streamlit_app._sp_season_row(flipped)
-    assert styles["wOBA"] == streamlit_app._BAND_R1_CSS
     assert styles["HR/9"] == streamlit_app._BAND_G2_CSS
 
 
@@ -1002,11 +1021,12 @@ def test_sp_season_row_names_absences_and_the_contact_floor() -> None:
     row, styles = streamlit_app._sp_season_row(None)
     assert row["Scope"] == "Season — no season record"
     assert all(text == "—" for key, text in row.items() if key != "Scope")
-    assert styles["wOBA"] == streamlit_app._REASON_CSS
+    assert styles["xwOBA"] == streamlit_app._REASON_CSS
     thin = dataclasses.replace(_sp_reads(), batted_ball_events=12)
     row, styles = streamlit_app._sp_season_row(thin)
     assert row["Scope"].endswith("INSUFFICIENT")
     assert styles["BRL%"] == streamlit_app._INSUFFICIENT_CSS
+    assert styles["Hard-Hit %"] == streamlit_app._INSUFFICIENT_CSS
     assert styles["LA"] == streamlit_app._INSUFFICIENT_CSS
     assert row["BRL%"] == "8.0%"  # the value stays visible (D-068)
 
@@ -1022,42 +1042,49 @@ def _sp_line() -> PitcherRecentLine:
         avg_launch_angle=Decimal("17.5"),
         air_ball_share=Decimal("0.55"),
         iso=Decimal("0.210"),
+        hard_hit_share=Decimal("0.50"),
         ground_ball_share=Decimal("0.38"),
         classified_batted_balls=30,
     )
 
 
-def test_sp_recent_row_names_the_l30_absences() -> None:
-    """D-111: the L30 scope publishes no innings and no per-event expected
-    SLG, so HR/9 and xISO name their absences and the HR count shows."""
+def test_sp_recent_row_names_the_two_month_absences() -> None:
+    """D-111: the event scope publishes no innings and no per-event expected
+    SLG, so HR/9 and xISO name their absences and the HR count shows.
+    D-128 (PO): the scope is the last two months now, and wOBA left the
+    pitcher tables."""
     import streamlit_app
 
-    row, styles = streamlit_app._sp_recent_row("vs L (L30)", _sp_line(), vulnerability_floor=True)
-    assert row["Scope"] == "vs L (L30) — 41 BF · 33 BBE · INSUFFICIENT"
+    row, styles = streamlit_app._sp_recent_row("vs L (2M)", _sp_line(), vulnerability_floor=True)
+    assert row["Scope"] == "vs L (2M) — 41 BF · 33 BBE · INSUFFICIENT"
     assert row["HR"] == "3"
     assert row["HR/9"] == "—"
     assert row["xISO"] == "—"
+    assert "wOBA" not in row
+    assert row["Hard-Hit %"] == "50.0%"
     assert styles["HR/9"] == streamlit_app._REASON_CSS
     assert styles["xISO"] == streamlit_app._REASON_CSS
     # Below the ratified vulnerability floor (80 BF / 40 BBE): amber, with
     # the values still visible.
-    assert styles["wOBA"] == streamlit_app._INSUFFICIENT_CSS
-    assert row["wOBA"] == ".355"
+    assert styles["xwOBA"] == streamlit_app._INSUFFICIENT_CSS
+    assert row["xwOBA"] == ".310"
     # An empty scope names itself.
-    row, styles = streamlit_app._sp_recent_row("vs R (L30)", None)
-    assert row["Scope"] == "vs R (L30) — no L30 record"
-    assert styles["wOBA"] == streamlit_app._REASON_CSS
+    row, styles = streamlit_app._sp_recent_row("vs R (2M)", None)
+    assert row["Scope"] == "vs R (2M) — no recent record"
+    assert styles["xwOBA"] == streamlit_app._REASON_CSS
 
 
 def test_sp_recent_row_at_the_floor_carries_no_advisory() -> None:
     """D-111: exactly 80 BF and 40 BBE meets the floor — the amber is for
-    below the line, never at it. wOBA above xwOBA still marks green."""
+    below the line, never at it. The researched bands still grade."""
     import streamlit_app
 
     line = dataclasses.replace(_sp_line(), plate_appearances=80, batted_balls=40)
-    row, styles = streamlit_app._sp_recent_row("vs R (L30)", line, vulnerability_floor=True)
+    row, styles = streamlit_app._sp_recent_row("vs R (2M)", line, vulnerability_floor=True)
     assert "INSUFFICIENT" not in row["Scope"]
-    assert styles["wOBA"] == streamlit_app._HIGHLIGHT
+    assert streamlit_app._INSUFFICIENT_CSS not in styles.values()
+    # 50% hard-hit against is past the elite edge on the vulnerability scale.
+    assert styles["Hard-Hit %"] == streamlit_app._BAND_G3_CSS
 
 
 def test_workload_facts_one_wording_both_surfaces() -> None:
@@ -1113,33 +1140,38 @@ def test_arms_carries_the_workload_columns_with_their_absence_named(
 
 
 def test_arms_metrics_mirror_the_card_rules_on_both_scopes() -> None:
-    """D-111: the Arms tab carries the same five metrics plus the air
-    mirror, with the samples as their own columns; the season scope names
-    the air share absent (the board's fbld/gb columns are exit velocities,
-    not a split), and the L30 scope names HR/9 and xISO absent exactly
-    like the cards."""
+    """D-111: the Arms tab carries the card metrics plus the air mirror,
+    with the samples as their own columns; the season scope names the air
+    share absent (the board's fbld/gb columns are exit velocities, not a
+    split), and the two-month scope names HR/9 and xISO absent exactly like
+    the cards. D-128 (PO): wOBA and ISO left the pitcher tables — xwOBA
+    and xISO stay — and Hard-Hit % joined both scopes."""
     import streamlit_app
 
     texts, styles = streamlit_app._arms_season_metrics(_sp_reads())
     assert texts["PA"] == "620"
     assert texts["BBE"] == "450"
-    # The season board publishes no air split — a named absence, L30 only.
+    assert "wOBA" not in texts and "ISO" not in texts
+    assert texts["xwOBA"] == ".297"
+    assert texts["Hard-Hit %"] == "42.0%"
+    # The season board publishes no air split — a named absence, recent only.
     assert texts["Air %"] == "—"
     assert styles["Air %"] == streamlit_app._REASON_CSS
-    # D-116 (PO): GB% lives on the L30 view only — the season scope does
+    # D-116 (PO): GB% lives on the recent view only — the season scope does
     # not carry the column at all.
     assert "GB %" not in texts
-    assert styles["wOBA"] == streamlit_app._HIGHLIGHT
     assert styles["HR/9"] == streamlit_app._HIGHLIGHT
     texts, styles = streamlit_app._arms_recent_metrics(_sp_line())
     assert texts["PA"] == "41"
     assert texts["BBE"] == "33"
+    assert "wOBA" not in texts and "ISO" not in texts
+    assert texts["xwOBA"] == ".310"
+    assert texts["Hard-Hit %"] == "50.0%"
     assert texts["HR"] == "3"
     assert texts["HR/9"] == "—"
     assert texts["xISO"] == "—"
     assert texts["Air %"] == "55.0%"
     assert texts["GB %"] == "38.0%"
-    assert styles["wOBA"] == streamlit_app._HIGHLIGHT
     # GB % reads its own denominator: below the 15-BBE floor on classified
     # contact it keeps its value under the amber advisory.
     thin = dataclasses.replace(_sp_line(), classified_batted_balls=12)
@@ -1149,8 +1181,8 @@ def test_arms_metrics_mirror_the_card_rules_on_both_scopes() -> None:
     # No record at all: a fully named absence, never invented zeros.
     texts, styles = streamlit_app._arms_recent_metrics(None)
     assert all(text == "—" for text in texts.values())
-    assert styles["wOBA"] == streamlit_app._REASON_CSS
-    assert "GB %" in texts  # the L30 column set carries it even on an empty scope
+    assert styles["xwOBA"] == streamlit_app._REASON_CSS
+    assert "GB %" in texts  # the recent column set carries it even on an empty scope
 
 
 def test_grid_line_cells_carry_no_gap_columns_on_either_view() -> None:
@@ -1180,7 +1212,7 @@ def test_grid_line_cells_carry_no_gap_columns_on_either_view() -> None:
     assert "ISO" in texts and "xwOBA" in texts
     for gone in ("xISO-ISO", "xISO-ISO ★", "xwOBA-wOBA", "xwOBA-wOBA ★"):
         assert gone not in texts
-    # The L30 view (the default) never shows LA either.
+    # The recent-window view never shows LA either.
     texts, _ = streamlit_app._grid_line_cells(
         _grid_line(gaps=gaps, avg_launch_angle=Decimal("16.4"))
     )
@@ -1242,8 +1274,9 @@ def test_bands_never_outrank_an_absence_an_advisory_or_the_ratified_green() -> N
 
 def test_band_registries_cover_every_graded_table() -> None:
     """D-127's "all tables" guard: the grid registry grades every rate
-    column the grid carries (Oppo Air % deliberately excepted — a fit
-    read), and the pitcher registry grades every Arms metric column."""
+    column the grid carries (the Straight and Oppo Air % fit reads
+    deliberately excepted — no quality scale, by decision), and the
+    pitcher registry grades every Arms and starter-card metric column."""
     import streamlit_app
 
     texts, _ = streamlit_app._grid_line_cells(_grid_line(), include_gaps=True)
@@ -1253,6 +1286,7 @@ def test_band_registries_cover_every_graded_table() -> None:
         "Barrels",
         "HR",
         "Robbed HR",
+        "Straight Air %",  # a fit read (D-128) — no quality scale
         "Oppo Air %",  # the fit read — no quality scale, by decision
     }
     assert rate_columns == set(streamlit_app._GRID_BANDS)
@@ -1262,10 +1296,12 @@ def test_band_registries_cover_every_graded_table() -> None:
         "PA",
         "BBE",
         "HR",
-        "HR/9",  # a season read — the L30 cell names its absence
+        "HR/9",  # a season read — the two-month cell names its absence
         "xISO",  # same
     }
     assert recent_columns <= set(streamlit_app._PITCHER_BANDS)
+    sp_columns = set(streamlit_app._SP_CARD_COLUMNS) - {"Scope", "HR"}
+    assert sp_columns <= set(streamlit_app._PITCHER_BANDS)
 
 
 def test_every_temperature_award_wears_a_band_color() -> None:
@@ -1293,10 +1329,13 @@ def test_band_edges_print_on_their_surfaces() -> None:
     assert "EV — elite ≥ 91" in streamlit_app._GRID_SCALE_TEXT
     assert "very poor < 85.5" in streamlit_app._GRID_SCALE_TEXT
     assert "HR/9 — elite ≥ 1.5" in streamlit_app._PITCHER_SCALE_TEXT
+    assert "Hard-Hit % — elite ≥ 46%" in streamlit_app._PITCHER_SCALE_TEXT
     assert "elite ≤ 18%" in streamlit_app._GRID_SCALE_TEXT  # the low-direction wording
     assert "elite ≥ 91" in streamlit_app._MATCHUPS_HELP["EV"]
     assert "elite ≥ 1.5" in streamlit_app._ARMS_HELP["HR/9"]
+    assert "elite ≥ 46%" in streamlit_app._SP_HELP["Hard-Hit %"]
     assert "No cell colors" in streamlit_app._MATCHUPS_HELP["Oppo Air %"]
+    assert "No cell colors" in streamlit_app._MATCHUPS_HELP["Straight Air %"]
     assert "115" in streamlit_app._CONDITIONS_HELP["HR factor (LHB)"]
 
 
@@ -1322,8 +1361,11 @@ def test_column_help_renames_with_the_grid_stars_and_drops_absent_columns() -> N
 
 
 def _board_with_grid_lines() -> SlateBoard:
-    """The graded outage board with populated L30 and season grid lines, so
-    the matchups grid and its season toggle have real figures to show."""
+    """The graded outage board with populated recent and season grid lines,
+    so the matchups grid and its window selector have real figures to show.
+    D-128 (PO): the season line carries its own spray profile (Savant's
+    published buckets, rebased) and the robbed count shows on both views
+    (always the last 7 days)."""
     import dataclasses as _dc
 
     from greenmachine.live.pipeline import BatterCard as _BatterCard
@@ -1337,14 +1379,16 @@ def _board_with_grid_lines() -> SlateBoard:
         hits=121,
         home_runs=33,
         exit_velocity=Decimal("91.5"),
-        robbed_hr_count=None,
-        pull_air_share=None,
+        robbed_hr_count=2,
+        pull_air_share=Decimal("0.36"),
+        straight_air_share=Decimal("0.34"),
+        oppo_air_share=Decimal("0.28"),
         avg_launch_angle=Decimal("12.8"),
     )
 
     def attach(cards: tuple[_BatterCard, ...]) -> tuple[_BatterCard, ...]:
         return tuple(
-            _dc.replace(card, mix_line=l30, season_line=season, mix_label="last 30 days")
+            _dc.replace(card, mix_line=l30, season_line=season, mix_label="season")
             for card in cards
         )
 
@@ -1361,8 +1405,10 @@ def test_matchups_grid_has_the_d079_columns_and_a_named_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """D-079: the grid is one row per batter with the ratified columns; the
-    caption names the mix window actually used (D-025/D-081); the season
-    toggle swaps the metric scope while the grade stays the L30 one."""
+    caption names the mix scope actually used (D-025/D-128). D-128 (PO):
+    the season sources are the default view — robbed HR and all three air
+    profiles show on it — and the recent-window radio swaps the metric
+    scope while the grade stays the L30 one."""
     import streamlit as st
 
     import greenmachine.live.pipeline as pipeline
@@ -1385,21 +1431,24 @@ def test_matchups_grid_has_the_d079_columns_and_a_named_window(
     grids = grid_frames()
     assert grids, "the matchups grids rendered"
     # D-096/D-097/D-098: no BIP, no Form column; Robbed HR is a count.
-    # D-124: the L30 view stars the spray shares (ratified v2.2 lines).
+    # D-128 (PO): the default view is the season scope — EV starred, the
+    # three air profiles and the robbed count all carry season-view values.
     expected = {
         "AB",
         "H",
         "Barrels",
         "HR",
-        "EV",
+        "EV ★",
+        "LA",
         "Barrel/PA %",
         "Hard-Hit %",
         "AVG",
         "SLG",
         "ISO",
         "Robbed HR",
-        "Pull Air % ★",
-        "Oppo Air % ★",
+        "Pull Air %",
+        "Straight Air %",
+        "Oppo Air %",
         "xwOBA",
         "Swing-Str %",
         "Grade",
@@ -1407,35 +1456,48 @@ def test_matchups_grid_has_the_d079_columns_and_a_named_window(
     assert expected <= set(grids[0].columns)
     assert "BIP" not in grids[0].columns
     assert "Form (EV)" not in grids[0].columns
-    assert set(grids[0]["AB"]) == {"5"}  # the L30 scope
-    away_grades = grids[0]["Grade"].tolist()
+    assert set(grids[0]["AB"]) == {"440"}  # the season scope is the default
+    assert set(grids[0]["Robbed HR"]) == {"2"}  # shows on the season view (D-128)
+    assert set(grids[0]["Pull Air %"]) == {"36.0%"}
+    assert set(grids[0]["Straight Air %"]) == {"34.0%"}
+    assert set(grids[0]["Oppo Air %"]) == {"28.0%"}
+    assert set(grids[0]["LA"]) == {"12.8°"}
+    season_grades = grids[0]["Grade"].tolist()
     captions = " ".join(element.value for element in at.caption)
-    assert "last 30 days" in captions
+    assert "season" in captions  # the mix scope actually used
     assert "14%" in captions
+    # D-128 (PO): a More button per batter under each grid — row selection
+    # is gone.
+    more = [button for button in at.button if button.key.startswith("more_")]
+    assert more, "the per-batter More buttons rendered"
 
-    toggles = [toggle for toggle in at.toggle if toggle.key == "matchups_season_view"]
-    assert toggles, "the season-view toggle rendered"
-    toggles[0].set_value(True)
+    modes = [radio for radio in at.radio if radio.key == "matchups_view_mode"]
+    assert modes, "the batter-window selector rendered"
+    modes[0].set_value("Recent window")
     at.run()
     assert not at.exception, [str(e.value) for e in at.exception]
     grids = grid_frames()
-    assert set(grids[0]["AB"]) == {"440"}  # the season scope
-    assert set(grids[0]["Robbed HR"]) == {"—"}  # no season source (D-081/D-090)
-    assert set(grids[0]["Pull Air %"]) == {"—"}
-    # D-124: the season view stars EV, carries the season average launch
-    # angle after it as unstarred context.
-    assert set(grids[0]["LA"]) == {"12.8°"}
-    assert "EV ★" in grids[0].columns
-    assert grids[0]["Grade"].tolist() == away_grades  # the grade stays L30
+    assert set(grids[0]["AB"]) == {"5"}  # the recent scope
+    assert set(grids[0]["Robbed HR"]) == {"1"}
+    # D-124: the recent view stars the two signed spray shares (ratified
+    # v2.2 lines); Straight Air % stays unstarred between them.
+    assert "Pull Air % ★" in grids[0].columns
+    assert "Straight Air %" in grids[0].columns
+    assert "Oppo Air % ★" in grids[0].columns
+    assert set(grids[0]["Pull Air % ★"]) == {"40.0%"}
+    captions = " ".join(element.value for element in at.caption)
+    assert "last 28 days" in captions  # the default four weeks
+    assert grids[0]["Grade"].tolist() == season_grades  # the fixture's one grade
 
 
 def test_grid_headers_carry_their_hover_definitions(monkeypatch: pytest.MonkeyPatch) -> None:
     """D-124: every batter-grid header carries its one-line definition as
     column help — starred under the view's own rename, absent columns
-    dropped. The L30 view stars the spray shares; the season view stars EV
-    and adds LA. D-127: the Arms, starter-card and Conditions tables carry
-    their own hover definitions now, so the batter-grid assertions scope
-    to the grids whose frame has a Batter column."""
+    dropped. D-128 (PO): the season view is the default — it stars EV and
+    adds LA; the recent window stars the two signed spray shares. D-127:
+    the Arms, starter-card and Conditions tables carry their own hover
+    definitions now, so the batter-grid assertions scope to the grids
+    whose frame has a Batter column."""
     import json
 
     import streamlit as st
@@ -1459,24 +1521,29 @@ def test_grid_headers_carry_their_hover_definitions(monkeypatch: pytest.MonkeyPa
                     names.add(name)
         return names
 
-    l30 = helps("Batter")
-    assert "Pull Air % ★" in l30
-    assert "Oppo Air % ★" in l30
-    assert "LA" not in l30  # a season-view column — no entry on the L30 grids
-    assert "EV ★" not in l30
-    # D-127: the starter cards and the Conditions table carry their hovers.
-    assert "BRL%" in helps("Scope")
-    assert "Temp band" in helps("Venue")
-
-    toggles = [toggle for toggle in at.toggle if toggle.key == "matchups_season_view"]
-    toggles[0].set_value(True)
-    at.run()
-    assert not at.exception, [str(e.value) for e in at.exception]
     season = helps("Batter")
     assert {"LA", "EV ★"} <= season
+    # D-128: the season view's air profiles carry their hovers unstarred.
+    assert "Straight Air %" in season
+    assert "Pull Air % ★" not in season
     # D-125: the gap columns left the grid, so their hover entries went too.
     assert "xISO-ISO ★" not in season
     assert "xwOBA-wOBA ★" not in season
+    # D-127: the starter cards and the Conditions table carry their hovers.
+    assert "BRL%" in helps("Scope")
+    assert "Hard-Hit %" in helps("Scope")
+    assert "Temp band" in helps("Venue")
+
+    modes = [radio for radio in at.radio if radio.key == "matchups_view_mode"]
+    modes[0].set_value("Recent window")
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    recent = helps("Batter")
+    assert "Pull Air % ★" in recent
+    assert "Straight Air %" in recent
+    assert "Oppo Air % ★" in recent
+    assert "LA" not in recent  # a season-view column — no entry on the recent grids
+    assert "EV ★" not in recent
 
 
 def test_slate_today_reads_the_viewers_arizona_day() -> None:
@@ -1823,14 +1890,15 @@ def test_card_tags_carry_the_v22_pitcher_side_reads() -> None:
             throws=None,
         )
 
-    # GB profile off the L30 share, plain and extreme — D-116 (PO): the
-    # tag fires on the share but never quotes the GB% number.
+    # GB profile off the two-month share, plain and extreme — D-116 (PO):
+    # the tag fires on the share but never quotes the GB% number. D-128
+    # (PO): the record behind it is the last two months now.
     _, _, vetoes = streamlit_app._card_tags(card, arm("1.10", "10.2", "0.52"))
-    assert "air allowed: low — ground-ball profile (L30 record)" in vetoes
+    assert "air allowed: low — ground-ball profile (2-month record)" in vetoes
     assert "52.0%" not in vetoes
     _, _, vetoes = streamlit_app._card_tags(card, arm("1.10", "10.2", "0.56"))
-    assert "extreme ground-ball profile (L30 record)" in vetoes
-    # The season LA line carries it when the L30 share is unpublished.
+    assert "extreme ground-ball profile (2-month record)" in vetoes
+    # The season LA line carries it when the two-month share is unpublished.
     _, _, vetoes = streamlit_app._card_tags(card, arm("1.10", "7.8", None))
     assert "air allowed: low — ground-ball profile (avg LA 7.8°, season)" in vetoes
     # Suppressor, gas, and fly-vulnerable.

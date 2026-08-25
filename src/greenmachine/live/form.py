@@ -117,6 +117,25 @@ def is_oppo_air(event: PitchEvent) -> bool:
     return (event.batter_side == "R" and spray < 0) or (event.batter_side == "L" and spray > 0)
 
 
+# D-128 (PO): the straight-away bucket's half-width — Statcast's attack-
+# direction convention (pull / straight / oppo split at fifteen degrees).
+STRAIGHT_AIR_SPRAY_DEGREES = 15
+
+
+def is_straight_air(event: PitchEvent) -> bool:
+    """Whether one air ball was hit straight away (D-128, PO): the spray
+    angle within fifteen degrees of dead center, over the identical
+    measurable-air denominator pull and oppo share. The pull and oppo
+    reads keep D-071's ratified SIGNED convention (they partition the
+    set), so a ball just off center reads as both straight and its signed
+    side — the three shares are one denominator, not a partition, and
+    the straight hover says so."""
+    spray = _spray_degrees(event)
+    if spray is None:
+        return False
+    return abs(spray) <= STRAIGHT_AIR_SPRAY_DEGREES
+
+
 def _pct(numerator: int, denominator: int) -> Decimal | None:
     if denominator <= 0:
         return None

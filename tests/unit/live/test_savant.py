@@ -72,7 +72,9 @@ _TRACKING_CSV = (
     "101,L,71.0,11.0,0.50,150\n"
 )
 
-_BATTED_BALL_CSV = "id,bbe,air_rate,pull_air_rate\n101,300,0.42,0.13\n"
+_BATTED_BALL_CSV = (
+    "id,bbe,air_rate,pull_air_rate,straight_air_rate,oppo_air_rate\n101,300,0.42,0.13,0.14,0.15\n"
+)
 
 _ARSENAL_CSV = (
     "player_id,team_name_alt,pitch_type,pitch_name,pitches,pitch_usage,pa,ba,slg,woba,"
@@ -176,13 +178,15 @@ def test_pitcher_expected_board_fails_cleanly_on_an_unknown_column() -> None:
 
 def test_statcast_pitcher_board_parses_the_against_record() -> None:
     """D-111: batted balls, barrels, and launch angle against — the board
-    publishes no air/ground split (fbld/gb are exit velocities)."""
+    publishes no air/ground split (fbld/gb are exit velocities). D-128
+    (PO): the hard-hit count against reads the board's ev95plus column."""
     rows = BaseballSavant(_FakeTransport(_STATCAST_PITCHERS_CSV)).fetch_statcast_pitchers(year=2026)
     assert not isinstance(rows, FetchFailure)
     row = rows[201]
     assert row.batted_ball_events == 100
     assert row.avg_launch_angle == Decimal("12.9")
     assert row.barrel_count == 8
+    assert row.hard_hit_count == 35
 
 
 def test_a_board_that_loses_half_its_rows_fails_instead_of_shrinking_silently() -> None:
@@ -222,11 +226,21 @@ def test_bat_tracking_keeps_both_sides_of_a_switch_hitter() -> None:
     assert sides["R"].ideal_attack_angle_share == Decimal("0.55")
 
 
-def test_batted_ball_board_parses_air_and_pull_rates() -> None:
+def test_batted_ball_board_parses_all_three_air_direction_rates() -> None:
+    """The board carries pull, straight and oppo air rates — each a share
+    of ALL batted balls, so the three sum to the air share (D-128)."""
     rows = BaseballSavant(_FakeTransport(_BATTED_BALL_CSV)).fetch_batted_ball(year=2026)
     assert not isinstance(rows, FetchFailure)
     assert rows[101].air_share == Decimal("0.42")
     assert rows[101].pull_air_share_of_bbe == Decimal("0.13")
+    assert rows[101].straight_air_share_of_bbe == Decimal("0.14")
+    assert rows[101].oppo_air_share_of_bbe == Decimal("0.15")
+    assert (
+        rows[101].pull_air_share_of_bbe
+        + rows[101].straight_air_share_of_bbe
+        + rows[101].oppo_air_share_of_bbe
+        == rows[101].air_share
+    )
 
 
 def test_pitch_arsenal_parses_per_pitch_rows() -> None:
