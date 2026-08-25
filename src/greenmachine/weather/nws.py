@@ -30,8 +30,10 @@ representation untouched.
 **Caching, with the bound stated to the reader.** A Streamlit page reruns on
 every interaction, so without a cache one density click would be thirty
 requests. Two bounds for two kinds of fact: a venue's gridpoint is cached for
-the session because ballparks do not move, and a forecast for
-``FORECAST_FRESHNESS`` because NWS updates roughly hourly. Absences are cached
+the session because ballparks do not move, and a venue's hourly periods for
+``FORECAST_FRESHNESS`` because NWS updates roughly hourly. (Since D-131 the
+cache holds the periods list, and each read picks the period covering the
+moment asked for — first pitch on the game-day read — off that cached list.) Absences are cached
 under the same bound as values — a venue outside coverage answers 404 every
 time, and hammering a source to relearn a permanent fact is not diligence. Every
 cached value carries the ``obtained_at`` it was fetched with, so age survives the
@@ -42,7 +44,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -177,6 +179,53 @@ def _properties(response: HttpResponse, what: str) -> dict[str, Any]:
     return properties
 
 
+def _period_time(period: object, key: str) -> datetime | None:
+    """One ISO timestamp off a forecast period, or None when it is absent or
+    unreadable. A period without usable times is skipped by the game-time
+    pick rather than costing the forecast. Naive timestamps are treated as
+    unreadable: NWS hourly periods carry their offset, and comparing a naive
+    moment against an aware first pitch would raise, not answer."""
+    if not isinstance(period, dict):
+        return None
+    raw = period.get(key)
+    if not isinstance(raw, str):
+        return None
+    try:
+        moment = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        return None
+    return moment
+
+
+def _pick_period(periods: list[Any], at: datetime | None) -> Any:
+    """The hourly period covering ``at`` — first pitch for a game-day read
+    (D-131).
+
+    None asks for the current period, the read as it was before D-131. When
+    no period covers the moment — the game sits beyond the hourly forecast's
+    reach — the nearest period stands in rather than an absence; when no
+    period carries a readable time, the first period answers as it always
+    has."""
+    if at is None:
+        return periods[0]
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=UTC)
+    nearest: Any = None
+    nearest_gap: float | None = None
+    for period in periods:
+        start = _period_time(period, "startTime")
+        end = _period_time(period, "endTime")
+        if start is not None and end is not None and start <= at < end:
+            return period
+        if start is not None:
+            gap = abs((start - at).total_seconds())
+            if nearest_gap is None or gap < nearest_gap:
+                nearest, nearest_gap = period, gap
+    return nearest if nearest is not None else periods[0]
+
+
 class NwsWeatherAdapter:
     """A ``WeatherAdapter`` whose answers come from api.weather.gov.
 
@@ -200,21 +249,37 @@ class NwsWeatherAdapter:
         self._contact = contact
         self._freshness = freshness
         self._gridpoints: dict[str, str] = {}
-        self._forecasts: dict[str, tuple[datetime, SnapshotField[WeatherForecast]]] = {}
+        # D-131: the cache holds the venue's hourly periods list, not one
+        # parsed forecast — the pick covering the requested moment happens
+        # off the cached list, so two moments on one venue cost one fetch.
+        self._forecasts: dict[str, tuple[datetime, list[Any] | None]] = {}
         self._reasons: dict[str, str] = {}
 
     # -- the seam's surface -------------------------------------------------
 
-    def forecast_for(self, venue: ParkVenue) -> SnapshotField[WeatherForecast]:
-        """A forecast for ``venue``, or an absence carrying its reason."""
+    def forecast_for(
+        self, venue: ParkVenue, at: datetime | None = None
+    ) -> SnapshotField[WeatherForecast]:
+        """A forecast for ``venue``, or an absence carrying its reason.
+
+        ``at`` picks the hourly period covering that moment — first pitch
+        for the game-day read (D-131: the spot-check found the board's
+        "start-time reading" was actually the current hour, and an
+        afternoon read of an evening game could carry a hours-stale wind
+        direction). When no period covers it — the game sits beyond the
+        hourly forecast's reach — the nearest period stands in rather
+        than an absence. None keeps the current period, as before. The
+        periods list is what the freshness cache holds, so two moments on
+        one venue cost one fetch."""
         cached = self._forecasts.get(venue.venue_id)
         if cached is not None:
-            stored_at, field = cached
+            stored_at, periods = cached
             if self._clock.now() - stored_at < self._freshness:
-                return field
-        field = self._fetch(venue)
-        self._forecasts[venue.venue_id] = (self._clock.now(), field)
-        return field
+                return self._answer(venue, periods, at, stored_at)
+        periods = self._fetch_periods(venue)
+        fetched_at = self._clock.now()
+        self._forecasts[venue.venue_id] = (fetched_at, periods)
+        return self._answer(venue, periods, at, fetched_at)
 
     def diagnostics(self) -> dict[str, str]:
         """Per venue, why no number could be shown — in plain language.
@@ -260,7 +325,10 @@ class NwsWeatherAdapter:
         self._gridpoints[venue.venue_id] = url
         return url
 
-    def _fetch(self, venue: ParkVenue) -> SnapshotField[WeatherForecast]:
+    def _fetch_periods(self, venue: ParkVenue) -> list[Any] | None:
+        """The venue's hourly periods, or None with the failure named in
+        ``diagnostics`` — the parse into a forecast happens per pick in
+        :meth:`_answer`, so one fetch serves every requested moment."""
         try:
             url = self._forecast_url(venue)
             response = self._get(url)
@@ -270,28 +338,6 @@ class NwsWeatherAdapter:
             periods = properties.get("periods")
             if not isinstance(periods, list):
                 raise MalformedPayloadError("forecast response has no periods list")
-            if not periods:
-                # The source answered and has nothing for this venue yet: the
-                # definition of NOT_YET_OBSERVED, and not a failure.
-                self._reasons[venue.venue_id] = (
-                    "the forecast answered with no period covering this venue yet"
-                )
-                return SnapshotField[WeatherForecast].absent(
-                    AbsenceReason.NOT_YET_OBSERVED, SOURCE_ID
-                )
-            period = periods[0]
-            if not isinstance(period, dict):
-                raise MalformedPayloadError("forecast period is not an object")
-            forecast = WeatherForecast(
-                temperature_f=_as_decimal(period.get("temperature"), "temperature"),
-                wind_speed_mph=_leading_number(
-                    _as_text(period.get("windSpeed"), "windSpeed"), "windSpeed"
-                ),
-                wind_direction=_as_text(period.get("windDirection"), "windDirection"),
-                short_forecast=_as_text(period.get("shortForecast"), "shortForecast"),
-                obtained_at=self._clock.now(),
-                relative_humidity_percent=_humidity_percent(period.get("relativeHumidity")),
-            )
         except StatusFailureError as failure:
             reason = failure.reason()
         except HostNotPermittedError:
@@ -311,10 +357,55 @@ class NwsWeatherAdapter:
         except MalformedPayloadError as exc:
             reason = f"the source answered an unreadable payload ({exc})"
         else:
-            self._reasons.pop(venue.venue_id, None)
-            return SnapshotField.present(forecast, SOURCE_ID)
+            return periods
         self._reasons[venue.venue_id] = reason
-        return SnapshotField[WeatherForecast].absent(AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_ID)
+        return None
+
+    def _answer(
+        self,
+        venue: ParkVenue,
+        periods: list[Any] | None,
+        at: datetime | None,
+        obtained_at: datetime,
+    ) -> SnapshotField[WeatherForecast]:
+        """One moment's forecast off the cached periods: the pick covering
+        ``at`` (the nearest when none does, D-131), the current period when
+        ``at`` is None. Absences keep their named reasons — the source's
+        failure, the empty answer, the unreadable pick. ``obtained_at`` is
+        the fetch moment, not the pick moment: a cached period list makes a
+        read older than the moment it was read, and that age must survive."""
+        if periods is None:
+            return SnapshotField[WeatherForecast].absent(
+                AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_ID
+            )
+        if not periods:
+            # The source answered and has nothing for this venue yet: the
+            # definition of NOT_YET_OBSERVED, and not a failure.
+            self._reasons[venue.venue_id] = (
+                "the forecast answered with no period covering this venue yet"
+            )
+            return SnapshotField[WeatherForecast].absent(AbsenceReason.NOT_YET_OBSERVED, SOURCE_ID)
+        period = _pick_period(periods, at)
+        try:
+            if not isinstance(period, dict):
+                raise MalformedPayloadError("forecast period is not an object")
+            forecast = WeatherForecast(
+                temperature_f=_as_decimal(period.get("temperature"), "temperature"),
+                wind_speed_mph=_leading_number(
+                    _as_text(period.get("windSpeed"), "windSpeed"), "windSpeed"
+                ),
+                wind_direction=_as_text(period.get("windDirection"), "windDirection"),
+                short_forecast=_as_text(period.get("shortForecast"), "shortForecast"),
+                obtained_at=obtained_at,
+                relative_humidity_percent=_humidity_percent(period.get("relativeHumidity")),
+            )
+        except MalformedPayloadError as exc:
+            self._reasons[venue.venue_id] = f"the source answered an unreadable payload ({exc})"
+            return SnapshotField[WeatherForecast].absent(
+                AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_ID
+            )
+        self._reasons.pop(venue.venue_id, None)
+        return SnapshotField.present(forecast, SOURCE_ID)
 
     def __repr__(self) -> str:
         return f"NwsWeatherAdapter(host={NWS_HOST!r}, freshness={self._freshness})"

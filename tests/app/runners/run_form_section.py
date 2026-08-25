@@ -185,7 +185,7 @@ def _runner_card() -> tuple[BatterCard, GameCard]:
             Path(__file__).resolve().parents[3] / "config" / "production" / "gm_hr_v1.yaml"
         ),
         fetch_day_events=lambda day: FetchFailure("runner: events not needed"),  # type: ignore[arg-type]
-        temperature_for=lambda venue: None,  # type: ignore[arg-type]
+        temperature_for=lambda venue, at: None,  # type: ignore[arg-type]
         park_factors={
             15: {
                 Handedness.LEFT: ParkFactor(

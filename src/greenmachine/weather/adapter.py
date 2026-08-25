@@ -20,6 +20,7 @@ therefore ordinary flow rather than error handling, and no caller needs a
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol
 
 from greenmachine.inputs import ParkVenue, SnapshotField, SourceRecord, WeatherForecast
@@ -38,6 +39,11 @@ class WeatherAdapter(Protocol):
 
     source: SourceRecord
 
-    def forecast_for(self, venue: ParkVenue) -> SnapshotField[WeatherForecast]:
-        """The forecast observed for ``venue`` — present, or absent with a reason."""
+    def forecast_for(
+        self, venue: ParkVenue, at: datetime | None = None
+    ) -> SnapshotField[WeatherForecast]:
+        """The forecast observed for ``venue`` — present, or absent with a reason.
+
+        ``at`` is the moment the reading should cover — first pitch for a
+        game-day read (D-131); None asks for the current period, as before."""
         ...

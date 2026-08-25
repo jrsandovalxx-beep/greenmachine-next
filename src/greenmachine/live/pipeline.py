@@ -1534,10 +1534,10 @@ def build_board(
     config: GreenMachineConfig,
     batter_window_days: int = MATCHUP_WINDOW_DAYS,
     fetch_day_events: Callable[[date], tuple[PitchEvent, ...] | FetchFailure],
-    temperature_for: Callable[[ParkVenue], Decimal | None],
+    temperature_for: Callable[[ParkVenue, datetime], Decimal | None],
     park_factors: dict[int, dict[Handedness, ParkFactor]],
-    wind_for: Callable[[ParkVenue], tuple[Decimal, str] | None] = lambda venue: None,
-    humidity_for: Callable[[ParkVenue], Decimal | None] = lambda venue: None,
+    wind_for: Callable[[ParkVenue, datetime], tuple[Decimal, str] | None] = lambda venue, at: None,
+    humidity_for: Callable[[ParkVenue, datetime], Decimal | None] = lambda venue, at: None,
 ) -> SlateBoard | FetchFailure:
     """Assemble and grade the full slate. Only a slate-level failure is fatal."""
     diagnostics: list[str] = []
@@ -1849,13 +1849,20 @@ def build_board(
         # source in v1, treating them as open-air could award a conditions
         # bonus for weather that never reached the field (D-073).
         roofed = venue_type is not VenueType.OPEN_AIR
-        temperature = temperature_for(venue) if venue is not None and not roofed else None
+        # Game-scoped, batter-invariant: one start instant and one frozen
+        # context shared by every card in the game. Computed before the
+        # weather reads so each one asks for the forecast covering first
+        # pitch rather than the hour the board was built (D-131).
+        start_utc = _parse_start(game.game_datetime_utc, game.official_date)
+        temperature = (
+            temperature_for(venue, start_utc) if venue is not None and not roofed else None
+        )
         # Wind only reaches the field of an open-air venue; a roofed game
         # carries no wind reading rather than a number that never applied.
-        wind = wind_for(venue) if venue is not None and not roofed else None
+        wind = wind_for(venue, start_utc) if venue is not None and not roofed else None
         # D-111: humidity rides the same rule — a roofed venue's reading
         # never reaches the field.
-        humidity = humidity_for(venue) if venue is not None and not roofed else None
+        humidity = humidity_for(venue, start_utc) if venue is not None and not roofed else None
 
         factor_left: ParkFactor | None = None
         factor_right: ParkFactor | None = None
@@ -1864,9 +1871,6 @@ def build_board(
             factor_left = per_side.get(Handedness.LEFT)
             factor_right = per_side.get(Handedness.RIGHT)
 
-        # Game-scoped, batter-invariant: one start instant and one frozen
-        # context shared by every card in the game.
-        start_utc = _parse_start(game.game_datetime_utc, game.official_date)
         game_context = _game_context(
             game.game_pk,
             game.official_date,

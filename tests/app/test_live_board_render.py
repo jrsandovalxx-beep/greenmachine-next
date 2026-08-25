@@ -189,7 +189,7 @@ def _outage_board() -> SlateBoard:
         as_of=AS_OF,
         config=CONFIG,
         fetch_day_events=lambda day: FetchFailure("simulated outage"),  # type: ignore[arg-type]
-        temperature_for=lambda venue: None,  # type: ignore[arg-type]
+        temperature_for=lambda venue, at: None,  # type: ignore[arg-type]
         park_factors={
             15: {
                 Handedness.LEFT: ParkFactor(

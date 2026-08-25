@@ -222,6 +222,76 @@ def test_a_wind_range_takes_its_first_number() -> None:
     assert forecast.wind_speed_mph == Decimal("7")
 
 
+# --- the game-time pick (D-131) ----------------------------------------------
+
+
+def timed_period(start: str, end: str, temperature: int, wind_direction: str) -> dict[str, object]:
+    """A synthetic hourly period with the timing fields the game-time pick
+    reads. Values stay non-baseball (OQ-4)."""
+    return {
+        "startTime": start,
+        "endTime": end,
+        "temperature": temperature,
+        "windSpeed": "88 mph",
+        "windDirection": wind_direction,
+        "shortForecast": "Synthetic sky (OQ-4)",
+    }
+
+
+def test_the_game_time_read_picks_the_period_covering_first_pitch() -> None:
+    """D-131: the board's weather read covers the game's start, not the hour
+    the board happened to be built in — the spot-check's defect, proven shut."""
+    periods = [
+        timed_period("2026-08-19T17:00:00+00:00", "2026-08-19T18:00:00+00:00", 311, "NNE"),
+        timed_period("2026-08-19T18:00:00+00:00", "2026-08-19T19:00:00+00:00", 322, "SSW"),
+    ]
+    adapter, _, _ = build([ok(points_body()), ok(forecast_body(periods))])
+    forecast = adapter.forecast_for(VENUE, datetime(2026, 8, 19, 18, 30, tzinfo=UTC)).value
+    assert forecast is not None
+    assert forecast.temperature_f == Decimal("322")
+    assert forecast.wind_direction == "SSW"
+
+
+def test_a_game_beyond_the_forecasts_reach_takes_the_nearest_period() -> None:
+    """A game past the hourly forecast's end gets its nearest period rather
+    than an absence: a hours-stale reading beats no reading, and the named
+    staleness is exactly what ``obtained_at`` and the pick make visible."""
+    periods = [
+        timed_period("2026-08-19T17:00:00+00:00", "2026-08-19T18:00:00+00:00", 311, "NNE"),
+        timed_period("2026-08-19T18:00:00+00:00", "2026-08-19T19:00:00+00:00", 322, "SSW"),
+    ]
+    adapter, _, _ = build([ok(points_body()), ok(forecast_body(periods))])
+    forecast = adapter.forecast_for(VENUE, datetime(2026, 8, 19, 23, 0, tzinfo=UTC)).value
+    assert forecast is not None
+    assert forecast.temperature_f == Decimal("322")
+
+
+def test_periods_without_times_answer_the_current_period_as_before() -> None:
+    """A period list with no readable times cannot cover any moment — the
+    current period answers as it did before D-131 rather than costing the
+    forecast."""
+    adapter, _, _ = build([ok(points_body()), ok(forecast_body())])
+    forecast = adapter.forecast_for(VENUE, datetime(2026, 8, 19, 18, 30, tzinfo=UTC)).value
+    assert forecast is not None
+    assert forecast.temperature_f == Decimal("321")
+
+
+def test_two_moments_on_one_venue_cost_one_fetch() -> None:
+    """The cache holds the periods list, so two different first pitches at one
+    venue are two picks off one fetch — the D-131 caching claim."""
+    periods = [
+        timed_period("2026-08-19T17:00:00+00:00", "2026-08-19T18:00:00+00:00", 311, "NNE"),
+        timed_period("2026-08-19T18:00:00+00:00", "2026-08-19T19:00:00+00:00", 322, "SSW"),
+    ]
+    adapter, transport, _ = build([ok(points_body()), ok(forecast_body(periods))])
+    early = adapter.forecast_for(VENUE, datetime(2026, 8, 19, 17, 30, tzinfo=UTC)).value
+    late = adapter.forecast_for(VENUE, datetime(2026, 8, 19, 18, 30, tzinfo=UTC)).value
+    assert early is not None and late is not None
+    assert early.temperature_f == Decimal("311")
+    assert late.temperature_f == Decimal("322")
+    assert len(transport.urls) == 2  # one points resolution, one forecast fetch
+
+
 # --- the four named failure modes, each exercised ---------------------------
 
 
@@ -335,7 +405,9 @@ def test_a_second_read_on_one_adapter_inside_the_bound_does_not_refetch() -> Non
     clock.advance(FORECAST_FRESHNESS - timedelta(minutes=1))
     second = adapter.forecast_for(VENUE)
     assert len(transport.urls) == calls
-    assert second is first
+    # D-131: the cache holds the venue's periods, not one parsed answer, so
+    # a cached read is freshly *picked* — equal values, not the same object.
+    assert second == first
 
 
 def test_the_cached_value_keeps_the_time_it_was_obtained() -> None:
