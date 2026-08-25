@@ -443,6 +443,21 @@ def test_shortlist_keeps_only_a_and_s_as_bubble_rows() -> None:
             assert label and explanation
 
 
+def test_form_score_cell_reads_the_actual_graded_subtotal() -> None:
+    """D-132 (PO): the shortlist's Form Score carries the batter's actual
+    graded form subtotal out of the category max from the production config
+    (2 in v1) — the D-124 placeholder dash is dead, never an invented
+    number."""
+    import streamlit_app
+
+    form_max = streamlit_app._form_max_points(streamlit_app.production_config())
+    assert form_max == Decimal("2")
+    for row in streamlit_app._slugger_rows(_graded_board()):
+        text = streamlit_app._form_score_text(row.card.result, form_max)
+        assert text is not None
+        assert text.endswith(" / 2")
+
+
 def test_money_tag_marks_a_batter_who_homered_with_the_date() -> None:
     """D-130 (PO): the neon tag carries the slate day's date — "$8/20" —
     and marks only a homer ON the viewed slate day; a batter without one

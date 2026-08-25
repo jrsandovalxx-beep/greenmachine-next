@@ -47,7 +47,7 @@ def _form(**overrides: FormValue) -> FormSection:
 
 def test_columns_are_the_d129_set_in_order() -> None:
     """D-129 (PO): SwSp% and Hard% left the table, and the Form Score
-    placeholder (D-124's dash) closes it."""
+    closes it — D-132's actual graded subtotal, the D-124 dash dead."""
     texts, _styles = streamlit_app._form_section_frames(_form())
     assert list(texts.columns) == [
         "Barrel%",
@@ -62,10 +62,16 @@ def test_columns_are_the_d129_set_in_order() -> None:
     assert len(texts) == 1
 
 
-def test_form_score_is_the_d124_placeholder_dash() -> None:
+def test_form_score_shows_the_actual_graded_subtotal() -> None:
+    """D-132 (PO): the actual form score out of the category max, never a
+    placeholder dash; a card with no evaluated grade names the absence
+    rather than inventing a number."""
+    texts, styles = streamlit_app._form_section_frames(_form(), "1.5 / 2")
+    assert texts.at[0, "Form Score"] == "1.5 / 2"
+    assert "Form Score" not in styles.columns  # a present value, no reason fill
     texts, styles = streamlit_app._form_section_frames(_form())
-    assert texts.at[0, "Form Score"] == "—"
-    assert "Form Score" not in styles.columns  # a placeholder, never a grade
+    assert texts.at[0, "Form Score"] == "not evaluated"
+    assert styles.at[0, "Form Score"] == streamlit_app._REASON_CSS
 
 
 def test_pulled_barrels_is_a_raw_count_with_its_bbe_sample() -> None:
