@@ -1020,9 +1020,9 @@ _MIN_BBE_PITCH_TYPE = 10
 # marks the digest's pitcher-vulnerability reads only: HR/9 at or above 1.5
 # (v2.2's season target, superseding the 1.4 line), and wOBA above xwOBA —
 # no invented bands. The L30 side rows carry the ratified
-# pitcher-vulnerability floor (80 batters faced / 40 batted balls); contact
-# reads carry the general 15-BBE floor. Below a floor the value stays
-# visible under the amber INSUFFICIENT advisory, never hidden (D-068).
+# pitcher-vulnerability floor (50 batters faced / 30 batted balls; D-134);
+# contact reads carry the general 15-BBE floor. Below a floor the value
+# stays visible under the amber INSUFFICIENT advisory, never hidden (D-068).
 _HR9_LINE = Decimal("1.5")
 # v2.2 (D-114): the pitcher-side tag lines — the suppressor at HR/9 ≤ 0.80,
 # the ground-ball profile at season avg LA allowed ≤ 8° or an L30 ground-
@@ -1036,8 +1036,16 @@ _GB_PROFILE_SHARE_LINE = Decimal("0.50")
 _GB_PROFILE_EXTREME_LINE = Decimal("0.55")
 _FB_VULNERABLE_LA_LINE = Decimal("18")
 _PITCHER_GAS_GB_CEILING = Decimal("0.40")
-_VULN_MIN_BF = 80
-_VULN_MIN_BBE = 40
+# D-134 (PO): the vulnerability floor drops from 80/40 to 50/30 per side —
+# researched against the 2026-08-26 slate's probables (14 starters, 6-11
+# starts each over the two-month record): the 80-BF line marked 12 of 28
+# side-rows INSUFFICIENT, and a regular's lighter side over ~7 outings
+# sits around 70-90 BF (sampled median 75). 50 is the "last 7 outings"
+# baseline the PO asked for — the genuinely thin sampled side (24 BF in
+# a 6-start record) stays marked, and 30 BBE keeps the pair proportional
+# (a walk-heavy line can't clear on batters faced alone).
+_VULN_MIN_BF = 50
+_VULN_MIN_BBE = 30
 _MIN_BBE_CONTACT = 15
 
 
@@ -3394,9 +3402,9 @@ def _sp_recent_row(
     of kept events (D-128, PO; L30 before). The event scope publishes no
     innings and no per-event expected SLG, so HR/9 and xISO name their
     absences and the HR count shows instead. ``vulnerability_floor`` is
-    the side rows' ratified 80-BF / 40-BBE line; the overall row carries
-    the general 15-BBE contact floor. Below a floor the values stay
-    visible under the amber advisory, never hidden (D-068)."""
+    the side rows' ratified 50-BF / 30-BBE line (D-134); the overall row
+    carries the general 15-BBE contact floor. Below a floor the values
+    stay visible under the amber advisory, never hidden (D-068)."""
     dash = {column: "—" for column in _SP_CARD_COLUMNS[1:]}
     if line is None:
         return {"Scope": f"{label} — no recent record", **dash}, {
@@ -3661,8 +3669,8 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
                 "HR count shows instead. Per the PO (D-128) the pitcher "
                 "tables drop wOBA and ISO — xwOBA and xISO stay — and add "
                 "Hard-Hit %, the 95+ mph share of batted balls against. "
-                "Amber: below the ratified floor — 80 BF / 40 BBE on a "
-                "side row, 15 BBE on contact reads — value shown, "
+                "Amber: below the ratified floor — 50 BF / 30 BBE on a "
+                "side row (D-134), 15 BBE on contact reads — value shown, "
                 "advisory attached (D-068). **Cell colors (D-127, PO):** "
                 "the metric cells grade vulnerability on the researched "
                 "2025 scale — greener is more forgiving; the ratified "

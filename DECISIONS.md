@@ -3331,3 +3331,42 @@ stale — and now names the actual graded subtotal instead.
 
 Full gate green on both Pythons, consistency check clean, all four
 showcase runners clean.
+
+## D-134 - Pitcher two-month side-row floor drops to 50 BF / 30 BBE
+
+Source: PO directive — "Also getting a lot of insufficient in the
+recent form for pitchers (two month scope) let's lower the minimum so
+that that goes away. Find a decent baseline, goal is around last 7
+outings which is roughly 2 months but you can research it."
+
+**The research.** Rather than reason from averages alone, the floor was
+set against the population it serves: the 2026-08-26 slate's probable
+starters. Fourteen starters' pitch records were pulled for the last two
+months (2026-06-26 → 2026-08-26, 6-11 starts each) and split by batter
+side:
+
+- A regular starter's LIGHTER side over the window sits around 70-90
+  batters faced (sampled median 75, p25 69) — that is the "last 7
+  outings" baseline the PO named, and it is exactly where the old
+  80-BF line cut: it marked 12 of 28 sampled side-rows INSUFFICIENT
+  (43%), the flood the PO saw.
+- At 50 BF the count drops to 1 of 28 — the one genuinely thin record
+  in the sample (24 BF over a 6-start window), which *should* keep its
+  marker. 60 was rejected: it still marked 3 of 28, including ordinary
+  58-BF sides from 9-start regulars.
+- 30 BBE keeps the pair proportional (~72% of BF reaches the batted-
+  ball record) so a walk-heavy line cannot clear on batters faced
+  alone; on the sample it marks the same one thin side.
+
+**The change.** ``_VULN_MIN_BF`` 80 → 50, ``_VULN_MIN_BBE`` 40 → 30 —
+the side rows of the starter header card (vs L / vs R over the
+two-month record). The overall row's 15-BBE contact floor is
+untouched, and the below-floor honesty is untouched (D-068): values
+stay visible with their exact samples under the amber advisory; only
+the line moved. Every surface that prints the floor now says 50/30 —
+the constants comment, the row docstring, and the Arms caption — and
+the boundary test moved to the line (exactly 50/30 carries no
+advisory).
+
+Full gate green on both Pythons, consistency check clean, all four
+showcase runners clean.
