@@ -332,7 +332,7 @@ def _build(api: object, savant: object, events: object = None) -> object:
         as_of=AS_OF,
         config=CONFIG,
         fetch_day_events=fetch_day,
-        temperature_for=lambda venue: Decimal("78"),
+        temperature_for=lambda venue, at: Decimal("78"),
         park_factors=_park_factors(),
     )
 
@@ -468,14 +468,14 @@ def _build_with_wind(api: object, wind: object) -> object:
         as_of=AS_OF,
         config=CONFIG,
         fetch_day_events=fetch_day,
-        temperature_for=lambda venue: Decimal("78"),
+        temperature_for=lambda venue, at: Decimal("78"),
         park_factors=_park_factors(),
         wind_for=wind,  # type: ignore[arg-type]
     )
 
 
 def test_wind_reaches_an_open_air_game_card() -> None:
-    board = _build_with_wind(_OpenAirApi(), lambda venue: (Decimal("9"), "WSW"))
+    board = _build_with_wind(_OpenAirApi(), lambda venue, at: (Decimal("9"), "WSW"))
     assert not isinstance(board, FetchFailure)
     game = board.games[0]
     assert game.venue_name == "Coors Field"
@@ -483,10 +483,25 @@ def test_wind_reaches_an_open_air_game_card() -> None:
     assert game.wind_direction == "WSW"
 
 
+def test_weather_readers_are_asked_for_the_forecast_at_first_pitch() -> None:
+    """D-131: every conditions reader receives the game's scheduled start, so
+    the adapter answers with the period covering first pitch — not the hour
+    the board was built in."""
+    seen: list[datetime] = []
+
+    def wind(venue: object, at: datetime) -> tuple[Decimal, str]:
+        seen.append(at)
+        return (Decimal("9"), "WSW")
+
+    board = _build_with_wind(_OpenAirApi(), wind)
+    assert not isinstance(board, FetchFailure)
+    assert seen == [datetime(2026, 8, 21, 1, 40, tzinfo=UTC)]
+
+
 def test_a_roofed_game_carries_no_wind() -> None:
     """Chase Field is a retractable roof: with no roof-state source in v1 the
     wind reading never applies (D-073), so the card carries no wind."""
-    board = _build_with_wind(_FakeApi(), lambda venue: (Decimal("9"), "WSW"))
+    board = _build_with_wind(_FakeApi(), lambda venue, at: (Decimal("9"), "WSW"))
     assert not isinstance(board, FetchFailure)
     game = board.games[0]
     assert game.venue_name == "Chase Field"
@@ -498,7 +513,7 @@ def test_open_air_card_carries_the_park_axis_and_parsed_wind() -> None:
     """SP-4 (D-119): Coors Field's measured home-to-CF axis (5 degrees) and
     the compass reading parsed to degrees true ride the game card, so the
     view never re-derives either."""
-    board = _build_with_wind(_OpenAirApi(), lambda venue: (Decimal("9"), "WSW"))
+    board = _build_with_wind(_OpenAirApi(), lambda venue, at: (Decimal("9"), "WSW"))
     assert not isinstance(board, FetchFailure)
     game = board.games[0]
     assert game.park_orientation_degrees == Decimal("5")
@@ -510,7 +525,7 @@ def test_open_air_card_carries_the_venue_slug() -> None:
     conditions surface joins the pinned wind-receptiveness snapshot by it.
     The Coors fixture joins, so the slug is present; an unjoined venue
     would carry None and the receptiveness cell would read as absent."""
-    board = _build_with_wind(_OpenAirApi(), lambda venue: (Decimal("9"), "WSW"))
+    board = _build_with_wind(_OpenAirApi(), lambda venue, at: (Decimal("9"), "WSW"))
     assert not isinstance(board, FetchFailure)
     assert board.games[0].venue_id == "coors-field"
 
@@ -666,7 +681,7 @@ def test_the_card_carries_the_workload_and_drift_facts() -> None:
 def test_roofed_card_carries_neither_axis_nor_wind_bearing() -> None:
     """A roofed venue's axis is a designed absence (D-073/D-119): no wind
     reaches the field, so no bearing may resolve."""
-    board = _build_with_wind(_FakeApi(), lambda venue: (Decimal("9"), "WSW"))
+    board = _build_with_wind(_FakeApi(), lambda venue, at: (Decimal("9"), "WSW"))
     assert not isinstance(board, FetchFailure)
     game = board.games[0]
     assert game.park_orientation_degrees is None
@@ -677,7 +692,7 @@ def test_an_unparseable_compass_reading_degrades_to_none() -> None:
     """A direction text outside the sixteen-point compass is an honest
     absence — the wind tags stay silent rather than resolve against a
     guessed bearing."""
-    board = _build_with_wind(_OpenAirApi(), lambda venue: (Decimal("9"), "Variable"))
+    board = _build_with_wind(_OpenAirApi(), lambda venue, at: (Decimal("9"), "Variable"))
     assert not isinstance(board, FetchFailure)
     game = board.games[0]
     assert game.wind_speed_mph == Decimal("9")
@@ -1123,7 +1138,7 @@ def test_the_mix_falls_back_to_the_two_month_record_without_a_board() -> None:
         as_of=AS_OF,
         config=CONFIG,
         fetch_day_events=fetch_day,
-        temperature_for=lambda venue: Decimal("78"),
+        temperature_for=lambda venue, at: Decimal("78"),
         park_factors=_park_factors(),
     )
     assert not isinstance(board, FetchFailure)
@@ -1181,7 +1196,7 @@ def test_the_batter_window_parameter_rewindows_the_grid_and_reaches() -> None:
         config=CONFIG,
         batter_window_days=14,
         fetch_day_events=fetch_day,
-        temperature_for=lambda venue: Decimal("78"),
+        temperature_for=lambda venue, at: Decimal("78"),
         park_factors=_park_factors(),
     )
     assert not isinstance(board, FetchFailure)
@@ -1211,7 +1226,7 @@ def test_the_batter_window_cannot_undercut_the_robbed_basis() -> None:
             config=CONFIG,
             batter_window_days=5,
             fetch_day_events=lambda day: (),
-            temperature_for=lambda venue: Decimal("78"),
+            temperature_for=lambda venue, at: Decimal("78"),
             park_factors=_park_factors(),
         )
 
@@ -1811,7 +1826,7 @@ def _build_with_humidity(api: object, humidity: object) -> object:
         as_of=AS_OF,
         config=CONFIG,
         fetch_day_events=fetch_day,
-        temperature_for=lambda venue: Decimal("78"),
+        temperature_for=lambda venue, at: Decimal("78"),
         park_factors=_park_factors(),
         humidity_for=humidity,  # type: ignore[arg-type]
     )
@@ -1820,10 +1835,10 @@ def _build_with_humidity(api: object, humidity: object) -> object:
 def test_humidity_reaches_an_open_air_game_card_only() -> None:
     """D-111: humidity rides the wind rule — an open-air venue's reading
     reaches the card; a roofed venue carries no reading that never applied."""
-    board = _build_with_humidity(_OpenAirApi(), lambda venue: Decimal("42"))
+    board = _build_with_humidity(_OpenAirApi(), lambda venue, at: Decimal("42"))
     assert not isinstance(board, FetchFailure)
     assert board.games[0].relative_humidity_percent == Decimal("42")
-    roofed = _build_with_humidity(_FakeApi(), lambda venue: Decimal("42"))
+    roofed = _build_with_humidity(_FakeApi(), lambda venue, at: Decimal("42"))
     assert not isinstance(roofed, FetchFailure)
     assert roofed.games[0].relative_humidity_percent is None
 

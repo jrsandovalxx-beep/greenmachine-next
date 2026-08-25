@@ -581,11 +581,13 @@ def _forecast_lookup(pick: Callable[[WeatherForecast], object], diagnostics: lis
     """
     adapter, live = weather_binding()
 
-    def read(venue: ParkVenue) -> object | None:
+    def read(venue: ParkVenue, at: datetime) -> object | None:
         if not live or len(diagnostics) >= WEATHER_FAILURE_CIRCUIT_BREAKER:
             return None
         try:
-            field = adapter.forecast_for(venue)
+            # D-131: ask for the forecast covering first pitch, not the hour
+            # the board happened to be built in.
+            field = adapter.forecast_for(venue, at)
         except Exception as exc:  # composition-root last resort: weather downgrades to absence
             diagnostics.append(f"{venue.venue_id}: {type(exc).__name__} on {type(venue).__name__}")
             return None

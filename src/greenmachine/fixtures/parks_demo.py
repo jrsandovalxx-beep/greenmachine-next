@@ -178,7 +178,12 @@ class FixtureWeatherAdapter:
     # carries CONDITIONS_SOURCE_ID, so the fixture's record is that source.
     source: SourceRecord = CONDITIONS_SOURCE
 
-    def forecast_for(self, venue: ParkVenue) -> SnapshotField[WeatherForecast]:
+    def forecast_for(
+        self, venue: ParkVenue, at: datetime | None = None
+    ) -> SnapshotField[WeatherForecast]:
+        # The fixture answers one fixed forecast regardless of the requested
+        # moment — D-131's game-time pick is a live-adapter concern.
+        del at
         reason = _FORECAST_ABSENT.get(venue.venue_id)
         if reason is not None:
             return SnapshotField[WeatherForecast].absent(reason, CONDITIONS_SOURCE_ID)

@@ -3195,3 +3195,72 @@ day being graded.
 
 Full gate green on both Pythons (3433 passed, 1 skipped), consistency
 check clean, all four showcase runners clean.
+
+## D-131 - Weather reads the forecast at first pitch, not the build hour
+
+Source: PO directive — "Please do weather accuracy spot check." The
+spot-check came first; the fix is what it found.
+
+**The spot-check (2026-08-25 ~20:05 UTC, slate 08/26).** Every readable
+venue on the board was compared against the source's own answer, and the
+source was compared against an independent one:
+
+- **Parsing, mapping, and units are correct.** At all 14 venues the
+  board could read, the app's temperature, wind speed, and wind
+  direction byte-matched the NWS hourly period the app was actually
+  consuming. No conversion or compass-mapping defect exists.
+- **One real defect found: the reading covers the wrong hour.** The
+  board asked NWS for the *current* hour's period no matter when the
+  game starts, so an afternoon board build showed an evening game the
+  afternoon's weather. Roughly 5 of 14 games carried a different wind
+  *direction* at first pitch than the board displayed (e.g. Yankee
+  Stadium W at build time vs S at game time; Busch SE vs W). Wind
+  direction drives the field words and tags, so this was not cosmetic.
+- **NWS itself validated.** Against Open-Meteo at the same coordinates
+  and hour, NWS sat within 2–6 °F and ~3 mph everywhere — no better
+  free source exists, and no source change is warranted.
+- **Named absences behaved correctly.** Rogers Centre answers absent
+  (Toronto is outside NWS coverage — D-055's honest 404), and one
+  transient venue absence recovered on retry.
+
+**The fix.** `WeatherAdapter.forecast_for` now takes the moment the
+reading should cover: `forecast_for(venue, at)`. The pipeline computes
+each game's scheduled first pitch *before* its weather reads and passes
+it to all three conditions readers (temperature, wind, humidity); the
+composition root's closure forwards it. The NWS adapter caches the
+venue's hourly **periods list** under the existing 30-minute freshness
+bound — not one parsed forecast — and each read picks the period
+covering `at`. When no period covers it (the game sits beyond the
+hourly forecast's ~6-day reach), the **nearest** period stands in
+rather than an absence: a stale reading from the source beats no
+reading, and it stays honest — it is still the source's own number,
+with `obtained_at` carrying the fetch moment so age survives the cache.
+`at=None` keeps the old current-period read, so the fixture, the parks
+page, and every existing caller behave exactly as before. The fixture
+adapter accepts and ignores the moment (its one fixed forecast is
+moment-invariant). Absence semantics are unchanged: source failures
+stay SOURCE_UNAVAILABLE with their plain-language diagnostics, an
+answered-but-empty period list stays NOT_YET_OBSERVED, roofed venues
+still take no read at all (D-073/D-111), and `obtained_at` remains the
+fetch time, not the pick time.
+
+**Why nearest-period rather than absence beyond the forecast's reach:**
+a future slate's game (the PO explicitly views future dates) would
+otherwise show no weather at all even though the source published a
+forecast covering most of the horizon. The stand-in is the source's
+data, clearly aged by its own timestamp — presence with disclosed age,
+not an invented number.
+
+**Verified:** the gate's new tests prove the covering period is picked,
+the nearest stands in beyond the horizon, untimed periods fall back to
+the current period, two moments on one venue cost one fetch, and the
+pipeline's readers receive the game's parsed start instant. A cached
+read now returns an equal-but-fresh pick (the periods list is what
+caches), so the prior object-identity assertion became a value-equality
+one. Full gate green on both Pythons (3438 passed, 1 skipped),
+consistency check clean, all four showcase runners clean.
+
+**Noted, not fixed here:** Sutter Health Park (Athletics) carries no
+`savant_venue_id` in the park registry, so its park-factor reads are
+named absences; that is a data-registry gap predating this change and
+is queued for a future decision.
