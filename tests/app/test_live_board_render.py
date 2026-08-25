@@ -1042,13 +1042,12 @@ def test_arms_metrics_mirror_the_card_rules_on_both_scopes() -> None:
     assert "GB %" in texts  # the L30 column set carries it even on an empty scope
 
 
-def test_grid_line_cells_add_the_gaps_on_the_season_view_only() -> None:
-    """D-110: the season view alone carries xISO-ISO and xwOBA-wOBA, each
-    signed with its PA sample, placed beside its sibling column, and
-    reason-styled when the expected-stats board has no row for him.
-    D-124: the season view stars the power-profile EV and the two gaps,
-    and carries the season average launch angle after EV — unstarred
-    context, never a firing line."""
+def test_grid_line_cells_carry_no_gap_columns_on_either_view() -> None:
+    """D-125 (PO): the D-110 regression gaps left the grid for the
+    Sluggers tags — neither view shows xISO-ISO or xwOBA-wOBA, while ISO
+    and xwOBA themselves stay (PO: keep both). D-124: the season view
+    stars the power-profile EV and carries the season average launch
+    angle after EV — unstarred context, never a firing line."""
     import streamlit_app
 
     from greenmachine.live.pipeline import RegressionGaps
@@ -1062,36 +1061,24 @@ def test_grid_line_cells_add_the_gaps_on_the_season_view_only() -> None:
         _grid_line(gaps=gaps, avg_launch_angle=Decimal("16.4")), include_gaps=True
     )
     columns = list(texts)
-    assert columns.index("xISO-ISO ★") == columns.index("ISO") + 1
-    assert columns.index("xwOBA-wOBA ★") == columns.index("xwOBA") + 1
     assert columns.index("LA") == columns.index("EV ★") + 1
-    assert texts["xISO-ISO ★"] == "+.041 (412 PA)"
-    assert texts["xwOBA-wOBA ★"] == "-.012 (412 PA)"
     assert texts["LA"] == "16.4°"
-    assert "xISO-ISO ★" not in styles  # a value cell carries no reason style
     assert "LA" not in styles
-    # The L30 view (the default) never shows the columns, even with data.
+    assert "ISO" in texts and "xwOBA" in texts
+    for gone in ("xISO-ISO", "xISO-ISO ★", "xwOBA-wOBA", "xwOBA-wOBA ★"):
+        assert gone not in texts
+    # The L30 view (the default) never shows LA either.
     texts, _ = streamlit_app._grid_line_cells(
         _grid_line(gaps=gaps, avg_launch_angle=Decimal("16.4"))
     )
-    assert "xISO-ISO" not in texts
-    assert "xISO-ISO ★" not in texts
-    assert "xwOBA-wOBA" not in texts
     assert "LA" not in texts
-    # No board row: the season view names the absence on both columns.
+    # No board row: the season view names the LA absence.
     texts, styles = streamlit_app._grid_line_cells(_grid_line(), include_gaps=True)
-    assert texts["xISO-ISO ★"] == "—"
-    assert texts["xwOBA-wOBA ★"] == "—"
     assert texts["LA"] == "—"
-    assert styles["xISO-ISO ★"] == streamlit_app._REASON_CSS
-    assert styles["xwOBA-wOBA ★"] == streamlit_app._REASON_CSS
     assert styles["LA"] == streamlit_app._REASON_CSS
-    # A scope missing at every reach still reads 'no data available' and
-    # still gains the two gap columns as styled dashes.
+    # A scope missing at every reach still reads 'no data available'.
     texts, styles = streamlit_app._grid_line_cells(None, include_gaps=True)
     assert texts["AB"] == "no data available"
-    assert texts["xISO-ISO ★"] == "—"
-    assert styles["xISO-ISO ★"] == streamlit_app._REASON_CSS
     assert styles["Oppo Air %"] == streamlit_app._REASON_CSS
 
 
@@ -1261,7 +1248,10 @@ def test_grid_headers_carry_their_hover_definitions(monkeypatch: pytest.MonkeyPa
     at.run()
     assert not at.exception, [str(e.value) for e in at.exception]
     season = helps()
-    assert {"LA", "EV ★", "xISO-ISO ★", "xwOBA-wOBA ★"} <= season
+    assert {"LA", "EV ★"} <= season
+    # D-125: the gap columns left the grid, so their hover entries went too.
+    assert "xISO-ISO ★" not in season
+    assert "xwOBA-wOBA ★" not in season
 
 
 def test_slate_today_reads_the_viewers_arizona_day() -> None:
@@ -1662,8 +1652,11 @@ def test_card_tags_carry_the_v22_x_gap_and_contact_first_reads() -> None:
         sprint_speed_fps=None,
         batting_side=None,
         mix_line=None,
+        team="",
+        form=None,
     )
-    # The xISO side trips the flag; the other value still prints.
+    # The xISO side trips the flag; the other value still prints, with the
+    # D-125 reliability band riding the sample.
     over = SimpleNamespace(
         **{
             **base,
@@ -1675,7 +1668,7 @@ def test_card_tags_carry_the_v22_x_gap_and_contact_first_reads() -> None:
         }
     )
     _, boosters, _ = streamlit_app._card_tags(over, None)
-    assert "x-gap: xISO +.051, xwOBA -.012 (season, 412 PA)" in boosters
+    assert "x-gap: xISO +.051, xwOBA -.012 (season, 412 PA · established)" in boosters
     # The xwOBA side trips it at its own, lighter line.
     flipped = SimpleNamespace(
         **{
@@ -1755,6 +1748,8 @@ def test_card_tags_carry_the_v22_batter_boosters() -> None:
         sprint_speed_fps=None,
         batting_side=None,
         mix_line=None,
+        team="",
+        form=None,
     )
 
     def batter(**over: object) -> SimpleNamespace:
@@ -1806,7 +1801,8 @@ def test_card_tags_carry_the_v22_batter_boosters() -> None:
     assert "bats 4th" in boosters
     advisories, boosters, _ = streamlit_app._card_tags(batter(order_position=7), arm)
     assert "bats 7th" in advisories and "bats 7th" not in boosters
-    # Actual over expected: context only, on the neutral column.
+    # Actual over expected: context only, on the neutral column — D-125
+    # names the structural reasons present, no reason no tag.
     context = batter(
         season_gaps=RegressionGaps(
             xiso_minus_iso=Decimal("-0.030"),
@@ -1817,11 +1813,110 @@ def test_card_tags_carry_the_v22_batter_boosters() -> None:
     )
     advisories, _, _ = streamlit_app._card_tags(context, arm)
     assert (
-        "actual over expected: wOBA +.042 over xwOBA (season, 401 PA), sprint 28.4 ft/s"
-        in advisories
+        "actual over expected: wOBA +.042 over xwOBA (season, 401 PA · established) "
+        "— likely structural: sprint 28.4 ft/s; "
+        "x-stats are park-neutral and direction-blind" in advisories
     )
     slow = SimpleNamespace(**{**vars(context), "sprint_speed_fps": Decimal("27.1")})
     assert "actual over expected" not in streamlit_app._card_tags(slow, arm)[0]
+
+
+def test_card_tags_carry_the_d125_bands_and_why_riders() -> None:
+    """D-125 (PO): every gap read carries its reliability band (thin under
+    200 PA, readable 200-399, established 400+ — builder bands off the
+    ratified stabilization anchors, printed in the captions per D-079).
+    The under-performance tag adds a rider when the batter's home park
+    suppresses HRs on his side (the park-neutral x-stats can hold that gap
+    open); the over-performance advisory names every structural reason
+    present — sprint, a pull-heavy air profile, a boosting home park."""
+    from types import SimpleNamespace
+
+    import streamlit_app
+
+    from greenmachine.live.pipeline import RegressionGaps
+
+    assert streamlit_app._gap_band(0) == "thin"
+    assert streamlit_app._gap_band(199) == "thin"
+    assert streamlit_app._gap_band(200) == "readable"
+    assert streamlit_app._gap_band(399) == "readable"
+    assert streamlit_app._gap_band(400) == "established"
+
+    base = dict(
+        result=SimpleNamespace(present_observations=[], missing_observations=[]),
+        order_position=None,
+        lineup_is_estimate=False,
+        season_k_share=None,
+        season=None,
+        season_gaps=None,
+        squared_up_share=None,
+        squared_up_swings=0,
+        squared_up_bat_speed=None,
+        statcast=None,
+        sprint_speed_fps=None,
+        batting_side="L",
+        mix_line=None,
+        team="",
+        form=None,
+    )
+
+    def batter(**over: object) -> SimpleNamespace:
+        return SimpleNamespace(**{**base, **over})
+
+    def gaps(xwoba: str, pa: int = 412) -> RegressionGaps:
+        return RegressionGaps(
+            xiso_minus_iso=Decimal("0.051"),
+            xwoba_minus_woba=Decimal(xwoba),
+            plate_appearances=pa,
+        )
+
+    # The band text rides the sample: 88 PA reads thin.
+    _, boosters, _ = streamlit_app._card_tags(batter(season_gaps=gaps("-0.012", 88)), None)
+    assert "(season, 88 PA · thin)" in boosters
+    # A suppressive home park (Oracle, LHB factor 73) attaches the rider.
+    _, boosters, _ = streamlit_app._card_tags(
+        batter(season_gaps=gaps("-0.012"), team="San Francisco Giants"), None
+    )
+    assert "home park HR factor 73 (LHB) can hold the gap open" in boosters
+    # A neutral home park or an unresolved side stays rider-free.
+    _, boosters, _ = streamlit_app._card_tags(
+        batter(season_gaps=gaps("-0.012"), team="New York Mets"), None
+    )
+    assert "can hold the gap open" not in boosters
+    _, boosters, _ = streamlit_app._card_tags(
+        batter(season_gaps=gaps("-0.012"), team="San Francisco Giants", batting_side=None),
+        None,
+    )
+    assert "can hold the gap open" not in boosters
+    # Over-performance: the pull-heavy air profile and the boosting home
+    # park join the sprint reason; all three print when all three fire.
+    form = SimpleNamespace(
+        pull_air_pct=SimpleNamespace(
+            sufficient=True, value=Decimal("44.2"), sample=19, window_days=14
+        )
+    )
+    advisories, _, _ = streamlit_app._card_tags(
+        batter(
+            season_gaps=gaps("-0.045"),
+            sprint_speed_fps=Decimal("28.4"),
+            form=form,
+            team="Los Angeles Dodgers",
+            batting_side="R",
+        ),
+        None,
+    )
+    assert "sprint 28.4 ft/s" in advisories
+    assert "pull-air 44% (19 air balls L14)" in advisories
+    assert "home park HR factor 132 (RHB)" in advisories
+    assert "park-neutral and direction-blind" in advisories
+    # An insufficient spray record drops only its own reason.
+    thin_form = SimpleNamespace(
+        pull_air_pct=SimpleNamespace(sufficient=False, value=None, sample=4, window_days=14)
+    )
+    advisories, _, _ = streamlit_app._card_tags(
+        batter(season_gaps=gaps("-0.045"), sprint_speed_fps=Decimal("28.4"), form=thin_form),
+        None,
+    )
+    assert "sprint 28.4 ft/s" in advisories and "pull-air" not in advisories
 
 
 def test_card_tags_carry_the_v22_park_and_weather_reads() -> None:
