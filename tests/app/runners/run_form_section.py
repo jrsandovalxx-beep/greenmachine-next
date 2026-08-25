@@ -145,7 +145,7 @@ class _RunnerSavant:
 
     def fetch_pitcher_expected_stats(self, *, year: int) -> dict:
         # D-111 showcase: the starter card's season row carries real-shaped
-        # values — wOBA above xwOBA and a 1.50 HR/9, so both greens show.
+        # values — a 1.50 HR/9, so the ratified vulnerability green shows.
         return {
             PITCHER_ID: ExpectedStatsRow(
                 player_id=PITCHER_ID,
@@ -167,8 +167,12 @@ class _RunnerSavant:
                 batted_ball_events=450,
                 avg_launch_angle=Decimal("12.9"),
                 barrel_count=36,
+                hard_hit_count=180,
             )
         }
+
+    def fetch_batted_ball(self, *, year: int, minimum: int = 0) -> dict:
+        return {}
 
 
 def _runner_card() -> tuple[BatterCard, GameCard]:

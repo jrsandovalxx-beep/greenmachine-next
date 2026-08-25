@@ -136,15 +136,17 @@ class ExpectedStatsRow:
 @dataclass(frozen=True)
 class StatcastPitcherRow:
     """The season Statcast board against one pitcher (D-111): batted balls,
-    barrels, and average launch angle against. Every column is required —
-    an unknown column is a clean FetchFailure, never a wrong number. The
-    board's fbld/gb columns are exit velocities, not counts, so no
-    air/ground split is read here."""
+    barrels, average launch angle, and — D-128 (PO) — the hard-hit count
+    against (the board's ev95plus column, verified live 2026-08-25). Every
+    column is required — an unknown column is a clean FetchFailure, never a
+    wrong number. The board's fbld/gb columns are exit velocities, not
+    counts, so no air/ground split is read here."""
 
     player_id: int
     batted_ball_events: int
     avg_launch_angle: Decimal
     barrel_count: int
+    hard_hit_count: int
 
 
 @dataclass(frozen=True)
@@ -179,10 +181,20 @@ class BatTrackingRow:
 
 @dataclass(frozen=True)
 class BattedBallRow:
+    """The season batted-ball profile board for one batter: batted balls,
+    the air share, and the three air-direction rates — each a share of ALL
+    batted balls, so the three sum to the air share (verified live
+    2026-08-25). D-128 (PO): the season view's pull/straight/oppo air
+    reads come from this board — published numbers, never home-built
+    derivations; the per-air-ball shares the grid prints are computed
+    pipeline-side off these rates (§GMF-008)."""
+
     player_id: int
     batted_ball_events: int
     air_share: Decimal  # fraction of BBE that are air balls
     pull_air_share_of_bbe: Decimal  # fraction of ALL BBE that are pulled air balls
+    straight_air_share_of_bbe: Decimal
+    oppo_air_share_of_bbe: Decimal
 
 
 @dataclass(frozen=True)
@@ -448,8 +460,8 @@ class BaseballSavant:
         self, *, year: int, minimum: int = 0
     ) -> dict[int, StatcastPitcherRow] | FetchFailure:
         """Season Statcast quality-of-contact board against pitchers (D-111),
-        keyed by player id. Batted balls, barrels, and average launch angle
-        against; every column required."""
+        keyed by player id. Batted balls, barrels, average launch angle, and
+        the hard-hit count against (D-128); every column required."""
         context = "statcast-pitchers"
 
         def parse(row: dict[str, str]) -> StatcastPitcherRow:
@@ -458,6 +470,7 @@ class BaseballSavant:
                 batted_ball_events=_int(row.get("attempts"), context),
                 avg_launch_angle=_decimal(row.get("avg_hit_angle"), context),
                 barrel_count=_int(row.get("barrels"), context),
+                hard_hit_count=_int(row.get("ev95plus"), context),
             )
 
         parsed = self._board(
@@ -535,7 +548,9 @@ class BaseballSavant:
     def fetch_batted_ball(
         self, *, year: int, minimum: int = 0
     ) -> dict[int, BattedBallRow] | FetchFailure:
-        """Season batted-ball profile board (air rate, pull-air rate)."""
+        """Season batted-ball profile board: air rate plus the three
+        air-direction rates (pull/straight/oppo), each over all batted
+        balls (D-128)."""
         context = "batted-ball"
 
         def parse(row: dict[str, str]) -> BattedBallRow:
@@ -545,6 +560,8 @@ class BaseballSavant:
                 batted_ball_events=_int(row.get("bbe"), context),
                 air_share=_decimal(row.get("air_rate"), context),
                 pull_air_share_of_bbe=_decimal(row.get("pull_air_rate"), context),
+                straight_air_share_of_bbe=_decimal(row.get("straight_air_rate"), context),
+                oppo_air_share_of_bbe=_decimal(row.get("oppo_air_rate"), context),
             )
 
         parsed = self._board(_BATTED_BALL_URL.format(year=year, minimum=minimum), context, parse)

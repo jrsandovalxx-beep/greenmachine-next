@@ -43,6 +43,7 @@ from greenmachine.live.form import (
     is_measurable_air,
     is_oppo_air,
     is_pull_air,
+    is_straight_air,
     resolve_form_section,
 )
 from greenmachine.live.grading import (
@@ -66,6 +67,7 @@ from greenmachine.live.mlb_api import (
 )
 from greenmachine.live.savant import (
     BaseballSavant,
+    BattedBallRow,
     BatTrackingRow,
     ExpectedStatsRow,
     PitchArsenalRow,
@@ -83,20 +85,28 @@ FORM_SHORT_DAYS = 7
 # in the form window, capped at this many games (D-086).
 RECENT_EVENT_GAMES_CAP = 7
 # The batter's matchup table reads his pitches seen against the
-# opposing starter's side over this many days (D-088).
+# opposing starter's side over this many days (D-088). D-128 (PO): this
+# is the DEFAULT — the Matchups tab's timeframe selector passes its own
+# (1-12 weeks or 1-3 months); the season view keeps this one behind the
+# grade, which therefore stays the L30 computation there.
 MATCHUP_WINDOW_DAYS = 30
+# D-128 (PO): the starter's recent-form lines, his per-side usage and
+# pitch sets, and his stuff drift all read this many days — the pitcher
+# tables' recent-form toggle is the last two months. Season-long PER-SIDE
+# mix splits have no published board (the arsenal CSV ignores its hand
+# parameter — verified live 2026-08-25), so the event record is the only
+# per-side basis and it reaches this far on every build.
+PITCHER_RECENT_WINDOW_DAYS = 60
 # The arsenal breakup's batter half is precomputed at each of these reaches
 # (D-106): weeks one through four plus the full month the pitch record
-# carries — the dialog's window control selects, never derives.
+# carries — the dialog's window control selects, never derives. A batter
+# window under thirty days caps the list at the window (D-128).
 MATCHUP_LINE_WINDOWS_DAYS = (7, 14, 21, 28, 30)
 GAME_LOG_LOOKBACK_DAYS = 5
 # SP-3 (D-123): the pitching game log's reach. It mirrors the pitch
 # window's full month so the start count behind the thin-sample caption
-# is the same record the L30 hand splits read.
+# is the same record the hand splits read.
 PITCHING_LOG_LOOKBACK_DAYS = 31
-# D-081's reach: a starter whose mix has no pitches in the matchup window
-# extends the read to L45 before falling back to the season board.
-MIX_REACH_DAYS = 45
 # The robbed-HR column (PO 2026-08-24, replacing D-090's +350 ft column):
 # batted balls at or past this projected distance that STAYED IN THE PARK
 # (a ball that left was not robbed of anything), over the batter's last 7
@@ -298,6 +308,11 @@ class BatterGridLine:
     # SP-1 (D-109): the pull mirror over the identical measurable-air
     # denominator — None on the season view, which publishes no spray read.
     oppo_air_share: Decimal | None = None
+    # D-128 (PO): the third air profile — straight-away air balls over the
+    # identical measurable-air denominator, so the three shares sum to one.
+    # None on the season view like its siblings; a fit read, deliberately
+    # uncolored on the grid like oppo.
+    straight_air_share: Decimal | None = None
     expected_woba: Decimal | None = None
     whiff_share: Decimal | None = None
     # SP-2 (D-110): the season regression gaps — carried only by the season
@@ -376,6 +391,10 @@ class PitcherSeasonReads:
     batted_ball_events: int  # the Statcast pitcher board's BBE sample (0 without)
     barrel_share: Decimal | None
     avg_launch_angle: Decimal | None
+    # D-128 (PO): hard-hit share against off the same Statcast pitcher
+    # board (its ev95plus count over its BBE sample) — the pitcher tables
+    # carry it on both scopes now.
+    hard_hit_share: Decimal | None
     home_runs: int | None  # the season line's HR count (None without a line)
     home_run_per_nine: Decimal | None
     innings_text: str  # the line's baseball-notation innings ("" without one)
@@ -383,13 +402,14 @@ class PitcherSeasonReads:
 
 @dataclass(frozen=True)
 class PitcherRecentLine:
-    """D-111: one L30 scope of the starter's record — overall, or against
-    one batting side — computed here from the window's kept events
-    (§GMF-008: the view formats, never derives). Rates are None where their
-    denominator is empty. The L30 scope publishes no innings, so HR/9 stays
-    a season read and the HR count shows instead; it publishes no per-event
-    expected SLG, so xISO stays a season read — the surface names both
-    absences rather than inventing them."""
+    """D-111: one recent-form scope of the starter's record — overall, or
+    against one batting side — computed here from the kept events (§GMF-008:
+    the view formats, never derives). D-128 (PO) stretched the scope from
+    thirty days to the last two months. Rates are None where their
+    denominator is empty. The event scope publishes no innings, so HR/9
+    stays a season read and the HR count shows instead; it publishes no
+    per-event expected SLG, so xISO stays a season read — the surface
+    names both absences rather than inventing them."""
 
     plate_appearances: int
     batted_balls: int
@@ -400,6 +420,10 @@ class PitcherRecentLine:
     avg_launch_angle: Decimal | None
     air_ball_share: Decimal | None
     iso: Decimal | None
+    # D-128 (PO): hard-hit share against — 95+ mph batted balls over BBE,
+    # the same definition the batter grid carries. The pitcher tables show
+    # it on both scopes now.
+    hard_hit_share: Decimal | None = None
     # D-114 (v2.2): ground balls over classified BBE — the GB% half of the
     # GB_PROFILE / PITCHER_GAS tags, which the season boards do not publish.
     # The classified count is the share's true denominator (BBE with a
@@ -488,11 +512,13 @@ def _pitcher_season_reads(
     batted_ball_events = 0
     barrel_share: Decimal | None = None
     avg_launch_angle: Decimal | None = None
+    hard_hit_share: Decimal | None = None
     if statcast_row is not None:
         batted_ball_events = statcast_row.batted_ball_events
         avg_launch_angle = statcast_row.avg_launch_angle
         if batted_ball_events:
             barrel_share = Decimal(statcast_row.barrel_count) / Decimal(batted_ball_events)
+            hard_hit_share = Decimal(statcast_row.hard_hit_count) / Decimal(batted_ball_events)
     home_runs: int | None = None
     home_run_per_nine: Decimal | None = None
     innings_text = ""
@@ -511,6 +537,7 @@ def _pitcher_season_reads(
         batted_ball_events=batted_ball_events,
         barrel_share=barrel_share,
         avg_launch_angle=avg_launch_angle,
+        hard_hit_share=hard_hit_share,
         home_runs=home_runs,
         home_run_per_nine=home_run_per_nine,
         innings_text=innings_text,
@@ -518,15 +545,21 @@ def _pitcher_season_reads(
 
 
 def _pitcher_recent_line(events: tuple[PitchEvent, ...]) -> PitcherRecentLine | None:
-    """One L30 scope of the starter's record off the kept window events
-    (D-111). None when the scope has no events at all — the surface names
-    the absence. wOBA sums the per-event values over the per-event
-    denominators, the same convention the expected-wOBA read uses."""
+    """One recent-form scope of the starter's record off the kept events —
+    the last two months since D-128 (PO), L30 before that (D-111). None
+    when the scope has no events at all — the surface names the absence.
+    wOBA sums the per-event values over the per-event denominators, the
+    same convention the expected-wOBA read uses."""
     if not events:
         return None
     outcomes = _plate_outcomes(events)
     batted = [event for event in events if event.launch_speed is not None]
     barrels = sum(1 for event in batted if event.launch_speed_angle == BARREL_CLASSIFICATION)
+    hard_hits = sum(
+        1
+        for event in batted
+        if event.launch_speed is not None and event.launch_speed >= HARD_HIT_THRESHOLD_MPH
+    )
     angles = [event.launch_angle for event in events if event.launch_angle is not None]
     woba_total = Decimal(0)
     woba_denominator = Decimal(0)
@@ -553,6 +586,7 @@ def _pitcher_recent_line(events: tuple[PitchEvent, ...]) -> PitcherRecentLine | 
         avg_launch_angle=(sum(angles, Decimal(0)) / Decimal(len(angles))) if angles else None,
         air_ball_share=air_ball_share,
         iso=outcomes.iso,
+        hard_hit_share=(Decimal(hard_hits) / Decimal(len(batted))) if batted else None,
         ground_ball_share=ground_ball_share,
         classified_batted_balls=len(classified),
     )
@@ -579,16 +613,19 @@ class PitcherCard:
     pitches_vs_left: frozenset[str]
     pitches_vs_right: frozenset[str]
     # D-102: each pitch type's share of his pitches to that side over the
-    # recent window — the only per-side usage split on the board, since the
-    # arsenal leaderboard publishes usage across all batters only.
+    # recent record — the only per-side usage split anywhere, since the
+    # arsenal leaderboard publishes usage across all batters only and its
+    # hand filter is inert (verified live 2026-08-25). D-128 (PO) stretched
+    # the record from thirty days to the last two months.
     usage_vs_left: dict[str, Decimal]
     usage_vs_right: dict[str, Decimal]
     # SP-1 (D-109): arsenal-wide whiff — the pitch-weighted mean over his
     # season lines, for the low-whiff side of the high-K interaction tag.
     season_whiff_weighted: Decimal | None = None
     # D-111: the header-card and Arms reads — season figures off the named
-    # boards, and the L30 lines (overall, per batting side) off the window's
-    # kept events. Each None names its scope's absence.
+    # boards, and the recent-form lines (overall, per batting side) off the
+    # kept events — the last two months since D-128 (PO). Each None names
+    # its scope's absence.
     season_reads: PitcherSeasonReads | None = None
     recent_overall: PitcherRecentLine | None = None
     recent_vs_left: PitcherRecentLine | None = None
@@ -969,6 +1006,11 @@ def _batter_grid_line(
     measurable_air = [event for event in batted if is_measurable_air(event)]
     pulls = sum(1 for event in measurable_air if is_pull_air(event))
     oppos = sum(1 for event in measurable_air if is_oppo_air(event))
+    # D-128 (PO): the straight-away bucket over the same denominator. Pull
+    # and oppo keep the ratified signed convention, so they partition the
+    # set and straight (a fifteen-degree band) overlaps a near-center
+    # ball's signed side — one denominator, not a partition.
+    straights = sum(1 for event in measurable_air if is_straight_air(event))
     return BatterGridLine(
         pitches=len(events),
         plate_appearances=outcomes.plate_appearances,
@@ -990,9 +1032,28 @@ def _batter_grid_line(
         robbed_hr_count=robbed_count,
         pull_air_share=(Decimal(pulls) / Decimal(len(measurable_air)) if measurable_air else None),
         oppo_air_share=(Decimal(oppos) / Decimal(len(measurable_air)) if measurable_air else None),
+        straight_air_share=(
+            Decimal(straights) / Decimal(len(measurable_air)) if measurable_air else None
+        ),
         expected_woba=outcomes.expected_woba,
         whiff_share=outcomes.whiff_share,
     )
+
+
+def _per_air_share(row: BattedBallRow | None, direction: str) -> Decimal | None:
+    """One air-direction bucket as a share of the batter's air balls
+    (D-128, PO): the batted-ball board's rates are shares of ALL batted
+    balls (the three sum to its air share), so each rebases on the air
+    share here — pipeline-side, §GMF-008. None without a row or an air
+    ball: the surface names the absence, never an invented split."""
+    if row is None or not row.air_share:
+        return None
+    rate = {
+        "pull": row.pull_air_share_of_bbe,
+        "straight": row.straight_air_share_of_bbe,
+        "oppo": row.oppo_air_share_of_bbe,
+    }[direction]
+    return rate / row.air_share
 
 
 def _season_grid_line(
@@ -1000,15 +1061,23 @@ def _season_grid_line(
     statcast: StatcastBatterRow | None,
     arsenal_rows: Sequence[PitchArsenalRow],
     gaps: RegressionGaps | None = None,
+    robbed_count: int | None = None,
+    batted_ball: BattedBallRow | None = None,
 ) -> BatterGridLine | None:
     """The batter's season-view grid line (D-079's toggle target), composed
     from the season sources: the hitting line for AB/H/HR/AVG/SLG/ISO, the
-    statcast board for EV/barrels/hard-hit, and the arsenal board for
-    PA-weighted xwOBA and pitch-weighted Swing-Str. The season scope has
-    no per-event record, so the robbed-HR count and the pull-air reads
-    stay None — the surface names the absence (D-081/D-090). The D-110
-    regression gaps ride along when the expected-stats board covers him."""
-    if line is None and statcast is None and not arsenal_rows:
+    statcast board for EV/barrels/hard-hit, the arsenal board for
+    PA-weighted xwOBA and pitch-weighted Swing-Str, and — D-128 (PO) —
+    the batted-ball profile board for the three air-direction reads:
+    Savant's own published pull/straight/oppo buckets, rebased here to
+    shares of his air balls (the board's rates are shares of ALL batted
+    balls and sum to its air share) so the column speaks one denominator
+    on both views. A missing row or an empty air share names the absence,
+    never an invented split. D-128 (PO): the robbed-HR count shows on
+    the season view too — it arrives computed, always on its own last-7-
+    days basis, which the surface names. The D-110 regression gaps ride
+    along when the expected-stats board covers him."""
+    if line is None and statcast is None and not arsenal_rows and batted_ball is None:
         return None
     at_bats = line.at_bats if line else 0
     hits = line.hits if line else 0
@@ -1042,9 +1111,10 @@ def _season_grid_line(
         batting_average=average,
         slugging=slugging,
         iso=(slugging - average if average is not None and slugging is not None else None),
-        robbed_hr_count=None,
-        pull_air_share=None,
-        oppo_air_share=None,
+        robbed_hr_count=robbed_count,
+        pull_air_share=_per_air_share(batted_ball, "pull"),
+        oppo_air_share=_per_air_share(batted_ball, "oppo"),
+        straight_air_share=_per_air_share(batted_ball, "straight"),
         expected_woba=(woba_total / Decimal(woba_pa)) if woba_pa else None,
         whiff_share=(whiff_total / Decimal(whiff_pitches)) if whiff_pitches else None,
         gaps=gaps,
@@ -1056,11 +1126,13 @@ def _window_mix_rows(
     window_events: Sequence[PitchEvent],
     board_rows: Sequence[PitchArsenalRow],
 ) -> tuple[PitchMixRow, ...]:
-    """The starter's mix from his pitch events over the window actually
-    used (D-079): usage from the window counts, put-away always from the
+    """The starter's mix from his pitch events over the record actually
+    used (D-079): usage from the event counts, put-away always from the
     season board — events carry no put-away counts. A pitch type absent
     from the board keeps put_away_share None; the derivation skips it
-    rather than inventing a zero."""
+    rather than inventing a zero. Since D-128 (PO) this builder is the
+    last resort: the season board is the mix scope, and only a starter
+    with no arsenal board at either year reads his two-month record."""
     counts: dict[str, int] = {}
     for event in window_events:
         if event.pitch_type:
@@ -1084,8 +1156,9 @@ def _window_mix_rows(
 
 
 def _board_mix_rows(board_rows: Sequence[PitchArsenalRow]) -> tuple[PitchMixRow, ...]:
-    """The starter's mix from a season arsenal board — the D-081 fallback
-    when no window pitches exist (current season, else last season)."""
+    """The starter's mix from a season arsenal board — since D-128 (PO)
+    the primary scope, the whole mix for the whole season (current
+    season, else last season labelled, D-087)."""
     rows = [
         PitchMixRow(
             pitch_type=row.pitch_type,
@@ -1374,6 +1447,7 @@ def build_board(
     slate_date: date,
     as_of: datetime,
     config: GreenMachineConfig,
+    batter_window_days: int = MATCHUP_WINDOW_DAYS,
     fetch_day_events: Callable[[date], tuple[PitchEvent, ...] | FetchFailure],
     temperature_for: Callable[[ParkVenue], Decimal | None],
     park_factors: dict[int, dict[Handedness, ParkFactor]],
@@ -1513,6 +1587,20 @@ def build_board(
         if not statcast:
             diagnostics.append("statcast board: returned zero rows")
 
+    # D-128 (PO): the season batted-ball profile board — the season view's
+    # pull/straight/oppo air reads are Savant's own published numbers, not
+    # home-built derivations. One extra CSV per build; degrades to named
+    # absences on its own failure.
+    batted_ball_result = savant.fetch_batted_ball(year=year)
+    batted_ball: dict[int, BattedBallRow]
+    if isinstance(batted_ball_result, FetchFailure):
+        diagnostics.append(f"batted-ball board: {batted_ball_result.reason}")
+        batted_ball = {}
+    else:
+        batted_ball = batted_ball_result
+        if not batted_ball:
+            diagnostics.append("batted-ball board: returned zero rows")
+
     # D-110's three season boards: expected statistics (the regression gaps'
     # only source), sprint speed, and the contact-quality board behind the
     # contact-first profile. Each degrades to a named absence on its own.
@@ -1593,10 +1681,19 @@ def build_board(
     short_tracking_by_batter = _by_player(tracking_short)
     reach_tracking_by_batter = _by_player(tracking_reach)
 
-    # The fetch window spans the matchup window (D-088), the longest read on
-    # the board; form still slices its own L7/L14 reaches out of it.
-    window_start = (as_of - timedelta(days=MATCHUP_WINDOW_DAYS)).date()
-    days = tuple(window_start + timedelta(days=offset) for offset in range(MATCHUP_WINDOW_DAYS + 1))
+    # The event record spans the batter window the Matchups tab selected
+    # (D-128, PO — thirty days by default), stretched to the pitcher
+    # recent-form reach when that is longer, so one fetch serves the
+    # batter grids, the grade, the robbed count, and the starter reads.
+    # Form still slices its own L7/L14 reaches out of it.
+    if batter_window_days < ROBBED_HR_WINDOW_DAYS:
+        raise ValueError(
+            f"the batter window ({batter_window_days} days) must at least "
+            f"cover the robbed-HR window ({ROBBED_HR_WINDOW_DAYS} days)"
+        )
+    record_days = max(batter_window_days, PITCHER_RECENT_WINDOW_DAYS)
+    window_start = (as_of - timedelta(days=record_days)).date()
+    days = tuple(window_start + timedelta(days=offset) for offset in range(record_days + 1))
     slate_batters = set(all_batter_ids)
     slate_pitchers = set(probable_ids)
 
@@ -1615,61 +1712,41 @@ def build_board(
     for event in events:
         events_by_batter.setdefault(event.batter_id, []).append(event)
         events_by_pitcher.setdefault(event.pitcher_id, []).append(event)
-    matchup_cutoff = window_start.isoformat()
+    # The batter scope (grid line, grade leg, robbed count, dialog reaches)
+    # reads the selected window; the starter scope (recent-form lines,
+    # per-side usage, stuff drift) reads the two-month pitcher reach.
+    matchup_cutoff = (as_of - timedelta(days=batter_window_days)).date().isoformat()
+    pitcher_cutoff = (as_of - timedelta(days=PITCHER_RECENT_WINDOW_DAYS)).date().isoformat()
     window_cutoffs = {
-        days: (as_of - timedelta(days=days)).date().isoformat()
-        for days in MATCHUP_LINE_WINDOWS_DAYS
+        reach: (as_of - timedelta(days=reach)).date().isoformat()
+        for reach in MATCHUP_LINE_WINDOWS_DAYS
+        if reach <= batter_window_days
     }
+    if batter_window_days not in window_cutoffs:
+        window_cutoffs[batter_window_days] = matchup_cutoff
 
-    # D-081's reach: a starter with no pitches in the matchup window extends
-    # the read to L45. The extra days are fetched once, only when some
-    # probable needs them; the season board is the next fallback.
-    starters_without_window = {
-        pid
-        for pid in probable_ids
-        if not any(event.game_date >= matchup_cutoff for event in events_by_pitcher.get(pid, ()))
-    }
-    if starters_without_window:
-        # A distinct name: rebinding ``reach_start`` here would leak the L45
-        # mix reach into the form fallback's L14 cutoff below (D-103).
-        mix_reach_start = (as_of - timedelta(days=MIX_REACH_DAYS)).date()
-        extra_days = tuple(
-            mix_reach_start + timedelta(days=offset)
-            for offset in range(MIX_REACH_DAYS - MATCHUP_WINDOW_DAYS)
-        )
-        extra_events, extra_diagnostics = fetch_window_events(
-            fetch_day_events,
-            days=extra_days,
-            keep=keep_event,
-        )
-        diagnostics.extend(extra_diagnostics)
-        if extra_events:
-            events = events + extra_events
-            for event in extra_events:
-                events_by_batter.setdefault(event.batter_id, []).append(event)
-                events_by_pitcher.setdefault(event.pitcher_id, []).append(event)
-
-    # Each probable's mix (D-079): his L30 usage, else the L45 reach, else
-    # the season board, else last season's board — the label names which.
+    # Each probable's mix (D-128, PO): his season arsenal board — the whole
+    # mix for the whole season — else last season's board (labelled, D-087),
+    # else the two-month event record (the only remaining source). The
+    # label names which. D-081's L45 reach is subsumed: the record now
+    # spans sixty days on every build, so no second fetch ever fires.
     mix_by_pitcher: dict[int, tuple[PitchMixRow, ...]] = {}
     mix_label_by_pitcher: dict[int, str] = {}
     for pid in probable_ids:
-        pitcher_window = tuple(events_by_pitcher.get(pid, ()))
-        window_30 = tuple(event for event in pitcher_window if event.game_date >= matchup_cutoff)
+        pitcher_window = tuple(
+            event for event in events_by_pitcher.get(pid, ()) if event.game_date >= pitcher_cutoff
+        )
         current_board = arsenal_by_pitcher.get(pid, ())
         board_rows = current_board or fallback_arsenal_by_pitcher.get(pid, ())
-        if window_30:
-            mix_by_pitcher[pid] = _window_mix_rows(window_30, board_rows)
-            mix_label_by_pitcher[pid] = "last 30 days"
-        elif pitcher_window:
-            mix_by_pitcher[pid] = _window_mix_rows(pitcher_window, board_rows)
-            mix_label_by_pitcher[pid] = "last 45 days"
-        elif current_board:
+        if current_board:
             mix_by_pitcher[pid] = _board_mix_rows(current_board)
             mix_label_by_pitcher[pid] = "season"
         elif board_rows:
             mix_by_pitcher[pid] = _board_mix_rows(board_rows)
             mix_label_by_pitcher[pid] = "last season"
+        elif pitcher_window:
+            mix_by_pitcher[pid] = _window_mix_rows(pitcher_window, ())
+            mix_label_by_pitcher[pid] = "last 60 days"
         else:
             mix_by_pitcher[pid] = ()
             mix_label_by_pitcher[pid] = ""
@@ -1730,10 +1807,13 @@ def build_board(
                     pitcher_expected,
                     pitcher_statcast,
                     year,
+                    # D-128 (PO): the starter's event reads — recent-form
+                    # lines, per-side usage and pitch sets, stuff drift —
+                    # all read the two-month pitcher record now.
                     tuple(
                         event
                         for event in events_by_pitcher.get(probable.player_id, ())
-                        if event.game_date >= matchup_cutoff
+                        if event.game_date >= pitcher_cutoff
                     ),
                     pitching_logs.get(probable.player_id, ()),
                     slate_date,
@@ -1867,6 +1947,19 @@ def build_board(
                     season_start=season_start,
                     capture=capture,
                 )
+                # The robbed count reads the batter's whole last-7-days
+                # record, not the mix scope — None when the event record
+                # itself failed. D-128 (PO): it rides BOTH grid lines, so
+                # the season view shows it too — always on the L7 basis,
+                # which the surface names.
+                robbed_count = (
+                    _robbed_hr_count(
+                        events_by_batter.get(player_id, ()),
+                        window_cutoffs[ROBBED_HR_WINDOW_DAYS],
+                    )
+                    if form_source_available
+                    else None
+                )
                 lineups[side_key].append(
                     BatterCard(
                         player_id=player_id,
@@ -1882,36 +1975,23 @@ def build_board(
                         recent_events=recent_events,
                         matchup_lines_by_window=(
                             {
-                                days: _matchup_lines(
+                                reach: _matchup_lines(
                                     starter_season_lines,
                                     _pitch_lines(
                                         tuple(
                                             event
                                             for event in matchup_scope_events
-                                            if event.game_date >= window_cutoffs[days]
+                                            if event.game_date >= window_cutoffs[reach]
                                         )
                                     ),
                                 )
-                                for days in MATCHUP_LINE_WINDOWS_DAYS
+                                for reach in sorted(window_cutoffs)
                             }
                             if starter_season_lines
                             else {}
                         ),
                         mix_line=(
-                            _batter_grid_line(
-                                mix_scope_events,
-                                # The robbed count reads the batter's whole
-                                # last-7-days record, not the mix scope —
-                                # None when the event record itself failed.
-                                robbed_count=(
-                                    _robbed_hr_count(
-                                        events_by_batter.get(player_id, ()),
-                                        window_cutoffs[ROBBED_HR_WINDOW_DAYS],
-                                    )
-                                    if form_source_available
-                                    else None
-                                ),
-                            )
+                            _batter_grid_line(mix_scope_events, robbed_count=robbed_count)
                             if pitcher_entity is not None
                             else None
                         ),
@@ -1920,6 +2000,8 @@ def build_board(
                             statcast_row,
                             arsenal_by_batter.get(player_id, ()),
                             gaps,
+                            robbed_count=robbed_count,
+                            batted_ball=batted_ball.get(player_id),
                         ),
                         mix_label=mix_label,
                         homered_on_last_game_day=_homered_on_last_game_day(
