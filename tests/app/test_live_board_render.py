@@ -255,7 +255,7 @@ def _staged_app(monkeypatch: pytest.MonkeyPatch) -> SlateBoard:
     monkeypatch.setattr(
         NwsWeatherAdapter,
         "forecast_for",
-        lambda self, venue: SnapshotField[WeatherForecast].absent(
+        lambda self, venue, at=None: SnapshotField[WeatherForecast].absent(
             AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_ID
         ),
     )
