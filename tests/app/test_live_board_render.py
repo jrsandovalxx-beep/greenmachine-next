@@ -614,29 +614,10 @@ def test_exit_velo_threshold_filters_the_log_to_the_qualifying_mix() -> None:
     assert set(texts_on["Pitch"]) == {"FF", "SL"}
 
 
-def _pitch_line(**overrides: object) -> object:
-    from greenmachine.live.pipeline import PitchLine
-
-    base = {
-        "pitch_type": "FF",
-        "pitch_name": "4-Seam Fastball",
-        "pitches": 60,
-        "usage_share": Decimal("0.30"),
-        "plate_appearances": 15,
-        "batting_average": Decimal("0.280"),
-        "slugging": Decimal("0.520"),
-        "iso": Decimal("0.240"),
-        "home_runs": 2,
-        "barrel_share": Decimal("0.10"),
-        "hard_hit_share": Decimal("0.45"),
-        "expected_woba": Decimal("0.355"),
-        "whiff_share": Decimal("0.24"),
-    }
-    base.update(overrides)
-    return PitchLine(**base)  # type: ignore[arg-type]
-
-
-def _season_line(**overrides: object) -> object:
+def _pitcher_breakup_line(**overrides: object) -> object:
+    """The pitcher half's season line (D-129): event-computed off his season
+    pitch record — the counting and expected fields the arsenal board never
+    published (the raw barrel count, the per-side xISO)."""
     from greenmachine.live.pipeline import PitchLine
 
     base = {
@@ -648,187 +629,203 @@ def _season_line(**overrides: object) -> object:
         "batting_average": Decimal("0.250"),
         "slugging": Decimal("0.400"),
         "iso": Decimal("0.150"),
-        "home_runs": None,
-        "barrel_share": None,
+        "home_runs": 12,
+        "barrel_share": Decimal("0.09"),
         "hard_hit_share": Decimal("0.40"),
-        "expected_woba": Decimal("0.300"),
+        "expected_woba": Decimal("0.335"),
         "whiff_share": Decimal("0.24"),
         "woba": Decimal("0.310"),
         "strikeout_share": Decimal("0.22"),
+        "batted_balls": 75,
+        "at_bats": 92,
+        "hits": 23,
+        "barrel_count": 7,
+        "expected_iso": Decimal("0.165"),
     }
     base.update(overrides)
     return PitchLine(**base)  # type: ignore[arg-type]
 
 
-def test_breakup_table_pairs_pitcher_season_with_batter_window() -> None:
-    """D-106: one table, two halves under an opaque sub-header — Usage% is
-    the pitcher's season share (the batter's seen-share never appears), the
-    first half is his season-long figures, the second the batter's window
-    line against that exact pitch, and a below-threshold row dims."""
-    from types import SimpleNamespace
+def _batter_breakup_line(**overrides: object) -> object:
+    """The batter half's season line against the pitch (D-129): AB and Hits
+    in, PA out; LA right after Hits, then barrel rate and EV; the pull/oppo
+    air reads over the form section's measurable-air convention."""
+    from greenmachine.live.pipeline import PitchLine
 
+    base = {
+        "pitch_type": "FF",
+        "pitch_name": "4-Seam Fastball",
+        "pitches": 120,
+        "usage_share": Decimal("0.40"),
+        "plate_appearances": 32,
+        "batting_average": Decimal("0.280"),
+        "slugging": Decimal("0.520"),
+        "iso": Decimal("0.240"),
+        "home_runs": 2,
+        "barrel_share": Decimal("0.12"),
+        "hard_hit_share": Decimal("0.45"),
+        "expected_woba": Decimal("0.355"),
+        "whiff_share": Decimal("0.26"),
+        "batted_balls": 25,
+        "mean_launch_speed": Decimal("93.2"),
+        "air_ball_share": Decimal("0.52"),
+        "mean_launch_angle": Decimal("21.5"),
+        "at_bats": 50,
+        "hits": 14,
+        "barrel_count": 3,
+        "pull_air_share": Decimal("0.44"),
+        "oppo_air_share": Decimal("0.15"),
+    }
+    base.update(overrides)
+    return PitchLine(**base)  # type: ignore[arg-type]
+
+
+def test_breakup_table_pairs_the_two_season_halves() -> None:
+    """The D-129 table: pitcher season scope on the left, batter season scope
+    on the right, usage above the threshold, ISO only on the batter half."""
     import streamlit_app
 
-    pitcher = SimpleNamespace(
-        season_lines=(
-            _season_line(),
-            _season_line(pitch_type="CH", pitch_name="Changeup", usage_share=Decimal("0.08")),
-        )
-    )
-    batter_lines = (
-        _pitch_line(),
-        _pitch_line(pitch_type="CH", pitch_name="Changeup", usage_share=Decimal("0.08")),
-    )
     markup = streamlit_app._arsenal_breakup_html(
-        pitcher,
-        batter_lines,
+        (
+            _pitcher_breakup_line(),
+            _pitcher_breakup_line(
+                pitch_type="CH", pitch_name="Changeup", usage_share=Decimal("0.05")
+            ),
+        ),
+        {"FF": _batter_breakup_line()},
         threshold=0.15,
-        side_filter=None,
-        side_usage=None,
-        window_label="last month",
-        throws_text="right",
+        pitcher_scope_label="season vs LHB",
+        batter_scope_label="season vs RHP",
     )
-    assert "Pitcher — season" in markup
-    assert "Batter — last month vs right-handed pitching" in markup
-    assert "gm-half-boundary" in markup
-    # Usage is the season board's — never the batter's seen share.
+
+    assert "Pitcher — season vs LHB" in markup
+    assert "Batter — season vs RHP" in markup
     assert ">45.0%<" in markup
-    # Season-only columns (wOBA, K%) show; the batter half carries his HRs.
+    assert "<td>100</td>" in markup
+    assert ">.165<" in markup
     assert ">.310<" in markup
+    assert ">.335<" in markup
     assert ">22.0%<" in markup
-    assert ">2</td>" in markup
-    # The 8%-usage changeup is below the qualifying share: dimmed, still listed.
-    assert markup.count('class="gm-dim"') == 1
-    assert "Changeup" in markup
+    assert "<td>7</td>" in markup
+    pitcher_half = markup.split("gm-half-boundary")[0]
+    assert ">ISO</th>" not in pitcher_half
+    assert 'class="gm-half-boundary">50</td>' in markup
+    assert "<td>14</td>" in markup
+    assert ">21.5°<" in markup
+    assert ">12.0%<" in markup
+    assert ">93.2<" in markup
+    assert ">44.0%<" in markup
+    assert ">15.0%<" in markup
+    assert "Changeup" not in markup
+    assert "gm-dim" not in markup
 
 
 def test_breakup_table_dashes_a_pitch_the_batter_has_not_seen() -> None:
-    """D-106: a pitch in his arsenal the batter never saw from this side
-    keeps its row — zero plate appearances and dashed rates, never hidden."""
-    from types import SimpleNamespace
-
+    """A pitch the batter never faced shows AB 0 and dashes for the rest of
+    his half — the absence is explicit, never invented."""
     import streamlit_app
 
-    pitcher = SimpleNamespace(
-        season_lines=(
-            _season_line(),
-            _season_line(pitch_type="CH", pitch_name="Changeup", usage_share=Decimal("0.20")),
-        )
-    )
     markup = streamlit_app._arsenal_breakup_html(
-        pitcher,
-        (_pitch_line(),),  # the batter's window holds fastballs only
+        (_pitcher_breakup_line(),),
+        {},
         threshold=0.15,
-        side_filter=None,
-        side_usage=None,
-        window_label="last 2 weeks",
-        throws_text="right",
+        pitcher_scope_label="season vs LHB",
+        batter_scope_label="season vs RHP",
     )
-    assert "Batter — last 2 weeks" in markup
-    changeup_row = markup.split("Changeup", 1)[1].split("</tr>", 1)[0]
-    assert '<td class="gm-half-boundary">0</td>' in changeup_row
-    # Eleven dashed batter cells — D-124's LA joined the batter half.
-    assert changeup_row.count("<td>—</td>") == 11
+
+    assert '<td class="gm-half-boundary">0</td>' in markup
+    assert markup.count("<td>—</td>") == 14
 
 
-def test_breakup_side_toggle_switches_usage_to_the_hitter_hand_basis() -> None:
-    """D-102 survives the merge: with the side toggle on, Usage% is his
-    share of pitches to that hitter hand over the recent window, rows order
-    by the shown basis and dim against it, and every other number stays
-    season-long."""
-    from types import SimpleNamespace
-
+def test_breakup_threshold_hides_rows_and_can_empty_the_table() -> None:
+    """Below-threshold rows hide outright (D-129 item 10); a threshold above
+    every usage empties the table so the dialog can caption the state."""
     import streamlit_app
 
-    pitcher = SimpleNamespace(
-        season_lines=(
-            _season_line(),  # FF, 45% season usage
-            _season_line(pitch_type="CH", pitch_name="Changeup", usage_share=Decimal("0.20")),
-        )
+    lines = (
+        _pitcher_breakup_line(),
+        _pitcher_breakup_line(pitch_type="CH", pitch_name="Changeup", usage_share=Decimal("0.10")),
     )
-    side_usage = {"FF": Decimal("0.30"), "CH": Decimal("0.70")}
     markup = streamlit_app._arsenal_breakup_html(
-        pitcher,
-        (),
+        lines,
+        {"FF": _batter_breakup_line()},
         threshold=0.15,
-        side_filter=frozenset({"FF", "CH"}),
-        side_usage=side_usage,
-        window_label="last month",
-        throws_text="right",
-    )
-    # The changeup leads vs this hand, so its row sorts first at 70%.
-    assert markup.index("Changeup") < markup.index("4-Seam Fastball")
-    assert ">70.0%<" in markup
-    assert ">30.0%<" in markup
-    assert ">45.0%<" not in markup
-    # Every other number stays the season board's.
-    assert "<td>100</td>" in markup
-    assert ">.310<" in markup
-    # The threshold dims on the shown basis: past 30%, the fastball dims
-    # even though its season usage is 45%.
-    markup_high = streamlit_app._arsenal_breakup_html(
-        pitcher,
-        (),
-        threshold=0.45,
-        side_filter=frozenset({"FF", "CH"}),
-        side_usage=side_usage,
-        window_label="last month",
-        throws_text="right",
-    )
-    assert markup_high.count('class="gm-dim"') == 1
-    dimmed = markup_high.split('class="gm-dim"', 1)[1].split("</tr>", 1)[0]
-    assert "4-Seam Fastball" in dimmed
-
-
-def test_breakup_side_filter_drops_rows_and_can_empty_the_table() -> None:
-    """D-105/D-106: the side filter lists only the pitches he threw to this
-    side; when none of them made his arsenal board the builder returns "" so
-    the surface names the reason instead of rendering a blank grid."""
-    from types import SimpleNamespace
-
-    import streamlit_app
-
-    pitcher = SimpleNamespace(season_lines=(_season_line(),))
-    markup = streamlit_app._arsenal_breakup_html(
-        pitcher,
-        (),
-        threshold=0.15,
-        side_filter=frozenset({"FF"}),
-        side_usage=None,
-        window_label="last month",
-        throws_text="right",
+        pitcher_scope_label="season vs LHB",
+        batter_scope_label="season vs RHP",
     )
     assert "4-Seam Fastball" in markup
+    assert "Changeup" not in markup
+
     empty = streamlit_app._arsenal_breakup_html(
-        pitcher,
-        (),
-        threshold=0.15,
-        side_filter=frozenset({"SL"}),  # thrown to this side, never on his board
-        side_usage=None,
-        window_label="last month",
-        throws_text="right",
+        lines,
+        {"FF": _batter_breakup_line()},
+        threshold=0.50,
+        pitcher_scope_label="season vs LHB",
+        batter_scope_label="season vs RHP",
     )
     assert empty == ""
 
 
-def test_arsenal_side_note_names_a_no_op_filter() -> None:
-    """D-099: when he threw every pitch to this side, the toggle says so —
-    a silent no-op reads as broken (the Weathers case); partial coverage
-    filters quietly; an empty record names the fallback."""
-    from types import SimpleNamespace
-
+def test_breakup_row_verdict_colors_need_both_halves_and_real_samples() -> None:
+    """The D-129 row verdict: pitcher green band + batter green band paints
+    the row green, both red paints it red, and thin samples stay neutral."""
     import streamlit_app
 
-    pitcher = SimpleNamespace(
-        season_lines=(
-            _season_line(),
-            _season_line(pitch_type="CH", pitch_name="Changeup", usage_share=Decimal("0.20")),
-        )
+    good = streamlit_app._arsenal_breakup_html(
+        (_pitcher_breakup_line(),),
+        {"FF": _batter_breakup_line()},
+        threshold=0.15,
+        pitcher_scope_label="season vs LHB",
+        batter_scope_label="season vs RHP",
     )
-    note = streamlit_app._arsenal_side_note(pitcher, frozenset({"FF", "CH"}), "right")
-    assert "nothing to filter" in note
-    assert streamlit_app._arsenal_side_note(pitcher, frozenset({"FF"}), "right") == ""
-    assert "full arsenal" in streamlit_app._arsenal_side_note(pitcher, frozenset(), "right")
+    assert 'tr class="gm-row-good"' in good
+
+    bad = streamlit_app._arsenal_breakup_html(
+        (_pitcher_breakup_line(expected_woba=Decimal("0.260")),),
+        {"FF": _batter_breakup_line(slugging=Decimal("0.300"))},
+        threshold=0.15,
+        pitcher_scope_label="season vs LHB",
+        batter_scope_label="season vs RHP",
+    )
+    assert 'tr class="gm-row-bad"' in bad
+
+    mixed = streamlit_app._arsenal_breakup_html(
+        (_pitcher_breakup_line(),),
+        {"FF": _batter_breakup_line(slugging=Decimal("0.400"))},
+        threshold=0.15,
+        pitcher_scope_label="season vs LHB",
+        batter_scope_label="season vs RHP",
+    )
+    assert "gm-row-good" not in mixed
+    assert "gm-row-bad" not in mixed
+
+    thin_pitcher = streamlit_app._arsenal_breakup_html(
+        (_pitcher_breakup_line(batted_balls=7),),
+        {"FF": _batter_breakup_line()},
+        threshold=0.15,
+        pitcher_scope_label="season vs LHB",
+        batter_scope_label="season vs RHP",
+    )
+    assert "gm-row-good" not in thin_pitcher
+
+    thin_batter = streamlit_app._arsenal_breakup_html(
+        (_pitcher_breakup_line(),),
+        {"FF": _batter_breakup_line(batted_balls=5)},
+        threshold=0.15,
+        pitcher_scope_label="season vs LHB",
+        batter_scope_label="season vs RHP",
+    )
+    assert "gm-row-good" not in thin_batter
+
+    unseen = streamlit_app._arsenal_breakup_html(
+        (_pitcher_breakup_line(),),
+        {},
+        threshold=0.15,
+        pitcher_scope_label="season vs LHB",
+        batter_scope_label="season vs RHP",
+    )
+    assert "gm-row-good" not in unseen
+    assert "gm-row-bad" not in unseen
 
 
 def test_a_dialog_failure_cannot_blank_the_board(tmp_path: Path) -> None:
@@ -1700,30 +1697,26 @@ def test_backtest_excludes_a_day_the_source_has_not_indexed(
 
 
 def test_breakup_batter_half_carries_contact_shape_with_the_pitch_type_floor() -> None:
-    """D-109: the batter half's EV and Air% read the window line — below
-    the ratified 10-BBE pitch-type floor the value keeps its exact sample
-    with an INSUFFICIENT marker; an empty denominator dashes. D-124: the
-    window record's per-pitch mean launch angle sits between them."""
-    from types import SimpleNamespace
-
+    """D-109 + D-129: the batter half's contact-shape reads (LA, barrel
+    rate, EV, hard-hit, air and both pull reads) carry the ratified 10-BBE
+    pitch-type floor — below it the value keeps its exact sample with an
+    INSUFFICIENT marker; an empty denominator dashes, never invents."""
     import streamlit_app
 
-    pitcher = SimpleNamespace(season_lines=(_season_line(),))
     markup = streamlit_app._arsenal_breakup_html(
-        pitcher,
-        (
-            _pitch_line(
+        (_pitcher_breakup_line(),),
+        {
+            "FF": _batter_breakup_line(
                 batted_balls=7,
                 mean_launch_speed=Decimal("91.23"),
                 air_ball_share=Decimal("0.5"),
                 mean_launch_angle=Decimal("23.4"),
-            ),
-        ),
+                pull_air_share=Decimal("0.4"),
+            )
+        },
         threshold=0.15,
-        side_filter=None,
-        side_usage=None,
-        window_label="last month",
-        throws_text="right",
+        pitcher_scope_label="season vs LHB",
+        batter_scope_label="season vs RHP",
     )
     assert ">EV</th>" in markup
     assert ">LA</th>" in markup
@@ -1731,22 +1724,23 @@ def test_breakup_batter_half_carries_contact_shape_with_the_pitch_type_floor() -
     assert "91.2 · n=7 · INSUFFICIENT" in markup
     assert "23.4° · n=7 · INSUFFICIENT" in markup
     assert "50.0% · n=7 · INSUFFICIENT" in markup
+    assert "40.0% · n=7 · INSUFFICIENT" in markup
+    assert "12.0% · n=7 · INSUFFICIENT" in markup
+    assert "45.0% · n=7 · INSUFFICIENT" in markup
     # A full sample shows the plain values, no marker.
     markup_full = streamlit_app._arsenal_breakup_html(
-        pitcher,
-        (
-            _pitch_line(
+        (_pitcher_breakup_line(),),
+        {
+            "FF": _batter_breakup_line(
                 batted_balls=12,
                 mean_launch_speed=Decimal("91.23"),
                 air_ball_share=Decimal("0.5"),
                 mean_launch_angle=Decimal("23.4"),
-            ),
-        ),
+            )
+        },
         threshold=0.15,
-        side_filter=None,
-        side_usage=None,
-        window_label="last month",
-        throws_text="right",
+        pitcher_scope_label="season vs LHB",
+        batter_scope_label="season vs RHP",
     )
     assert ">91.2</td>" in markup_full
     assert ">23.4°</td>" in markup_full
@@ -1754,29 +1748,25 @@ def test_breakup_batter_half_carries_contact_shape_with_the_pitch_type_floor() -
     assert "INSUFFICIENT" not in markup_full
     # No classified contact at all: dashes, never an invented zero.
     markup_empty = streamlit_app._arsenal_breakup_html(
-        pitcher,
-        (_pitch_line(batted_balls=0, mean_launch_speed=None, air_ball_share=None),),
+        (_pitcher_breakup_line(),),
+        {
+            "FF": _batter_breakup_line(
+                batted_balls=0,
+                mean_launch_speed=None,
+                air_ball_share=None,
+                mean_launch_angle=None,
+                barrel_share=None,
+                hard_hit_share=None,
+                pull_air_share=None,
+                oppo_air_share=None,
+            )
+        },
         threshold=0.15,
-        side_filter=None,
-        side_usage=None,
-        window_label="last month",
-        throws_text="right",
+        pitcher_scope_label="season vs LHB",
+        batter_scope_label="season vs RHP",
     )
     row = markup_empty.split("4-Seam Fastball", 1)[1].split("</tr>", 1)[0]
     assert row.count("<td>—</td>") >= 2
-    # A pitch the batter never faced: eleven dashed batter cells, so the
-    # halves keep their column counts (D-124's LA joins the batter half).
-    markup_unseen = streamlit_app._arsenal_breakup_html(
-        pitcher,
-        (),
-        threshold=0.15,
-        side_filter=None,
-        side_usage=None,
-        window_label="last month",
-        throws_text="right",
-    )
-    unseen_row = markup_unseen.split("4-Seam Fastball", 1)[1].split("</tr>", 1)[0]
-    assert unseen_row.count("<td>—</td>") == 11
 
 
 def test_card_tags_carry_the_slot_and_the_v22_k_reads() -> None:
@@ -2612,25 +2602,17 @@ def test_ordinal_never_says_1th() -> None:
 def test_breakup_builder_escapes_pitch_names() -> None:
     """D-106: the table renders through raw HTML, so a pitch name carrying
     markup characters arrives escaped — a data string never becomes page
-    structure."""
-    from types import SimpleNamespace
-
+    structure. D-129: the scope labels land in the half headers."""
     import streamlit_app
 
-    pitcher = SimpleNamespace(
-        season_lines=(_season_line(pitch_name="<b>Fastball</b>"),),
-    )
     markup = streamlit_app._arsenal_breakup_html(
-        pitcher,
-        (),
+        (_pitcher_breakup_line(pitch_name="<b>Fastball</b>"),),
+        {},
         threshold=0.15,
-        side_filter=None,
-        side_usage=None,
-        window_label="last month",
-        throws_text=None,
+        pitcher_scope_label="season, all hands",
+        batter_scope_label="season, all hands",
     )
     assert "<b>Fastball</b>" not in markup
     assert "&lt;b&gt;Fastball&lt;/b&gt;" in markup
-    # No throwing side on the board: the header names the generic scope
-    # (html.escape quotes the apostrophe — the header text is escaped too).
-    assert "vs the starter&#x27;s side" in markup
+    assert "Pitcher — season, all hands" in markup
+    assert "Batter — season, all hands" in markup

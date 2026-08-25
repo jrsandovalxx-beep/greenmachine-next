@@ -236,6 +236,22 @@ class PitchLine:
     # half. The arsenal board publishes no per-pitch LA, so season-scope
     # lines leave this None and the pitcher half never shows it.
     mean_launch_angle: Decimal | None = None
+    # D-129 (PO): the season breakup's counting columns and air-direction
+    # reads — at-bats and hits beside the rates, the raw barrel count, and
+    # the pull/oppo shares of measurable air balls (the form section's
+    # exact convention, one definition both surfaces share). None where
+    # the scope's source publishes no count (the arsenal board publishes
+    # none of these).
+    at_bats: int | None = None
+    hits: int | None = None
+    barrel_count: int | None = None
+    pull_air_share: Decimal | None = None
+    oppo_air_share: Decimal | None = None
+    # D-129 (PO): expected ISO — mean expected SLG minus mean expected BA
+    # over the scope's batted balls carrying both readings, the per-side
+    # xISO the arsenal board cannot split (its hand filter is inert,
+    # verified 2026-08-25). None where no batted ball carries both.
+    expected_iso: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -771,6 +787,11 @@ class _PlateOutcomes:
     iso: Decimal | None
     expected_woba: Decimal | None
     whiff_share: Decimal | None
+    # D-129 (PO): the scoped strikeout share and actual wOBA — the season
+    # breakup's per-side K% and wOBA, which the arsenal board cannot split
+    # by hand (its filter is inert, verified 2026-08-25).
+    strikeout_share: Decimal | None = None
+    woba: Decimal | None = None
 
 
 def _plate_outcomes(events: Sequence[PitchEvent]) -> _PlateOutcomes:
@@ -793,6 +814,18 @@ def _plate_outcomes(events: Sequence[PitchEvent]) -> _PlateOutcomes:
     )
     swings = sum(1 for event in events if event.description in _SWING_DESCRIPTIONS)
     whiffs = sum(1 for event in events if event.description in _WHIFF_DESCRIPTIONS)
+    actual_woba_ending = [
+        event for event in ending if event.woba_value is not None and event.woba_denom
+    ]
+    actual_woba_total = sum(
+        (event.woba_value for event in actual_woba_ending if event.woba_value is not None),
+        Decimal(0),
+    )
+    actual_woba_denominator = sum(
+        (event.woba_denom for event in actual_woba_ending if event.woba_denom is not None),
+        Decimal(0),
+    )
+    strikeouts = sum(1 for event in ending if event.event == "strikeout")
     return _PlateOutcomes(
         plate_appearances=len(ending),
         at_bats=at_bats,
@@ -803,6 +836,8 @@ def _plate_outcomes(events: Sequence[PitchEvent]) -> _PlateOutcomes:
         iso=(slugging - average if average is not None and slugging is not None else None),
         expected_woba=(woba_total / woba_denominator) if woba_denominator else None,
         whiff_share=Decimal(whiffs) / Decimal(swings) if swings else None,
+        strikeout_share=(Decimal(strikeouts) / Decimal(len(ending)) if ending else None),
+        woba=((actual_woba_total / actual_woba_denominator) if actual_woba_denominator else None),
     )
 
 
@@ -849,6 +884,22 @@ def _pitch_lines(events: Sequence[PitchEvent]) -> tuple[PitchLine, ...]:
         mean_angle: Decimal | None = None
         if angles:
             mean_angle = sum(angles, Decimal(0)) / Decimal(len(angles))
+        # D-129 (PO): the air-direction reads over the form section's exact
+        # measurable-air convention, and the per-side expected ISO off the
+        # per-event expected SLG/BA (both readings present, one base).
+        measurable_air = [event for event in group if is_measurable_air(event)]
+        pulls = sum(1 for event in measurable_air if is_pull_air(event))
+        oppos = sum(1 for event in measurable_air if is_oppo_air(event))
+        expected_pairs = [
+            (event.estimated_slg, event.estimated_ba)
+            for event in batted
+            if event.estimated_slg is not None and event.estimated_ba is not None
+        ]
+        expected_iso: Decimal | None = None
+        if expected_pairs:
+            expected_iso = (
+                sum((slg for slg, _ in expected_pairs), Decimal(0)) / Decimal(len(expected_pairs))
+            ) - (sum((ba for _, ba in expected_pairs), Decimal(0)) / Decimal(len(expected_pairs)))
         lines.append(
             PitchLine(
                 pitch_type=pitch_type,
@@ -864,14 +915,53 @@ def _pitch_lines(events: Sequence[PitchEvent]) -> tuple[PitchLine, ...]:
                 hard_hit_share=Decimal(hard_hits) / Decimal(len(batted)) if batted else None,
                 expected_woba=outcomes.expected_woba,
                 whiff_share=outcomes.whiff_share,
+                woba=outcomes.woba,
+                strikeout_share=outcomes.strikeout_share,
                 batted_balls=len(bbe),
                 mean_launch_speed=mean_speed,
                 air_ball_share=Decimal(air_balls) / Decimal(len(bbe)) if bbe else None,
                 mean_launch_angle=mean_angle,
+                at_bats=outcomes.at_bats,
+                hits=outcomes.hits,
+                barrel_count=barrels if batted else None,
+                pull_air_share=(
+                    Decimal(pulls) / Decimal(len(measurable_air)) if measurable_air else None
+                ),
+                oppo_air_share=(
+                    Decimal(oppos) / Decimal(len(measurable_air)) if measurable_air else None
+                ),
+                expected_iso=expected_iso,
             )
         )
     lines.sort(key=lambda line: line.usage_share, reverse=True)
     return tuple(lines)
+
+
+def season_breakup_lines(
+    pitcher_events: Sequence[PitchEvent],
+    batter_events: Sequence[PitchEvent],
+    *,
+    batter_side: str,
+    pitcher_throws: str,
+    hand_filter: bool,
+) -> tuple[tuple[PitchLine, ...], dict[str, PitchLine]]:
+    """The dialog's season breakup scopes (D-129, PO): the starter's
+    per-pitch lines and the batter's, each off that player's season pitch
+    record — his pitches to the batter's side and the batter's pitches
+    seen from the starter's hand by default, or both records unfiltered
+    when the hand filter is off. Every metric in a row derives from exactly
+    one scope, so the two toggle positions can never disagree about their
+    denominators (§GMF-008 — the view formats, never filters). Returns his
+    lines usage-sorted and the batter's keyed by pitch type."""
+    if hand_filter:
+        pitcher_scope = [event for event in pitcher_events if event.batter_side == batter_side]
+        batter_scope = [event for event in batter_events if event.pitcher_throws == pitcher_throws]
+    else:
+        pitcher_scope = list(pitcher_events)
+        batter_scope = list(batter_events)
+    pitcher_lines = _pitch_lines(pitcher_scope)
+    batter_lines = {line.pitch_type: line for line in _pitch_lines(batter_scope)}
+    return pitcher_lines, batter_lines
 
 
 def _season_pitch_lines(rows: Sequence[PitchArsenalRow]) -> tuple[PitchLine, ...]:

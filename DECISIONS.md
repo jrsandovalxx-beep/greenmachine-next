@@ -3059,3 +3059,101 @@ stays L30 on the season view.
 
 Full gate green on both Pythons (3427 passed, 1 skipped), consistency
 check clean, all four showcase runners clean.
+
+## D-129 - Batter detail popup rebuild: starter details beside the park, season-based arsenal breakup with real per-hand splits, form-table thresholds, pulled-barrel surfaces
+
+The PO's batter-detail-popup change list (19 items), implemented as one
+rebuild of the dialog. The popup now carries the same starter card the
+Matchups tab shows to the right of the stadium animation, with the
+starter's reads as Sluggers-style bubble tags under it (the exact
+D-114 firing conditions via one shared helper, so the two surfaces can
+never disagree). The wind line speaks field words ("wind 12 mph out to
+right") and the arrow rotates relative to the drawn field when the
+venue's measured home-to-center axis and the wind's from-bearing both
+ride along — the arrow and the words always agree; without them the
+compass frame stands in, as before.
+
+**The breakup is season-based with real splits.** Both halves read each
+player's season pitch record — his pitches and the batter's pitches
+seen — fetched lazily on the dialog open (one Savant query per player,
+cached per slate day). The default scope is the matchup's hands (his
+pitches to the batter's side, the batter's record against the starter's
+hand); the "All pitches, all hands" toggle rebases EVERY metric, never
+just the usage, because every figure derives from exactly one scope of
+the record. The design driver: items 10-12 (hand-filtered season
+metrics) are impossible off the published boards — verified live
+2026-08-25 that the arsenal board's hand filter is inert (identical
+bytes either way), so no published per-hand season split exists and the
+split is computed pipeline-side over the raw record (§GMF-008: the view
+formats, never derives). The game-type filter pins the regular season —
+without it spring training leaks in (verified live). The months/weeks
+toggles and filters are gone. Rows below the usage threshold now HIDE
+(item 10) instead of dimming; an emptied table names the threshold and
+the slider instead of rendering nothing.
+
+**Column changes.** Pitcher half: ISO out, xISO in (mean expected SLG
+minus mean expected BA over the scope's batted balls carrying both
+readings — a constructed split, disclosed in the caption, since the
+board publishes no per-hand expected rates), the raw barrel count added,
+wOBA and K% added off the plate outcomes. Batter half: PA out, AB and
+Hits in; LA right after Hits, then barrel rate and EV, then the rest;
+Pull Air % and Oppo Air % added over the form section's exact
+measurable-air convention (one definition both surfaces share). The
+title names the starter and his throwing hand. A pitch the batter has
+not seen shows AB 0 (a true count) and dashes the rest — never hidden,
+never invented. Per-pitch contact reads keep the ratified 10-BBE floor
+with the INSUFFICIENT marker (D-109).
+
+**Form table thresholds (item 6).** The recent-form table is now
+color-coded with six-band specs researched off the live 2026 boards
+(481 player-sides at 100+ swings; the statcast board at min=100):
+Barrel% 13/10/8.5·6/4/2.5 (league mean 7.76, P50 7.3, P75 10.3,
+P90 13.2), EV 91/90/89·88/87/85.5 (mean 88.78, P90 91.8 — confirms
+D-127's grid edges), attack angle 13.5/12/10.5·9/7.5/6 (mean 10.15°,
+P10 5.8, P90 14.8), ideal-attack-angle rate 60/56/53·47/43/39 (mean
+51%, P10 40.5, P90 61.5), Pull Air % 43/38/33·27/22/17 (the grid's
+ratified D-127 spec, one scale both surfaces). SwSp% and Hard% left the
+table (item 5). The bands are window-independent rate baselines — the
+INSUFFICIENT marker already carries the window's sample risk, so the
+color reads the level and the marker reads the trust. Oppo Air % stays
+deliberately bandless (a fit read, not a quality scale). Form Score
+prints at the end of the table as the D-124 placeholder dash. Pulled
+BRL is a raw count with its own greens (1 / 2 / 3+ against D-116's
+one-pulled-barrel-per-week reality; 0 stays neutral, never red).
+
+**Pulled barrels surfaced (items 17-18).** The exit-velocity event log
+now paints a pulled barrel's Event cell a lighter green (a home run
+keeps the dark green), with the caption naming both. Item 18 ("make
+sure the pulled barrel counter is working, I've only seen 0") —
+VERIFIED WORKING, no bug: 59 batters on the live 2026-08-25 board
+carry nonzero counts (Blaze Jordan 3; Contreras, Seager, Wetherholt,
+Walker, Teoscar Hernández 2 each), 176 zeros, 26 absent. Zeros are the
+expected state at roughly one pulled barrel per batter-week; the new
+event-log highlight makes the nonzero ones visible when they happen.
+
+**Row verdict (item 19).** A breakup row goes green when the starter's
+xwOBA with the pitch sits in a green vulnerability band AND the
+batter's SLG against it sits in a green band; red when both sit in red
+bands; anything else neutral. A verdict requires 10+ batted balls on
+BOTH halves (the ratified D-109 floor) so a thin row never grades
+noise. The rule is a mechanical band check — a criteria tally, never a
+prediction (D-015/D-017 stand).
+
+**Judgment calls, disclosed.** (a) Item 2 ("instead of check boxes lets
+use a 'more' button") read as already satisfied by D-126/D-128's More
+buttons — no further change. (b) Switch hitters and unknown sides: the
+all-hands toggle disables and the table reads both full season records
+with a caption naming why (a switch hitter bats from both sides) — a
+per-side split would invent a side. (c) xISO is the constructed split
+above, disclosed on the surface — no published per-hand expected split
+exists. (d) Form bands use display units (the form pipeline's rates are
+percent-scale). (e) The lazy fetch adds one query per player per dialog
+open — cached per slate day, so repeat opens are free. (f) The wind
+arrow's rotation frame changed only when BOTH the measured axis and the
+from-bearing exist; the compass path is byte-identical otherwise.
+(g) A shell docstring/parameter rename (park_axis_degrees →
+axis_degrees) satisfied the config-boundary guard's substring rule —
+geometry unchanged.
+
+Full gate green on both Pythons (3434 passed, 1 skipped), consistency
+check clean, all four showcase runners clean.

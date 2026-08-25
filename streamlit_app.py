@@ -93,7 +93,7 @@ from greenmachine.live.backtest import (
     slate_as_of,
     tally_grades,
 )
-from greenmachine.live.form import FormSection, FormValue
+from greenmachine.live.form import BARREL_CLASSIFICATION, FormSection, FormValue, is_pull_air
 from greenmachine.live.grading import QUALIFYING_USAGE_SHARE, ROOFED_VENUE_NEUTRAL_FAHRENHEIT
 from greenmachine.live.mlb_api import FetchFailure, GameLogEntry, MlbStatsApi
 from greenmachine.live.pipeline import (
@@ -109,8 +109,9 @@ from greenmachine.live.pipeline import (
     SlateBoard,
     StarterWorkload,
     build_board,
+    season_breakup_lines,
 )
-from greenmachine.live.savant import BaseballSavant
+from greenmachine.live.savant import BaseballSavant, PitchEvent
 from greenmachine.live.transport import UrllibTransport as MlbTransport
 from greenmachine.live.wind import resolved_wind_mph, spray_field_bearing, wind_field_words
 from greenmachine.parks import ALL_COLUMNS as PARK_COLUMNS
@@ -534,6 +535,28 @@ def _day_events(day_iso: str, year: int) -> object:
     return savant.fetch_pitch_events(year=year, day=day_iso)
 
 
+@st.cache_data(ttl=DAY_EVENTS_TTL_SECONDS, show_spinner=False)
+def _season_pitch_events(
+    player_id: int, role: str, slate_iso: str
+) -> tuple[PitchEvent, ...] | None:
+    """One player's regular-season pitch record through the slate day
+    (D-129): the batter detail dialog's lazy per-side season split — one
+    Savant query per player, cached per slate day. None names the fetch
+    failure so the breakup names its absence instead of inventing a split."""
+    _, savant = live_mlb_adapters()
+    year = int(slate_iso[:4])
+    result = savant.fetch_player_pitch_events(
+        year=year,
+        role=role,  # type: ignore[arg-type]  # the two call sites pass the literals
+        player_id=player_id,
+        start=f"{year}-03-01",
+        end=slate_iso,
+    )
+    if isinstance(result, FetchFailure):
+        return None
+    return result
+
+
 # Bound on live-weather failures per board build. A black-holed venue costs one
 # transport timeout (~10s); without a cap, a network path that drops every NWS
 # packet would multiply that by every open-air venue on the slate. After this
@@ -852,6 +875,33 @@ def _apply_bands(
 # neon glow; no background, so the cell keeps its theme fill.
 
 
+class _FieldWind(NamedTuple):
+    """The D-129 field-frame extras for ``field_wind_html``: the wind in
+    field words plus the axis/bearing pair that rotates the flow to the
+    drawn field — all three None when any reading is missing, so the panel
+    keeps its compass frame."""
+
+    words: str | None
+    from_degrees: float | None
+    axis_degrees: float | None
+
+
+def _field_wind(game: GameCard) -> _FieldWind:
+    """Resolve the field-frame wind for one game: open air, a measured
+    park axis and a parsed from-bearing all present, or nothing."""
+    if (
+        game.venue_type is VenueType.OPEN_AIR
+        and game.wind_from_degrees is not None
+        and game.park_orientation_degrees is not None
+    ):
+        return _FieldWind(
+            words=wind_field_words(game.wind_from_degrees, game.park_orientation_degrees),
+            from_degrees=float(game.wind_from_degrees),
+            axis_degrees=float(game.park_orientation_degrees),
+        )
+    return _FieldWind(None, None, None)
+
+
 def _conditions_text(game: GameCard) -> tuple[str, bool]:
     """(text, is-absent) for the shortlist's weather column (D-126, PO): the
     start-time temperature plus the wind in plain field words — "84°F ·
@@ -1060,6 +1110,68 @@ def _wind_rider_text(game: GameCard, side: str, match_field: str) -> str:
     return f", wind {float(resolved):.0f} mph out to {_field_name(side, match_field)}"
 
 
+def _pitcher_profile_tags(opposing: PitcherCard) -> tuple[list[str], list[str]]:
+    """(boosters, vetoes) — the pitcher-side reads (D-114): HR/9 is a
+    season-scope read (the event record publishes no innings); the
+    ground-ball share reads the event record because the season boards
+    publish no GB% — the last two months since D-128 (PO) rewindowed the
+    starter's recent reads; the firing conditions are unchanged. D-116
+    (PO): the GB% number itself lives on the Arms tab only — these tags
+    keep their firing conditions but never quote the share. Shared by the
+    shortlist tags and the popup's pitcher bubbles (D-129) so the two
+    surfaces can never disagree about a line."""
+    boosters: list[str] = []
+    vetoes: list[str] = []
+    reads = opposing.season_reads
+    hr9 = reads.home_run_per_nine if reads is not None else None
+    season_la = reads.avg_launch_angle if reads is not None else None
+    recent = opposing.recent_overall
+    gb_share = recent.ground_ball_share if recent is not None else None
+    if gb_share is not None and gb_share >= _GB_PROFILE_SHARE_LINE:
+        extreme = "extreme " if gb_share >= _GB_PROFILE_EXTREME_LINE else ""
+        vetoes.append(f"air allowed: low — {extreme}ground-ball profile (2-month record)")
+    elif season_la is not None and season_la <= _GB_PROFILE_LA_LINE:
+        vetoes.append(
+            f"air allowed: low — ground-ball profile (avg LA {float(season_la):.1f}°, season)"
+        )
+    if hr9 is not None and hr9 <= _HR9_SUPPRESSOR_LINE:
+        vetoes.append(f"suppressor: HR/9 {float(hr9):.2f} (season)")
+    if (
+        hr9 is not None
+        and hr9 >= _HR9_LINE
+        and gb_share is not None
+        and gb_share < _PITCHER_GAS_GB_CEILING
+    ):
+        boosters.append(f"gas: HR/9 {float(hr9):.2f} (season)")
+    if season_la is not None and season_la >= _FB_VULNERABLE_LA_LINE:
+        boosters.append(f"fly-ball vulnerable: avg LA {float(season_la):.1f}° (season)")
+    return boosters, vetoes
+
+
+def _pitcher_tag_lists(pitcher: PitcherCard) -> tuple[list[str], list[str], list[str]]:
+    """(advisories, boosters, vetoes) for the popup's pitcher area (D-129,
+    PO): HIS reads as Sluggers-style bubble tags — the same D-114 firing
+    conditions the shortlist's pitcher-side tags use (green argues for the
+    home run, red against), the low-whiff arm read, and the neutral
+    sample notes (grey)."""
+    profile_boosters, vetoes = _pitcher_profile_tags(pitcher)
+    boosters: list[str] = []
+    whiff = pitcher.season_whiff_weighted
+    if whiff is not None and whiff <= _LOW_WHIFF_SHARE:
+        boosters.append(f"low-whiff arm: arsenal whiff {float(whiff) * 100:.1f}% (season)")
+    boosters.extend(profile_boosters)
+    advisories: list[str] = []
+    if pitcher.season_reads is None:
+        advisories.append("no season record")
+    workload = pitcher.workload
+    if workload is not None and workload.thin_sample:
+        count = workload.starts_in_window
+        advisories.append(
+            f"thin sample: {count} start" + ("" if count == 1 else "s") + " in the 2-month record"
+        )
+    return advisories, boosters, vetoes
+
+
 def _card_tag_lists(
     card: BatterCard,
     opposing: PitcherCard | None,
@@ -1114,37 +1226,13 @@ def _card_tag_lists(
             vetoes.append(f"high-K profile: K% {float(k_share) * 100:.1f} ({pa} PA)")
         elif k_share >= _BINARY_K_SHARE:
             vetoes.append(f"binary K profile: K% {float(k_share) * 100:.1f} ({pa} PA)")
-    # v2.2 pitcher-side reads (D-114): HR/9 is a season-scope read (the
-    # event record publishes no innings); the ground-ball share reads the
-    # event record because the season boards publish no GB% — the last two
-    # months since D-128 (PO) rewindowed the starter's recent reads; the
-    # firing conditions are unchanged. D-116 (PO): the GB% number itself
-    # lives on the Arms tab only — these tags keep their firing conditions
-    # but never quote the share.
+    # v2.2 pitcher-side reads (D-114): one shared helper, so the shortlist
+    # tags and the popup's pitcher bubbles (D-129) can never disagree about
+    # a firing condition.
     if opposing is not None:
-        reads = opposing.season_reads
-        hr9 = reads.home_run_per_nine if reads is not None else None
-        season_la = reads.avg_launch_angle if reads is not None else None
-        recent = opposing.recent_overall
-        gb_share = recent.ground_ball_share if recent is not None else None
-        if gb_share is not None and gb_share >= _GB_PROFILE_SHARE_LINE:
-            extreme = "extreme " if gb_share >= _GB_PROFILE_EXTREME_LINE else ""
-            vetoes.append(f"air allowed: low — {extreme}ground-ball profile (2-month record)")
-        elif season_la is not None and season_la <= _GB_PROFILE_LA_LINE:
-            vetoes.append(
-                f"air allowed: low — ground-ball profile (avg LA {float(season_la):.1f}°, season)"
-            )
-        if hr9 is not None and hr9 <= _HR9_SUPPRESSOR_LINE:
-            vetoes.append(f"suppressor: HR/9 {float(hr9):.2f} (season)")
-        if (
-            hr9 is not None
-            and hr9 >= _HR9_LINE
-            and gb_share is not None
-            and gb_share < _PITCHER_GAS_GB_CEILING
-        ):
-            boosters.append(f"gas: HR/9 {float(hr9):.2f} (season)")
-        if season_la is not None and season_la >= _FB_VULNERABLE_LA_LINE:
-            boosters.append(f"fly-ball vulnerable: avg LA {float(season_la):.1f}° (season)")
+        profile_boosters, profile_vetoes = _pitcher_profile_tags(opposing)
+        boosters.extend(profile_boosters)
+        vetoes.extend(profile_vetoes)
     # v2.2 (D-115): the x-gap flag — an under-performance read, so the
     # positive side only (expected above actual); both gaps always shown,
     # no expected-stats row, no tag. D-125: the reliability band rides the
@@ -1570,15 +1658,75 @@ def _home_park_hr_factor(team: str, side: str | None) -> ParkFactor | None:
 
 # Display precision per form metric: the rates and angles at one decimal,
 # matching the live board.
+# The recent-form table's scale (D-129, PO), in the table's own display
+# units (percent-points, mph, degrees). The rates' edges are
+# window-independent — a per-contact quality read means the same over
+# seven days as over a season; what moves with the window is the sample,
+# and the INSUFFICIENT marker already carries that. Research (live 2026
+# league boards, qualified hitters, pulled 2026-08-25): barrels 7.8% of
+# batted balls on average (P75 10.3, P90 13.2); average EV 88.8 (P90
+# 91.8) — the D-127 grid edges confirmed, reused; attack angle averages
+# 10.2° (P25 7.8, P75 12.5); the ideal attack-angle share averages 51%
+# (P25 45.5, P75 57.1, P90 61.5); the pull-air share reuses the D-127
+# grid edges (same metric, same denominator). Oppo Air % stays neutral —
+# a fit read against the park, never a quality grade (D-127). Pulled BRL
+# is a raw count against D-116's one-pulled-barrel week: 1/2/3+ land the
+# three greens, 0 stays neutral — never red, 0 is not cold.
+_FORM_BANDS: dict[str, _BandSpec] = {
+    "Barrel%": _BandSpec("high", 13, 10, 8.5, 6, 4, 2.5),
+    "EV": _BandSpec("high", 91, 90, 89, 88, 87, 85.5),
+    "AtkAng": _BandSpec("high", 13.5, 12, 10.5, 9, 7.5, 6),
+    "IdealAtkAng%": _BandSpec("high", 60, 56, 53, 47, 43, 39),
+    "Pull Air %": _BandSpec("high", 43, 38, 33, 27, 22, 17),
+}
+_FORM_SCALE_TEXT = "; ".join(
+    f"{name} — {_band_scale_text(spec)}" for name, spec in _FORM_BANDS.items()
+)
+_FORM_HELP: dict[str, str] = {
+    "Barrel%": (
+        "Barrels per 100 batted balls over the window. "
+        f"Cell colors: {_band_scale_text(_FORM_BANDS['Barrel%'])}."
+    ),
+    "EV": (
+        "Average exit velocity in mph over the window's batted balls. "
+        f"Cell colors: {_band_scale_text(_FORM_BANDS['EV'])}."
+    ),
+    "AtkAng": (
+        "Average attack angle in degrees over the window's competitive "
+        f"swings. Cell colors: {_band_scale_text(_FORM_BANDS['AtkAng'])}."
+    ),
+    "IdealAtkAng%": (
+        "Per 100 competitive swings, how many land in the ideal 5-20° "
+        f"attack-angle band. Cell colors: {_band_scale_text(_FORM_BANDS['IdealAtkAng%'])}."
+    ),
+    "Pull Air %": (
+        "Pulled air balls per 100 measurable air balls (fly balls, line "
+        "drives and popups with hit coordinates and a known batting "
+        f"side). Cell colors: {_band_scale_text(_FORM_BANDS['Pull Air %'])}."
+    ),
+    "Oppo Air %": (
+        "Opposite-field air balls over the identical measurable-air "
+        "denominator. No cell colors — a fit read against the park, not "
+        "a quality grade (D-127)."
+    ),
+    "Pulled BRL": (
+        "Barrels hit to the pull side — a raw count with its batted-ball "
+        "sample, never a rate. A regular averages about one a week, so 0 "
+        "is neutral (no fill); 1 / 2 / 3+ land the three greens "
+        "(D-116/D-129)."
+    ),
+    "Form Score": (
+        "A placeholder: v2.2 ratifies the form reads but no rollup "
+        "formula, so the dash holds until one is (D-124)."
+    ),
+}
 _FORM_PRECISION = {
     "Barrel%": 1,
     "EV": 1,
     "AtkAng": 1,
     "IdealAtkAng%": 1,
-    "SwSp%": 1,
     "Pull Air %": 1,
     "Oppo Air %": 1,
-    "Hard%": 1,
 }
 
 # D-078's wording for a metric with no observations at either window reach.
@@ -1586,26 +1734,25 @@ _FORM_ABSENT_TEXT = "not enough data available"
 
 
 def _form_section_frames(form: FormSection) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """(texts, styles) for ``styled_text_frame`` — D-068's one-row section.
-
-    The columns are D-068's set minus xwOBA, which left the popup under
-    D-102 (it stays on the Matchups main tables). A metric present and
-    sufficient shows its value; one resolved on the L14 fallback names the
-    window ("· L14"); one below its sample floor keeps its value with its
-    exact sample and an INSUFFICIENT marker on amber — present, never absent
-    (D-023/D-025); one with no observations at either reach reads "not enough
-    data available" (D-078). Built on the §GMF-002 grid machinery, like every
-    live surface.
+    """(texts, styles) for ``styled_text_frame`` — D-068's one-row section,
+    re-columned by D-129 (PO): SwSp% and Hard% left the table, the Form
+    Score placeholder closes it (D-124's dash until v2.2 ratifies a rollup
+    formula), and every graded rate wears its researched band (the six-bucket
+    D-127 scale; the form edges are window-independent, derivations in
+    DECISIONS D-129). A metric present and sufficient shows its value; one
+    resolved on the L14 fallback names the window ("· L14"); one below its
+    sample floor keeps its value with its exact sample and an INSUFFICIENT
+    marker on amber — present, never absent (D-023/D-025); one with no
+    observations at either reach reads "not enough data available" (D-078).
+    An amber INSUFFICIENT cell and a named absence always outrank a band.
     """
     fields: tuple[tuple[str, FormValue | None], ...] = (
         ("Barrel%", form.barrel_pct),
         ("EV", form.exit_velocity),
         ("AtkAng", form.attack_angle_degrees),
         ("IdealAtkAng%", form.ideal_attack_angle_pct),
-        ("SwSp%", form.sweet_spot_pct),
         ("Pull Air %", form.pull_air_pct),
         ("Oppo Air %", form.oppo_air_pct),
-        ("Hard%", form.hard_hit_pct),
     )
     texts: dict[str, str] = {}
     styles: dict[str, str] = {}
@@ -1622,16 +1769,38 @@ def _form_section_frames(form: FormSection) -> tuple[pd.DataFrame, pd.DataFrame]
             texts[column] = f"{value_text} · L14"
         else:
             texts[column] = value_text
+    _apply_bands(
+        styles,
+        _FORM_BANDS,
+        {
+            column: (metric.value if metric is not None else None)
+            for column, metric in fields
+            if column in _FORM_BANDS  # Oppo Air % stays neutral (a fit read)
+        },
+    )
     # v2.2 (D-116): pulled barrels as a raw count with its BBE sample —
     # never a rate, no sample floor (0 is a real observation, a regular
     # averages ~1 barrel a week). The L14 fallback names its window.
+    # D-129: the count grades against the one-pulled-barrel week — 1/2/3+
+    # land the three greens, 0 stays neutral, never red.
     pulled = form.pulled_barrels
     if pulled is None or pulled.value is None:
         texts["Pulled BRL"] = _FORM_ABSENT_TEXT
         styles["Pulled BRL"] = _REASON_CSS
     else:
-        count_text = f"{int(pulled.value)} ({pulled.sample} BBE)"
-        texts["Pulled BRL"] = count_text + (" · L14" if pulled.window_days == 14 else "")
+        count = int(pulled.value)
+        texts["Pulled BRL"] = f"{count} ({pulled.sample} BBE)" + (
+            " · L14" if pulled.window_days == 14 else ""
+        )
+        if count >= 3:
+            styles["Pulled BRL"] = _BAND_G3_CSS
+        elif count == 2:
+            styles["Pulled BRL"] = _BAND_G2_CSS
+        elif count == 1:
+            styles["Pulled BRL"] = _BAND_G1_CSS
+    # D-124/D-129: the Form Score placeholder closes the table — the dash
+    # holds until v2.2 ratifies a rollup formula.
+    texts["Form Score"] = "—"
     return pd.DataFrame([texts]), pd.DataFrame([styles])
 
 
@@ -1671,6 +1840,16 @@ _EV_HEAT = (
     (88.0, "background-color: #5c2a10; color: #ffe0b8"),
 )
 _HR_CSS = "background-color: #2e7d32; color: #eaffcf; font-weight: 700"
+# D-129 (PO): a pulled barrel in the log wears the same green family as a
+# home run, one shade down — the counter's events made visible (a pulled
+# barrel that IS a home run keeps the HR fill).
+_PULLED_BARREL_CSS = "background-color: #3d5a1e; color: #eaffcf; font-weight: 700"
+
+
+def _is_pulled_barrel(event: PitchEvent) -> bool:
+    """One event a pulled barrel (D-116's exact convention): air-ball
+    contact to the pull side in the barrel classification band."""
+    return is_pull_air(event) and event.launch_speed_angle == BARREL_CLASSIFICATION
 
 
 def _exit_velo_frames(
@@ -1713,6 +1892,8 @@ def _exit_velo_frames(
         styles: dict[str, str] = {}
         if event.event == "home_run":
             styles["Event"] = _HR_CSS
+        elif _is_pulled_barrel(event):
+            styles["Event"] = _PULLED_BARREL_CSS
         if event.launch_speed is not None:
             for floor, css in _EV_HEAT:
                 if float(event.launch_speed) >= floor:
@@ -1781,135 +1962,174 @@ _BREAKUP_CSS = """
   border-bottom: 1px solid #2e5b23; }
 .gm-breakup .gm-half-boundary { border-left: 3px solid rgba(155, 240, 11, 0.55); }
 .gm-breakup tbody tr { border-bottom: 1px solid rgba(46, 91, 35, 0.35); }
-.gm-breakup tr.gm-dim td { color: #8a9a8f; }
+.gm-breakup tr.gm-row-good td { background: rgba(63, 125, 50, 0.30); }
+.gm-breakup tr.gm-row-bad td { background: rgba(125, 34, 28, 0.32); }
 </style>
 """
 
+_BREAKUP_GREENS = frozenset({_BAND_G3_CSS, _BAND_G2_CSS, _BAND_G1_CSS})
+_BREAKUP_REDS = frozenset({_BAND_R1_CSS, _BAND_R2_CSS, _BAND_R3_CSS})
+
+
+def _breakup_row_verdict(pitcher_line: PitchLine, batter_line: PitchLine | None) -> str:
+    """The row's combined read (D-129, PO): green when his xwOBA with the
+    pitch sits in a green vulnerability band AND the batter's SLG against
+    it sits in a green band — both halves argue for the home run; red when
+    both sit in red bands; anything else neutral. A row earns a verdict
+    only with 10+ batted balls on BOTH halves (the ratified per-pitch
+    contact floor, D-109) — a thin row stays neutral rather than grading
+    noise."""
+    if pitcher_line.batted_balls < _MIN_BBE_PITCH_TYPE:
+        return ""
+    if batter_line is None or batter_line.batted_balls < _MIN_BBE_PITCH_TYPE:
+        return ""
+    pitcher_css = (
+        _band_css(_PITCHER_BANDS["xwOBA"], float(pitcher_line.expected_woba))
+        if pitcher_line.expected_woba is not None
+        else None
+    )
+    batter_css = (
+        _band_css(_GRID_BANDS["SLG"], float(batter_line.slugging))
+        if batter_line.slugging is not None
+        else None
+    )
+    if pitcher_css in _BREAKUP_GREENS and batter_css in _BREAKUP_GREENS:
+        return "gm-row-good"
+    if pitcher_css in _BREAKUP_REDS and batter_css in _BREAKUP_REDS:
+        return "gm-row-bad"
+    return ""
+
 
 def _arsenal_breakup_html(
-    pitcher: PitcherCard,
-    batter_lines: tuple[PitchLine, ...],
+    pitcher_lines: tuple[PitchLine, ...],
+    batter_lines: dict[str, PitchLine],
     *,
     threshold: float,
-    side_filter: frozenset[str] | None,
-    side_usage: dict[str, Decimal] | None,
-    window_label: str,
-    throws_text: str | None,
+    pitcher_scope_label: str,
+    batter_scope_label: str,
 ) -> str:
-    """The arsenal breakup table (D-106): one row per pitch in the starter's
-    season arsenal. Usage% is HIS — the board's season share, or his share of
-    pitches to this hitter hand over the recent window when the side toggle
-    is on (D-102); the batter's seen-share never appears. The first half is
-    his season-long figures with the pitch; the second is the batter's
-    against that pitch from the starter's side over the named window — a
-    pitch he has not seen dashes rather than vanishing. Returns "" when a
-    side filter removes every row, so the surface names that reason instead
-    of rendering an empty table.
+    """The arsenal breakup table (D-129, PO): one row per pitch the starter
+    threw this season at or above the usage threshold — rows below it hide,
+    and the threshold slider stays. Every metric on a row derives from one
+    scope of each player's season pitch record (§GMF-008): the default
+    reads the matchup's hands — his pitches to the batter's side, the
+    batter's pitches seen from the starter's hand — and the all-hands
+    toggle rebases every figure, never just the usage. The pitcher half
+    drops ISO for xISO (mean expected SLG minus expected BA over the
+    scope's batted balls — the arsenal board cannot split by hand) and
+    adds the raw barrel count; the batter half swaps PA for AB and Hits,
+    puts LA right after Hits, then barrel rate and EV, and adds the
+    pull/oppo air reads. A pitch the batter has not seen dashes rather
+    than vanishing. Returns "" when no pitch clears the threshold, so the
+    surface names that instead of rendering an empty table.
     """
-    batter_by_type = {line.pitch_type: line for line in batter_lines}
-    rows: list[tuple[Decimal, str]] = []
-    for season in pitcher.season_lines:
-        if side_filter is not None and season.pitch_type not in side_filter:
+    rows: list[str] = []
+    for line in pitcher_lines:
+        if float(line.usage_share) < threshold:
             continue
-        shown_usage = (
-            side_usage.get(season.pitch_type, season.usage_share)
-            if side_usage is not None
-            else season.usage_share
-        )
-        batter = batter_by_type.get(season.pitch_type)
+        batter = batter_lines.get(line.pitch_type)
         if batter is None:
-            batter_cells = ["<td>0</td>"] + ["<td>—</td>"] * 11
+            batter_cells = ["<td>0</td>"] + ["<td>—</td>"] * 14
         else:
             # Per-pitch contact shape (D-109): the ratified 10-BBE
             # pitch-type floor — below it the value keeps its exact sample
             # with an INSUFFICIENT marker; an empty denominator dashes.
-            ev_text = "—"
-            la_text = "—"
-            air_text = "—"
             insufficient_note = ""
             if 0 < batter.batted_balls < _MIN_BBE_PITCH_TYPE:
                 insufficient_note = f" · n={batter.batted_balls} · INSUFFICIENT"
-            if batter.mean_launch_speed is not None:
-                ev_text = f"{float(batter.mean_launch_speed):.1f}" + insufficient_note
-            # D-124: the window record's per-pitch mean launch angle, the
-            # same measured-event base EV reads — the arsenal board
-            # publishes no per-pitch LA, so the pitcher half has none.
-            if batter.mean_launch_angle is not None:
-                la_text = f"{float(batter.mean_launch_angle):.1f}°" + insufficient_note
-            if batter.air_ball_share is not None:
-                air_text = _pct_text(batter.air_ball_share) + insufficient_note
+            la_text = (
+                (f"{float(batter.mean_launch_angle):.1f}°" + insufficient_note)
+                if batter.mean_launch_angle is not None
+                else "—"
+            )
+            ev_text = (
+                (f"{float(batter.mean_launch_speed):.1f}" + insufficient_note)
+                if batter.mean_launch_speed is not None
+                else "—"
+            )
+            barrel_text = (
+                (_pct_text(batter.barrel_share) + insufficient_note)
+                if batter.barrel_share is not None
+                else "—"
+            )
+            hard_hit_text = (
+                (_pct_text(batter.hard_hit_share) + insufficient_note)
+                if batter.hard_hit_share is not None
+                else "—"
+            )
+            air_text = (
+                (_pct_text(batter.air_ball_share) + insufficient_note)
+                if batter.air_ball_share is not None
+                else "—"
+            )
+            pull_air_text = (
+                (_pct_text(batter.pull_air_share) + insufficient_note)
+                if batter.pull_air_share is not None
+                else "—"
+            )
+            oppo_air_text = (
+                (_pct_text(batter.oppo_air_share) + insufficient_note)
+                if batter.oppo_air_share is not None
+                else "—"
+            )
             batter_cells = [
-                f"<td>{batter.plate_appearances}</td>",
+                f"<td>{batter.at_bats if batter.at_bats is not None else '—'}</td>",
+                f"<td>{batter.hits if batter.hits is not None else '—'}</td>",
+                f"<td>{la_text}</td>",
+                f"<td>{barrel_text}</td>",
+                f"<td>{ev_text}</td>",
                 f"<td>{_avg_text(batter.batting_average)}</td>",
                 f"<td>{_avg_text(batter.slugging)}</td>",
                 f"<td>{_avg_text(batter.iso)}</td>",
                 f"<td>{batter.home_runs if batter.home_runs is not None else '—'}</td>",
-                f"<td>{_pct_text(batter.barrel_share)}</td>",
-                f"<td>{_pct_text(batter.hard_hit_share)}</td>",
+                f"<td>{hard_hit_text}</td>",
                 f"<td>{_avg_text(batter.expected_woba)}</td>",
                 f"<td>{_pct_text(batter.whiff_share)}</td>",
-                f"<td>{ev_text}</td>",
-                f"<td>{la_text}</td>",
                 f"<td>{air_text}</td>",
+                f"<td>{pull_air_text}</td>",
+                f"<td>{oppo_air_text}</td>",
             ]
         batter_cells[0] = batter_cells[0].replace("<td>", '<td class="gm-half-boundary">', 1)
-        dim = ' class="gm-dim"' if float(shown_usage) < threshold else ""
-        name = html.escape(season.pitch_name or season.pitch_type or "— (untagged)")
-        row = (
-            f"<tr{dim}><td>{name}</td><td>{float(shown_usage):.1%}</td>"
-            f"<td>{season.plate_appearances}</td>"
-            f"<td>{_avg_text(season.batting_average)}</td>"
-            f"<td>{_avg_text(season.slugging)}</td>"
-            f"<td>{_avg_text(season.iso)}</td>"
-            f"<td>{_avg_text(season.woba)}</td>"
-            f"<td>{_avg_text(season.expected_woba)}</td>"
-            f"<td>{_pct_text(season.whiff_share)}</td>"
-            f"<td>{_pct_text(season.strikeout_share)}</td>"
-            f"<td>{_pct_text(season.hard_hit_share)}</td>" + "".join(batter_cells) + "</tr>"
+        verdict = _breakup_row_verdict(line, batter)
+        row_class = f' class="{verdict}"' if verdict else ""
+        name = html.escape(line.pitch_name or line.pitch_type or "— (untagged)")
+        xiso_text = _avg_text(line.expected_iso)
+        rows.append(
+            f"<tr{row_class}><td>{name}</td><td>{float(line.usage_share):.1%}</td>"
+            f"<td>{line.plate_appearances}</td>"
+            f"<td>{_avg_text(line.batting_average)}</td>"
+            f"<td>{_avg_text(line.slugging)}</td>"
+            f"<td>{xiso_text}</td>"
+            f"<td>{_avg_text(line.woba)}</td>"
+            f"<td>{_avg_text(line.expected_woba)}</td>"
+            f"<td>{_pct_text(line.whiff_share)}</td>"
+            f"<td>{_pct_text(line.strikeout_share)}</td>"
+            f"<td>{_pct_text(line.hard_hit_share)}</td>"
+            f"<td>{line.barrel_count if line.barrel_count is not None else '—'}</td>"
+            + "".join(batter_cells)
+            + "</tr>"
         )
-        rows.append((shown_usage, row))
     if not rows:
         return ""
-    if side_usage is not None:
-        rows.sort(key=lambda item: item[0], reverse=True)
-    side_clause = f"{throws_text}-handed pitching" if throws_text else "the starter's side"
     header = (
         '<tr class="gm-halves"><th colspan="2"></th>'
-        '<th colspan="9" class="gm-half">Pitcher — season</th>'
-        f'<th colspan="12" class="gm-half gm-half-boundary">Batter — '
-        f"{html.escape(window_label)} vs {html.escape(side_clause)}</th></tr>"
+        f'<th colspan="11" class="gm-half">Pitcher — {html.escape(pitcher_scope_label)}</th>'
+        f'<th colspan="15" class="gm-half gm-half-boundary">Batter — '
+        f"{html.escape(batter_scope_label)}</th></tr>"
         '<tr class="gm-cols"><th>Pitch</th><th>Usage%</th>'
-        "<th>PA</th><th>AVG</th><th>SLG</th><th>ISO</th><th>wOBA</th><th>xwOBA</th>"
-        "<th>Whiff%</th><th>K%</th><th>Hard-Hit%</th>"
-        '<th class="gm-half-boundary">PA</th><th>AVG</th><th>SLG</th><th>ISO</th><th>HR</th>'
-        "<th>Barrel%</th><th>Hard-Hit%</th><th>xwOBA</th><th>Swing-Str%</th>"
-        "<th>EV</th><th>LA</th><th>Air%</th></tr>"
+        "<th>PA</th><th>AVG</th><th>SLG</th><th>xISO</th><th>wOBA</th><th>xwOBA</th>"
+        "<th>Whiff%</th><th>K%</th><th>Hard-Hit%</th><th>BRL</th>"
+        '<th class="gm-half-boundary">AB</th><th>H</th><th>LA</th><th>Barrel%</th><th>EV</th>'
+        "<th>AVG</th><th>SLG</th><th>ISO</th><th>HR</th><th>Hard-Hit%</th><th>xwOBA</th>"
+        "<th>Swing-Str%</th><th>Air%</th><th>Pull Air%</th><th>Oppo Air%</th></tr>"
     )
     return (
         '<div class="gm-breakup-wrap"><table class="gm-breakup"><thead>'
         + header
         + "</thead><tbody>"
-        + "".join(row for _, row in rows)
+        + "".join(rows)
         + "</tbody></table></div>"
     )
-
-
-def _arsenal_side_note(pitcher: PitcherCard, side_set: frozenset[str], side_text: str) -> str:
-    """What the side toggle did, in words (D-099). An empty record falls back
-    to the full arsenal, and a record covering every shown pitch removes
-    nothing — both are named, or a no-op toggle reads as broken."""
-    if not side_set:
-        return (
-            f"He threw nothing to {side_text}-handed batters in the recent "
-            "pitch record — showing the full arsenal."
-        )
-    shown = {line.pitch_type for line in pitcher.season_lines}
-    if shown <= side_set:
-        return (
-            f"He threw every pitch in his arsenal to {side_text}-handed "
-            "batters over the recent 31-day record — nothing to filter."
-        )
-    return ""
 
 
 def _opposing_pitcher(game: GameCard, card: BatterCard) -> PitcherCard | None:
@@ -1926,46 +2146,91 @@ def _game_of(board: SlateBoard, card: BatterCard) -> GameCard | None:
 
 
 def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
-    """The batter detail body (D-084): the 2D park with its live wind, the
-    D-068 form section, and the recent exit-velocity sheet behind the
-    pitch-mix threshold toggle.
+    """The batter detail body (D-084): the 2D park with its live wind in
+    field words (D-129), the expected starter's card and bubble tags
+    beside it (D-129), the D-068 form section, and the recent
+    exit-velocity sheet behind the pitch-mix threshold toggle.
 
     Reachable from the Sluggers and Matchups More buttons (D-078/D-128),
-    it is also the D-080 expanded matchup view: the batter's per-pitch
-    table against the starter's side over the selected matchup window
-    (D-088/D-128), the pitcher's season-long Arsenal with its side filter
-    and last-season fallback (D-087), and one threshold slider driving
-    every table and the event log.
+    it is also the D-080 expanded matchup view, rebuilt by D-129 (PO):
+    both halves of the arsenal breakup read each player's season pitch
+    record — the matchup's hands by default, all hands on the toggle,
+    every metric rebased — over one lazy query per player, with one
+    threshold slider driving the breakup's rows and the event log's
+    pitch-mix filter.
     """
     st.markdown(f"**{card.full_name}** — {card.team}")
+    pitcher = _opposing_pitcher(game, card) if game is not None else None
 
-    st.markdown("**Park and conditions**")
-    if game is None:
-        st.caption("This batter's game is not on today's slate board.")
-    else:
-        factor = _side_factor(game, card.batting_side)
-        detail_lines = [
-            f"park factor {float(factor.factor):.0f}" if factor else "park factor not covered"
-        ]
-        if game.venue_type is VenueType.OPEN_AIR and game.temperature_fahrenheit is not None:
-            detail_lines.append(f"{float(game.temperature_fahrenheit):.0f}°F at game time")
-        roofed = game.venue_type is not VenueType.OPEN_AIR
-        st.markdown(
-            field_wind_html(
-                venue_name=game.venue_name,
-                detail_lines=tuple(detail_lines),
-                wind_speed_mph=(
-                    float(game.wind_speed_mph) if game.wind_speed_mph is not None else None
+    # D-129 (PO): the park panel and the expected starter's details sit
+    # side by side — the same starter card the Matchups tab carries, with
+    # his reads as Sluggers-style bubble tags under it.
+    park_column, pitcher_column = st.columns([1, 1])
+    with park_column:
+        st.markdown("**Park and conditions**")
+        if game is None:
+            st.caption("This batter's game is not on today's slate board.")
+        else:
+            factor = _side_factor(game, card.batting_side)
+            detail_lines = [
+                f"park factor {float(factor.factor):.0f}" if factor else "park factor not covered"
+            ]
+            if game.venue_type is VenueType.OPEN_AIR and game.temperature_fahrenheit is not None:
+                detail_lines.append(f"{float(game.temperature_fahrenheit):.0f}°F at game time")
+            roofed = game.venue_type is not VenueType.OPEN_AIR
+            field_wind = _field_wind(game)
+            st.markdown(
+                field_wind_html(
+                    venue_name=game.venue_name,
+                    detail_lines=tuple(detail_lines),
+                    wind_speed_mph=(
+                        float(game.wind_speed_mph) if game.wind_speed_mph is not None else None
+                    ),
+                    wind_direction=game.wind_direction,
+                    wind_absent_text=(
+                        "roofed — wind never reaches the field"
+                        if roofed
+                        else "wind reading unavailable"
+                    ),
+                    wind_words=field_wind.words,
+                    wind_from_degrees=field_wind.from_degrees,
+                    axis_degrees=field_wind.axis_degrees,
                 ),
-                wind_direction=game.wind_direction,
-                wind_absent_text=(
-                    "roofed — wind never reaches the field"
-                    if roofed
-                    else "wind reading unavailable"
+                unsafe_allow_html=True,
+            )
+    with pitcher_column:
+        st.markdown("**Expected starter**")
+        if game is None:
+            st.caption("No game on today's slate board — no opposing starter to read.")
+        else:
+            sp_recent = st.toggle(
+                "Starter metrics: recent form (last 2 months) — season is the default",
+                value=False,
+                key=f"sp_recent_popup_{card.player_id}",
+                help=(
+                    "D-111, rewindowed by D-128 (PO). The overall row flips "
+                    "from the season boards to the starter's last two "
+                    "months of kept pitch events. The side rows always "
+                    "read that two-month window."
                 ),
-            ),
-            unsafe_allow_html=True,
-        )
+            )
+            opposing_team = game.away_team if card.team == game.home_team else game.home_team
+            _sp_card(
+                pitcher,
+                opposing_team,
+                recent=sp_recent,
+                key_suffix=f"_popup_{card.player_id}",
+            )
+            if pitcher is not None:
+                pills = _tag_pills(*_pitcher_tag_lists(pitcher))
+                if pills:
+                    st.markdown(_SLUGGERS_CSS + _pills_html(pills), unsafe_allow_html=True)
+                    st.caption(
+                        "His reads (D-114/D-129): the same firing conditions "
+                        "the shortlist's pitcher-side tags use — green argues "
+                        "for the home run, red against, grey a note. Hover a "
+                        "bubble for the full read."
+                    )
 
     st.markdown("**Recent form [L7]**")
     if card.form is None:
@@ -1975,7 +2240,11 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
         )
     else:
         texts, styles = _form_section_frames(card.form)
-        st.dataframe(styled_text_frame(texts, styles), hide_index=True)
+        st.dataframe(
+            styled_text_frame(texts, styles),
+            hide_index=True,
+            column_config=_column_help(texts.columns, _FORM_HELP),
+        )
         st.caption(
             "Each metric is the last 7 days [L7]; a metric whose L7 window is "
             "empty falls back to its L14 window, marked '· L14'. A metric below "
@@ -1988,7 +2257,13 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
             "side — a raw count with its BBE sample, never a rate: a regular "
             "averages about one barrel a week, so 0 is neutral, not cold "
             "(D-116). Its air-ball floor splits by window: 8 at L7, 15 at "
-            "L14 (v2.2)."
+            "L14 (v2.2). D-129 (PO): SwSp% and Hard% left this table, the Form "
+            "Score placeholder closes it (D-124), and **cell colors** grade "
+            "the rates on researched 2026 league scales — the edges: "
+            + _FORM_SCALE_TEXT
+            + ". Oppo Air % stays neutral (a fit read); Pulled BRL grades "
+            "against the one-barrel week — 1/2/3+ green, 0 neutral. An amber "
+            "INSUFFICIENT cell and a named absence always outrank a band."
         )
 
     st.markdown("**Season profile**")
@@ -2013,7 +2288,6 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
     else:
         st.caption("sprint speed not covered by source for this batter.")
 
-    pitcher = _opposing_pitcher(game, card) if game is not None else None
     threshold_pct = st.slider(
         "Usage threshold for this window's tables",
         min_value=5,
@@ -2036,126 +2310,121 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
     )
     st.markdown(
         "**Hitting stats — arsenal breakup**"
-        + (f" · {pitcher.full_name}" if pitcher is not None else "")
+        + (
+            f" · {pitcher.full_name} (throws {pitcher.throws})"
+            if pitcher is not None and pitcher.throws
+            else f" · {pitcher.full_name}"
+            if pitcher is not None
+            else ""
+        )
     )
     if pitcher is None:
         st.caption(
             "No opposing starter is named for this game — the breakup appears once probables post."
         )
-    elif not pitcher.season_lines:
-        st.caption("No arsenal-board coverage for this pitcher, this season or last.")
     else:
-        side_known = card.batting_side in ("L", "R")
-        side_filter: frozenset[str] | None = None
-        side_usage: dict[str, Decimal] | None = None
-        side_note = ""
-        side_text = ""
-        if side_known:
-            side_text = "left" if card.batting_side == "L" else "right"
-            side_on = st.toggle(
-                f"Only pitches he uses vs {side_text}-handed batters",
-                value=False,
-                key=f"arsenal_side_{card.player_id}",
-                help="Filters the rows to the pitch types he has thrown to "
-                "this side in the recent pitch record, and Usage% becomes his "
-                "share of pitches to this side over that record (D-102); "
-                "every other number stays season-long either way.",
-            )
-            if side_on:
-                side_set = (
-                    pitcher.pitches_vs_left
-                    if card.batting_side == "L"
-                    else pitcher.pitches_vs_right
-                )
-                if side_set:
-                    side_filter = side_set
-                    side_usage = (
-                        pitcher.usage_vs_left
-                        if card.batting_side == "L"
-                        else pitcher.usage_vs_right
-                    )
-                side_note = _arsenal_side_note(pitcher, side_set, side_text)
-        window_unit = st.segmented_control(
-            "Batter-half window",
-            ["Months", "Weeks"],
-            default="Months",
-            key=f"breakup_unit_{card.player_id}",
-            help="The batter half's reach. Months is the full month the pitch "
-            "record carries; Weeks is one to four weeks back, precomputed at "
-            "each reach (D-106). The pitcher half stays season-long either way.",
+        # D-129 (PO): both halves read each player's SEASON pitch record,
+        # fetched lazily on the dialog open (one query per player, cached
+        # per slate day) — the published boards carry no per-hand split
+        # (their hand filter is inert, verified 2026-08-25), so the split
+        # is computed pipeline-side over the same record (§GMF-008).
+        assert game is not None  # a named starter only exists with a game
+        side_known = card.batting_side in ("L", "R") and pitcher.throws in ("L", "R")
+        side_text = "left" if card.batting_side == "L" else "right"
+        all_hands = st.toggle(
+            "All pitches, all hands",
+            value=False,
+            key=f"arsenal_allhands_{card.player_id}",
+            disabled=not side_known,
+            help=(
+                "Off (default): only the pitches he threw to "
+                f"{side_text}-handed batters this season, and the batter's "
+                f"season record against pitches from {throws_text}-handed "
+                "pitching — every metric rebased to that hand, never just "
+                "the usage. On: both full season records, all hands (D-129)."
+                if side_known
+                else "Unavailable without a known batting side on both "
+                "cards — the table reads all hands."
+            ),
         )
-        if window_unit == "Weeks":
-            weeks_back = int(
-                st.number_input(
-                    "Weeks back",
-                    min_value=1,
-                    max_value=4,
-                    value=2,
-                    step=1,
-                    key=f"breakup_weeks_{card.player_id}",
-                )
+        hand_filter = side_known and not all_hands
+        if not side_known:
+            reason = (
+                "A switch hitter bats from both sides"
+                if card.batting_side == "S"
+                else "A batting side is not on record for both cards"
             )
-            window_days = weeks_back * 7
-            window_label = f"last {weeks_back} week" + ("s" if weeks_back != 1 else "")
+            st.caption(f"{reason} — the breakup reads both full season records, all hands.")
+        slate_iso = game.scheduled_start_utc.date().isoformat()
+        pitcher_events = _season_pitch_events(pitcher.player_id, "pitcher", slate_iso)
+        batter_events = _season_pitch_events(card.player_id, "batter", slate_iso)
+        if pitcher_events is None or batter_events is None:
+            st.caption(
+                "The season pitch record could not be retrieved for one of "
+                "these players — the breakup stays off rather than invent "
+                "a split."
+            )
+        elif not pitcher_events:
+            st.caption("No regular-season pitches on record for him this year.")
         else:
-            window_days = 30
-            window_label = "last month"
-        lines = card.matchup_lines_by_window.get(window_days, ())
-        table_html = _arsenal_breakup_html(
-            pitcher,
-            lines,
-            threshold=threshold,
-            side_filter=side_filter,
-            side_usage=side_usage,
-            window_label=window_label,
-            throws_text=throws_text,
-        )
-        if not table_html:
-            # Only a side filter can empty the table (season_lines is
-            # non-empty above): none of the pitches he used against this
-            # side made his arsenal board, so season-long figures don't
-            # exist for them — name that instead of showing a blank grid.
-            st.caption(
-                "None of the pitches he used against "
-                f"{side_text}-handed batters in the recent record appear on "
-                "his arsenal board, so there are no season-long figures to "
-                "show for them."
+            pitcher_lines, batter_lines = season_breakup_lines(
+                pitcher_events,
+                batter_events,
+                batter_side=card.batting_side,
+                pitcher_throws=pitcher.throws,
+                hand_filter=hand_filter,
             )
-        else:
-            st.markdown(_BREAKUP_CSS + table_html, unsafe_allow_html=True)
-            st.caption(
-                "LA (D-124): the batter's mean launch angle against that "
-                "pitch over the window record — the arsenal board publishes "
-                "no per-pitch LA, so the pitcher half has none. v2.2 reads "
-                "23°+ against a pitch as strong, 30° elite, and 18° as the "
-                "HR launch floor (below it, home runs need ~115 mph EV) — "
-                "an average is context for those reads, never a firing "
-                "line itself."
+            table_html = _arsenal_breakup_html(
+                pitcher_lines,
+                batter_lines,
+                threshold=threshold,
+                pitcher_scope_label=(
+                    f"season vs {card.batting_side}HB" if hand_filter else "season, all hands"
+                ),
+                batter_scope_label=(
+                    f"season vs {pitcher.throws}HP" if hand_filter else "season, all hands"
+                ),
             )
-        if side_usage is not None:
+            if not table_html:
+                st.caption(
+                    f"No pitch clears the {threshold_pct}% usage line on this "
+                    "scope — lower the threshold slider to bring rows back."
+                )
+            else:
+                st.markdown(_BREAKUP_CSS + table_html, unsafe_allow_html=True)
+                st.caption(
+                    "One row per pitch he threw at or above the usage line "
+                    "on the named scope — every figure on a row comes from "
+                    "that same scope of the season pitch record, so the two "
+                    "toggle positions can never disagree about a "
+                    "denominator (D-129). xISO: mean expected SLG minus "
+                    "expected BA over the scope's batted balls — the "
+                    "arsenal board publishes no per-hand split, so a dash "
+                    "means no batted ball carried both readings. BRL is "
+                    "the raw barrel count. A pitch the batter has not seen "
+                    "dashes instead of hiding. Per-pitch contact reads "
+                    "carry the ratified 10-BBE pitch-type floor — below it "
+                    "the value keeps its exact sample with an INSUFFICIENT "
+                    "marker (D-109). **Row colors (D-129, PO):** a row "
+                    "goes green when his xwOBA with the pitch sits in a "
+                    "green vulnerability band AND the batter's SLG against "
+                    "it sits in a green band, red when both sit in red "
+                    "bands — only with 10+ batted balls on both halves; "
+                    "anything else stays neutral."
+                )
+                st.caption(
+                    "LA (D-124): the batter's mean launch angle against "
+                    "that pitch over the season record. v2.2 reads 23°+ "
+                    "against a pitch as strong, 30° elite, and 18° as the "
+                    "HR launch floor (below it, home runs need ~115 mph "
+                    "EV) — an average is context for those reads, never a "
+                    "firing line itself."
+                )
             st.caption(
-                f"Usage% is his share of pitches to {side_text}-handed "
-                "batters over the recent 31-day record — the arsenal board "
-                "publishes usage across all batters only, so the per-hand "
-                "basis comes from the pitch window (D-102)."
+                f"Season records: his {len(pitcher_events)} pitches, the "
+                f"batter's {len(batter_events)} seen — regular season "
+                f"through {slate_iso}."
             )
-        if side_note:
-            st.caption(side_note)
-        season_note = f" Season board: {pitcher.season_lines_year}" + (
-            " — no current-season record, so last season fills in (D-087)."
-            if game is not None and pitcher.season_lines_year < game.scheduled_start_utc.year
-            else "."
-        )
-        st.caption(
-            "One row per pitch in his arsenal: Usage% and the first half are "
-            "his season-long figures from the arsenal board — never a window "
-            f"(D-087) — and the second half is the batter's {window_label} "
-            "against that exact pitch from this side. A pitch the batter has "
-            "not seen dashes instead of hiding. Rows dimmed sit below the "
-            "threshold. Per-pitch EV and Air% carry the ratified 10-BBE "
-            "pitch-type floor — below it the value keeps its exact sample "
-            "with an INSUFFICIENT marker (D-109)." + season_note
-        )
         # v2.2's stuff-drift caption (D-123, SP-3): the primary pitch's
         # season-to-window whiff and usage facts. The mirage caution ships
         # as this caption alone — no mirage or decay wording on screen.
@@ -2203,6 +2472,12 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
         st.caption("No logged plate appearances on these pitches in the window.")
         return
     st.dataframe(styled_text_frame(sheet, sheet_styles), hide_index=True)
+    st.caption(
+        "Green Event cells (D-129, PO): dark green a home run, the lighter "
+        "green a pulled barrel — barrel-band contact to the pull side, the "
+        "Pulled BRL counter's events made visible. The EV column heats at "
+        "88 / 95 / 100 mph."
+    )
 
 
 @st.dialog("Batter detail", width="large")
@@ -3111,10 +3386,12 @@ def _sp_recent_row(
     return {"Scope": full_label, **texts}, styles
 
 
-def _sp_card(card: PitcherCard | None, team: str, *, recent: bool) -> None:
+def _sp_card(card: PitcherCard | None, team: str, *, recent: bool, key_suffix: str = "") -> None:
     """One starter header card (D-111): name, team, and hand over the scope
     rows. An unannounced starter names the absence. D-128 (PO): the
-    recent-form read is the last two months (L30 before)."""
+    recent-form read is the last two months (L30 before). D-129 (PO): the
+    batter detail popup reuses this card beside the stadium — ``key_suffix``
+    keeps its widget key distinct from the tab copy behind the dialog."""
     if card is None:
         st.markdown(f"**{team} starter**")
         st.caption("starter not announced")
@@ -3137,7 +3414,7 @@ def _sp_card(card: PitcherCard | None, team: str, *, recent: bool) -> None:
         ),
         hide_index=True,
         column_config=_column_help(sp_frame.columns, _SP_HELP),
-        key=f"sp_card_{card.player_id}_{'recent' if recent else 'season'}",
+        key=f"sp_card_{card.player_id}_{'recent' if recent else 'season'}{key_suffix}",
     )
     # v2.2's thin-sample caution (D-123, SP-3): a window spanning at most
     # two starts names itself beside the hand splits.
@@ -3188,6 +3465,7 @@ def _stadium_panel(game: GameCard) -> None:
         )
         detail_lines.append(f"{temperature} · {humidity}")
     roofed = game.venue_type is not VenueType.OPEN_AIR
+    field_wind = _field_wind(game)
     st.markdown(
         field_wind_html(
             venue_name=game.venue_name,
@@ -3199,6 +3477,9 @@ def _stadium_panel(game: GameCard) -> None:
             wind_absent_text=(
                 "roofed — wind never reaches the field" if roofed else "wind reading unavailable"
             ),
+            wind_words=field_wind.words,
+            wind_from_degrees=field_wind.from_degrees,
+            axis_degrees=field_wind.axis_degrees,
         ),
         unsafe_allow_html=True,
     )

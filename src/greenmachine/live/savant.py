@@ -88,6 +88,18 @@ _PITCH_EVENTS_URL = (
     "?all=true&hfSea={year}%7C&player_type=batter"
     "&game_date_gt={day}&game_date_lt={day}&type=details&"
 )
+# D-129: one player's pitch record over a date span — the batter detail
+# dialog's lazy per-side season split (one query per player per open). The
+# game-type filter pins the regular season: without it the search also
+# returns spring-training pitches (verified live 2026-08-25). The column
+# set is the day feed's — same endpoint, same parser.
+_PLAYER_PITCH_EVENTS_URL = (
+    "https://baseballsavant.mlb.com/statcast_search/csv"
+    "?all=true&hfSea={year}%7C&hfGT=R%7C&player_type={role}"
+    "&{lookup}%5B%5D={player_id}"
+    "&game_date_gt={start}&game_date_lt={end}&type=details&"
+)
+_PLAYER_LOOKUP_PARAMS = {"pitcher": "pitchers_lookup", "batter": "batters_lookup"}
 
 
 class PayloadMalformedError(Exception):
@@ -239,6 +251,10 @@ class PitchEvent:
     woba_value: Decimal | None
     woba_denom: Decimal | None
     hit_distance: Decimal | None = None
+    # D-129: the per-event expected SLG/BA — the per-side xISO the arsenal
+    # board cannot split (its hand filter is inert, verified 2026-08-25).
+    estimated_slg: Decimal | None = None
+    estimated_ba: Decimal | None = None
 
 
 def _decimal(raw: Any, context: str) -> Decimal:
@@ -293,6 +309,35 @@ def _percent(raw: Any, context: str) -> Decimal:
 def _percent_or_none(raw: Any) -> Decimal | None:
     value = _decimal_or_none(raw)
     return value / Decimal(100) if value is not None else None
+
+
+def _parse_pitch_event(row: dict[str, str], context: str) -> PitchEvent:
+    """One row of the per-event search CSV as a :class:`PitchEvent` — shared
+    by the day feed and the D-129 player-scoped season fetch (same endpoint,
+    same columns)."""
+    return PitchEvent(
+        game_pk=_int(row.get("game_pk"), context),
+        game_date=str(row.get("game_date", "")).strip(),
+        batter_id=_int(row.get("batter"), context),
+        pitcher_id=_int(row.get("pitcher"), context),
+        batter_side=str(row.get("stand", "")).strip(),
+        pitcher_throws=str(row.get("p_throws", "")).strip(),
+        pitch_type=str(row.get("pitch_type", "")).strip(),
+        event=str(row.get("events", "") or "").strip(),
+        description=str(row.get("description", "") or "").strip(),
+        bb_type=str(row.get("bb_type", "") or "").strip(),
+        launch_speed=_decimal_or_none(row.get("launch_speed")),
+        launch_angle=_decimal_or_none(row.get("launch_angle")),
+        launch_speed_angle=_int_or_none(row.get("launch_speed_angle")),
+        hc_x=_decimal_or_none(row.get("hc_x")),
+        hc_y=_decimal_or_none(row.get("hc_y")),
+        estimated_woba=_decimal_or_none(row.get("estimated_woba_using_speedangle")),
+        woba_value=_decimal_or_none(row.get("woba_value")),
+        woba_denom=_decimal_or_none(row.get("woba_denom")),
+        hit_distance=_decimal_or_none(row.get("hit_distance_sc")),
+        estimated_slg=_decimal_or_none(row.get("estimated_slg_using_speedangle")),
+        estimated_ba=_decimal_or_none(row.get("estimated_ba_using_speedangle")),
+    )
 
 
 def _parse_expected_row(row: dict[str, str], context: str) -> ExpectedStatsRow:
@@ -604,29 +649,46 @@ class BaseballSavant:
         context = f"pitch-events[{day}]"
 
         def parse(row: dict[str, str]) -> PitchEvent:
-            return PitchEvent(
-                game_pk=_int(row.get("game_pk"), context),
-                game_date=str(row.get("game_date", "")).strip(),
-                batter_id=_int(row.get("batter"), context),
-                pitcher_id=_int(row.get("pitcher"), context),
-                batter_side=str(row.get("stand", "")).strip(),
-                pitcher_throws=str(row.get("p_throws", "")).strip(),
-                pitch_type=str(row.get("pitch_type", "")).strip(),
-                event=str(row.get("events", "") or "").strip(),
-                description=str(row.get("description", "") or "").strip(),
-                bb_type=str(row.get("bb_type", "") or "").strip(),
-                launch_speed=_decimal_or_none(row.get("launch_speed")),
-                launch_angle=_decimal_or_none(row.get("launch_angle")),
-                launch_speed_angle=_int_or_none(row.get("launch_speed_angle")),
-                hc_x=_decimal_or_none(row.get("hc_x")),
-                hc_y=_decimal_or_none(row.get("hc_y")),
-                estimated_woba=_decimal_or_none(row.get("estimated_woba_using_speedangle")),
-                woba_value=_decimal_or_none(row.get("woba_value")),
-                woba_denom=_decimal_or_none(row.get("woba_denom")),
-                hit_distance=_decimal_or_none(row.get("hit_distance_sc")),
-            )
+            return _parse_pitch_event(row, context)
 
         parsed = self._board(_PITCH_EVENTS_URL.format(year=year, day=day), context, parse)
+        if isinstance(parsed, FetchFailure):
+            return parsed
+        return tuple(parsed)
+
+    def fetch_player_pitch_events(
+        self,
+        *,
+        year: int,
+        role: Literal["pitcher", "batter"],
+        player_id: int,
+        start: str,
+        end: str,
+    ) -> tuple[PitchEvent, ...] | FetchFailure:
+        """One player's regular-season pitch record between the ISO dates
+        (D-129): every pitch he threw (``role="pitcher"``) or saw
+        (``role="batter"``) — the batter detail dialog's lazy per-side
+        season split, one query per player per dialog open (cached per
+        slate day by the caller). Same search endpoint and column set as
+        the day feed; the game-type filter pins the regular season —
+        without it spring training leaks in (verified live 2026-08-25)."""
+        context = f"player-pitch-events[{role}:{player_id} {start}..{end}]"
+
+        def parse(row: dict[str, str]) -> PitchEvent:
+            return _parse_pitch_event(row, context)
+
+        parsed = self._board(
+            _PLAYER_PITCH_EVENTS_URL.format(
+                year=year,
+                role=role,
+                lookup=_PLAYER_LOOKUP_PARAMS[role],
+                player_id=player_id,
+                start=start,
+                end=end,
+            ),
+            context,
+            parse,
+        )
         if isinstance(parsed, FetchFailure):
             return parsed
         return tuple(parsed)
