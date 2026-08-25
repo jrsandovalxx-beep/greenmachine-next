@@ -54,7 +54,7 @@ from decimal import Decimal
 from functools import lru_cache
 from importlib import metadata
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pandas as pd
@@ -111,7 +111,7 @@ from greenmachine.live.pipeline import (
 )
 from greenmachine.live.savant import BaseballSavant
 from greenmachine.live.transport import UrllibTransport as MlbTransport
-from greenmachine.live.wind import resolved_wind_mph, spray_field_bearing
+from greenmachine.live.wind import resolved_wind_mph, spray_field_bearing, wind_field_words
 from greenmachine.parks import ALL_COLUMNS as PARK_COLUMNS
 from greenmachine.parks import FACTOR_COLUMNS as PARK_FACTOR_COLUMNS
 from greenmachine.parks import (
@@ -644,17 +644,33 @@ _VETO_CSS = "background-color: #a41616; color: #ffe9e9"
 # Neon-green money tag (D-094): a "$" beside a shortlist batter who homered
 # in his most recent game day on or before this slate. Text shadow gives the
 # neon glow; no background, so the cell keeps its theme fill.
-_MONEY_CSS = "color: #39ff14; text-shadow: 0 0 8px #39ff14; font-weight: 700"
 
 
-def _weather_text(game: GameCard) -> tuple[str, bool]:
-    """(text, is-absent) for the shortlist's weather column: the temperature
-    for open-air venues, or the plain reason there is no reading (D-084)."""
+def _conditions_text(game: GameCard) -> tuple[str, bool]:
+    """(text, is-absent) for the shortlist's weather column (D-126, PO): the
+    start-time temperature plus the wind in plain field words — "84°F ·
+    12 mph out to right" — resolved on the measured park axis. Without the
+    axis the compass reading stands in; a roofed venue keeps the indoor
+    neutral value; nothing sourced, the plain reason, never an invention."""
     if game.venue_type is not VenueType.OPEN_AIR:
         return "roofed — indoor neutral value", False
-    if game.temperature_fahrenheit is None:
+    parts: list[str] = []
+    if game.temperature_fahrenheit is not None:
+        parts.append(f"{float(game.temperature_fahrenheit):.0f}°F")
+    speed = game.wind_speed_mph
+    if speed is not None:
+        if speed <= 0:
+            parts.append("calm")
+        elif game.wind_from_degrees is not None and game.park_orientation_degrees is not None:
+            words = wind_field_words(game.wind_from_degrees, game.park_orientation_degrees)
+            parts.append(f"{float(speed):.0f} mph {words}")
+        elif game.wind_direction:
+            parts.append(f"{float(speed):.0f} mph {game.wind_direction.upper()}")
+        else:
+            parts.append(f"{float(speed):.0f} mph")
+    if not parts:
         return "source unavailable", True
-    return f"{float(game.temperature_fahrenheit):.0f}°F, open air", False
+    return " · ".join(parts), False
 
 
 # D-109 / v2.2 (D-114): the shortlist tags' firing lines, printed in the tab
@@ -838,18 +854,17 @@ def _wind_rider_text(game: GameCard, side: str, match_field: str) -> str:
     return f", wind {float(resolved):.0f} mph out to {_field_name(side, match_field)}"
 
 
-def _card_tags(
+def _card_tag_lists(
     card: BatterCard,
     opposing: PitcherCard | None,
     *,
     game: GameCard | None = None,
-) -> tuple[str, str, str]:
-    """(advisories, boosters, vetoes) for the shortlist's three tag columns
-    (v2.2, D-114): the neutral advisories and absences, the reads that argue
-    FOR the home run (green), and the reads that argue AGAINST it (red).
-    Tags join with " · ", so no tag carries an interpunct inside itself —
-    commas inside, interpuncts between. The park and weather reads (D-118)
-    need the game; without one they stay silent."""
+) -> tuple[list[str], list[str], list[str]]:
+    """(advisories, boosters, vetoes) as lists — the shortlist's bubble
+    tags (D-126): the neutral advisories and absences, the reads that argue
+    FOR the home run (green bubbles), and the reads that argue AGAINST it
+    (red). Each list item is one self-contained tag. The park and weather
+    reads (D-118) need the game; without one they stay silent."""
     advisories: list[str] = []
     boosters: list[str] = []
     vetoes: list[str] = []
@@ -1151,23 +1166,118 @@ def _card_tags(
                         f"{float(other_factor.factor):.0f}"
                         f"{_wind_rider_text(game, side, 'oppo')}"
                     )
+    return advisories, boosters, vetoes
+
+
+def _card_tags(
+    card: BatterCard,
+    opposing: PitcherCard | None,
+    *,
+    game: GameCard | None = None,
+) -> tuple[str, str, str]:
+    """The same three tag lists joined with " · " — the flat form the tag
+    tests assert against; the Sluggers tab renders the lists as hoverable
+    bubbles (D-126), so the interpunct-inside-a-tag caution is historical."""
+    advisories, boosters, vetoes = _card_tag_lists(card, opposing, game=game)
     return " · ".join(advisories), " · ".join(boosters), " · ".join(vetoes)
 
 
-def _slugger_frames(board: SlateBoard) -> tuple[pd.DataFrame, pd.DataFrame, list[BatterCard]]:
-    """(texts, styles, cards) — the D-084 shortlist: grades A and S only.
+# D-126 (PO): the shortlist's tag bubbles — pill markup, injected once per
+# render. Green argues for the home run, red against it, grey a note; the
+# native hover (title) carries the full read with its samples, and the
+# neon money span dates the last-game-day homer so a pre-game read can
+# tell last night from tonight.
+_SLUGGERS_CSS = """
+<style>
+.gm-pill{display:inline-block;border-radius:999px;padding:0 9px;margin:1px 2px;
+font-size:.78rem;line-height:1.55;white-space:nowrap;cursor:help}
+.gm-pill-for{background:#2f5d0f;color:#eaffcf}
+.gm-pill-against{background:#7d1616;color:#ffe9e9}
+.gm-pill-note{background:#39423c;color:#c8d2cb}
+.gm-money{color:#39ff14;text-shadow:0 0 8px #39ff14;font-weight:700;white-space:nowrap}
+.gm-grade{background:#427010;color:#eaffcf;border-radius:4px;padding:1px 8px;font-weight:700}
+.gm-dim{color:#7d8f84;font-style:italic}
+.gm-head{font-size:.78rem;color:#9fb3a6;font-weight:600;white-space:nowrap;cursor:help}
+</style>
+"""
 
-    The shortlist is a reading list, not a metrics table: batter, team, the
-    pitcher they face, the grade, the park factor for their batting side, the
-    weather, and three tag columns (v2.2, D-114) — green For-HR boosters,
-    red Against-HR vetoes, and the neutral advisories (low sample, missing
-    components, estimated lineup). Per-batter metrics moved into the batter
-    detail popup (D-084). The third return is the card behind each row, in
-    row order, so a grid selection resolves to a batter (GMF-007).
-    """
-    text_rows: list[dict[str, str]] = []
-    style_rows: list[dict[str, str]] = []
-    cards: list[BatterCard] = []
+# The shortlist's column ratios and headers (D-126, PO's order): identity
+# and the pitcher he faces, the bubble tags, the conditions, then the
+# parked reads — Park factor, the Form Score placeholder, Grade last —
+# and the More button that opens the detail popup.
+_SLUGGER_SPECS = [1.7, 0.55, 1.6, 1.6, 3.6, 1.9, 0.85, 0.95, 0.7, 0.8]
+_SLUGGER_HEADERS = (
+    "Batter",
+    "HR",
+    "Team",
+    "Versus",
+    "Tags",
+    "Weather",
+    "Park factor",
+    "Form Score",
+    "Grade",
+    "",
+)
+
+
+def _pill_label(text: str) -> str:
+    """The bubble's short face: the tag's own name when it carries one
+    before a colon ("x-gap", "power profile", "low sample"), else the
+    whole tag when it is short enough to be its own face ("barrel 16.1%
+    (320 BBE)"). The full read always rides the hover, so a truncated
+    face loses nothing."""
+    head, sep, _ = text.partition(":")
+    if sep and len(head) <= 28:
+        return head
+    if len(text) <= 34:
+        return text
+    return text[:33].rstrip() + "..."
+
+
+def _tag_pills(
+    advisories: list[str], boosters: list[str], vetoes: list[str]
+) -> tuple[tuple[str, str, str], ...]:
+    """(label, kind, full-read) triples in the old columns' order — the
+    reads FOR the home run, the reads AGAINST it, then the notes — so the
+    bubble row keeps the D-114 reading order without the columns."""
+    pills: list[tuple[str, str, str]] = []
+    for kind, tags in (("for", boosters), ("against", vetoes), ("note", advisories)):
+        for text in tags:
+            pills.append((_pill_label(text), kind, text))
+    return tuple(pills)
+
+
+def _pills_html(pills: tuple[tuple[str, str, str], ...]) -> str:
+    return " ".join(
+        f'<span class="gm-pill gm-pill-{kind}" '
+        f'title="{html.escape(explanation, quote=True)}">{html.escape(label)}</span>'
+        for label, kind, explanation in pills
+    )
+
+
+class _SluggerRow(NamedTuple):
+    """One shortlist row's render materials (D-126): the card and game for
+    the detail dialog, plus every cell's text precomputed (the view never
+    derives)."""
+
+    card: BatterCard
+    game: GameCard
+    versus: str
+    money_day: str | None
+    money_iso: str | None
+    pills: tuple[tuple[str, str, str], ...]
+    weather: str
+    weather_absent: bool
+    factor_text: str
+    factor_absent: bool
+
+
+def _slugger_rows(board: SlateBoard) -> list[_SluggerRow]:
+    """The D-084 shortlist as render rows: grades A and S only. Per-batter
+    metrics live in the batter detail popup (D-084); the row keeps the
+    identity cells, the bubble tags, the weather, the park factor, the Form
+    Score placeholder and the grade — in the PO's D-126 order."""
+    rows: list[_SluggerRow] = []
     for game in board.games:
         for batters, opposing in (
             (game.away_batters, game.home_pitcher),
@@ -1179,43 +1289,30 @@ def _slugger_frames(board: SlateBoard) -> tuple[pd.DataFrame, pd.DataFrame, list
                 if card.result.grade not in (Grade.S, Grade.A):
                     continue
                 factor = _side_factor(game, card.batting_side)
-                weather, weather_absent = _weather_text(game)
-                advisories, boosters, vetoes = _card_tags(card, opposing, game=game)
-                texts = {
-                    "Batter": card.full_name,
-                    "HR": "$" if card.homered_on_last_game_day else "",
-                    "Team": card.team,
-                    "Versus": opposing.full_name if opposing else "TBD",
-                    "Grade": card.result.grade.value,
-                    # D-124: the Form Score placeholder — v2.2 ratifies the
-                    # form reads but no rollup formula, so the column holds
-                    # the dash (never an invented number) until one is.
-                    "Form Score": "—",
-                    "Park factor": (
-                        f"{float(factor.factor):.0f}" if factor is not None else "not covered"
-                    ),
-                    "Weather": weather,
-                    "For HR": boosters,
-                    "Against HR": vetoes,
-                    "Tags": advisories,
-                }
-                styles = {"Grade": _HIGHLIGHT, "Form Score": _REASON_CSS}
-                if card.homered_on_last_game_day:
-                    styles["HR"] = _MONEY_CSS
-                if factor is None:
-                    styles["Park factor"] = _REASON_CSS
-                if weather_absent:
-                    styles["Weather"] = _REASON_CSS
-                # v2.2 (D-114): green marks the reads for the home run, red
-                # the reads against it — only when the column carries a tag.
-                if boosters:
-                    styles["For HR"] = _HIGHLIGHT
-                if vetoes:
-                    styles["Against HR"] = _VETO_CSS
-                text_rows.append(texts)
-                style_rows.append(styles)
-                cards.append(card)
-    return pd.DataFrame(text_rows), pd.DataFrame(style_rows), cards
+                weather, weather_absent = _conditions_text(game)
+                advisories, boosters, vetoes = _card_tag_lists(card, opposing, game=game)
+                money_iso = card.homered_on_last_game_day
+                money_day = None
+                if money_iso is not None:
+                    _, month, day = money_iso.split("-")
+                    money_day = f"{int(month)}/{int(day)}"
+                rows.append(
+                    _SluggerRow(
+                        card=card,
+                        game=game,
+                        versus=opposing.full_name if opposing else "TBD",
+                        money_day=money_day,
+                        money_iso=money_iso,
+                        pills=_tag_pills(advisories, boosters, vetoes),
+                        weather=weather,
+                        weather_absent=weather_absent,
+                        factor_text=(
+                            f"{float(factor.factor):.0f}" if factor is not None else "not covered"
+                        ),
+                        factor_absent=factor is None,
+                    )
+                )
+    return rows
 
 
 def _component_flags(card: BatterCard) -> tuple[str, str]:
@@ -1919,14 +2016,17 @@ def _batter_detail_dialog(card: BatterCard, game: GameCard | None) -> None:
 def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCard | None:
     st.caption(
         "The shortlist (D-084): only batters graded A or S under the provisional "
-        "v1 model (D-071). Park factor is the batter-side home-run factor; "
-        "weather is the venue reading. Three tag columns (v2.2, D-114): "
-        "**For HR** in green — the reads arguing for the home run; "
-        "**Against HR** in red — the reads arguing against it; **Tags** — "
-        "the neutral advisories (low samples, missing components, estimated "
-        "lineups, the lineup slot) plus the regression-gap and contact-first "
-        "context reads (D-110). A neon **$** marks a batter who homered in "
-        "his most recent game day on or before this slate (D-094). "
+        "v1 model (D-071). **Tags** are bubbles (D-126, PO — the For-HR and "
+        "Against-HR columns are gone): green bubbles argue for the home run, "
+        "red against it, grey the notes (low samples, missing components, "
+        "estimated lineups, the lineup slot) — hover any bubble for the full "
+        "read with its samples. Park factor is the batter-side home-run "
+        "factor; weather is the start-time reading with the wind in field "
+        "words (out to right, in to home, left to right) resolved on the "
+        "measured park axis. A neon **$ with its date** marks a batter who "
+        "homered in his most recent completed game day — the date says "
+        "which game, so a pre-game read never passes last night's homer off "
+        "as tonight's (D-094, D-126). **More** opens the batter's detail. "
         "Firing lines — K reads: the unlock needs K% ≥ 22% of season plate "
         "appearances AND an arsenal-wide whiff ≤ 20%, both; without that "
         "matchup K% ≥ 28% reads binary and ≥ 30% is the high-K caution. "
@@ -1988,24 +2088,61 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "until one is — never an invented number. Hover any column header "
         "for its one-line definition."
     )
-    texts, styles, cards = _slugger_frames(board)
-    if texts.empty:
+    rows = _slugger_rows(board)
+    if not rows:
         st.info(f"No batter grades A or S on the {board.official_date} slate.")
         return None
-    event = st.dataframe(
-        styled_text_frame(texts, styles),
-        hide_index=True,
-        height=frame_height("Roomy", len(texts)),
-        on_select="rerun",
-        selection_mode="single-row",
-        column_config=_column_help(texts.columns, _SLUGGERS_HELP),
-        key=f"live_sluggers_{board.official_date}_{_selection_epoch()}",
-    )
-    selected_rows = event.selection.rows
-    if not selected_rows:
-        st.caption("Select a row to open the batter's detail.")
-        return None
-    return cards[selected_rows[0]]
+    # D-126 (PO): the shortlist as bubble rows, not a data grid — the tag
+    # columns became hoverable pills, and a More button per row replaces
+    # the row-select box. Header cells carry the same one-line definitions
+    # on hover (the glossary dict below).
+    st.markdown(_SLUGGERS_CSS, unsafe_allow_html=True)
+    header = st.columns(_SLUGGER_SPECS)
+    for column, name in zip(header, _SLUGGER_HEADERS, strict=True):
+        if name:
+            definition = _SLUGGERS_HELP.get(name, "")
+            column.markdown(
+                f'<span class="gm-head" title="{html.escape(definition, quote=True)}">'
+                f"{html.escape(name)}</span>",
+                unsafe_allow_html=True,
+            )
+    selected: BatterCard | None = None
+    for row in rows:
+        cells = st.columns(_SLUGGER_SPECS, vertical_alignment="center")
+        cells[0].markdown(html.escape(row.card.full_name), unsafe_allow_html=True)
+        if row.money_day is not None:
+            cells[1].markdown(
+                f'<span class="gm-money" title="Homered in his most recent '
+                f"completed game day ({row.money_iso}) — the tag clears once "
+                f'his next game goes final (D-094/D-126)">${row.money_day}</span>',
+                unsafe_allow_html=True,
+            )
+        cells[2].markdown(html.escape(row.card.team), unsafe_allow_html=True)
+        cells[3].markdown(html.escape(row.versus), unsafe_allow_html=True)
+        if row.pills:
+            cells[4].markdown(_pills_html(row.pills), unsafe_allow_html=True)
+        weather = html.escape(row.weather)
+        cells[5].markdown(
+            f'<span class="gm-dim">{weather}</span>' if row.weather_absent else weather,
+            unsafe_allow_html=True,
+        )
+        factor = html.escape(row.factor_text)
+        cells[6].markdown(
+            f'<span class="gm-dim">{factor}</span>' if row.factor_absent else factor,
+            unsafe_allow_html=True,
+        )
+        # D-124: the Form Score placeholder — the dash holds until v2.2
+        # ratifies a rollup formula, never an invented number.
+        cells[7].markdown('<span class="gm-dim">—</span>', unsafe_allow_html=True)
+        cells[8].markdown(
+            f'<span class="gm-grade">{row.card.result.grade.value}</span>',
+            unsafe_allow_html=True,
+        )
+        if cells[9].button("More", key=f"more_{board.official_date}_{row.card.player_id}"):
+            selected = row.card
+    if selected is None:
+        st.caption("More opens the batter's detail.")
+    return selected
 
 
 # Absence texts that appear in otherwise-plain cells on the Arms and Backtest
@@ -2314,11 +2451,17 @@ _MATCHUPS_HELP: dict[str, str] = {
 _SLUGGERS_HELP: dict[str, str] = {
     "Batter": "The batter's name.",
     "HR": (
-        "A neon $ marks a batter who homered in his most recent game day "
-        "on or before this slate (D-094)."
+        "A neon $ with a date marks a batter who homered in his most "
+        "recent completed game day — the date says which game, and the tag "
+        "clears once his next game goes final (D-094/D-126)."
     ),
     "Team": "His club on this slate.",
     "Versus": "The expected opposing starter — TBD until probables post.",
+    "Tags": (
+        "Bubble reads: green argues for the home run, red against it, "
+        "grey a note (low samples, missing components, estimated lineup, "
+        "the slot). Hover a bubble for the full read with its samples."
+    ),
     "Grade": "The provisional v1 grade — only A and S make this shortlist (D-084).",
     "Form Score": (
         "A placeholder: v2.2 ratifies the form reads but no rollup formula, "
@@ -2327,13 +2470,10 @@ _SLUGGERS_HELP: dict[str, str] = {
     "Park factor": (
         "The batter-side home-run factor: 100 is neutral, ≥ 110 boosts, ≤ 90 suppresses (v2.2)."
     ),
-    "Weather": "The venue reading — a roofed stadium reads the indoor neutral value.",
-    "For HR": "The reads arguing FOR the home run (v2.2), green when present.",
-    "Against HR": "The reads arguing AGAINST the home run (v2.2), red when present.",
-    "Tags": (
-        "Neutral advisories — low samples, missing components, estimated "
-        "lineups, the lineup slot — plus the regression-gap and "
-        "contact-first context reads (D-110)."
+    "Weather": (
+        "The start-time reading: temperature, and the wind resolved on the "
+        "park's measured axis in field words — out to right, in to home, "
+        "left to right. A roofed stadium reads the indoor neutral value."
     ),
 }
 

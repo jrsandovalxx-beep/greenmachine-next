@@ -333,10 +333,13 @@ class BatterCard:
     mix_line: BatterGridLine | None
     season_line: BatterGridLine | None
     mix_label: str
-    # D-094/D-100: whether the batter homered in his most recent completed
-    # game on or before this slate — the Sluggers tab's neon "$" tag, read
-    # from the near-real-time game log. Never a guess: no log, no tag.
-    homered_on_last_game_day: bool
+    # D-094/D-100: the ISO date of the batter's most recent completed game
+    # day when he homered in it — the Sluggers tab's neon "$" tag, read
+    # from the near-real-time game log and shown WITH its date (D-126, PO:
+    # an undated "$" before first pitch read as "homered tonight" when the
+    # homer was last night's). None when the latest played day held no
+    # homer, and never a guess: no log, no tag.
+    homered_on_last_game_day: str | None
     result: EvaluatedGradeResult | NotEvaluableGradeResult
     # SP-1 (D-109): season strikeout share (K/PA) for the high-K tags —
     # computed here, selected by the view.
@@ -644,16 +647,20 @@ class SlateBoard:
     diagnostics: tuple[str, ...]
 
 
-def _homered_on_last_game_day(entries: tuple[GameLogEntry, ...]) -> bool:
-    """D-094/D-100: True when the batter homered in his most recent completed
-    game — the game log carries only final games, so an in-progress one
-    neither tags nor clears. A homer earlier with a quieter game after it
-    does not tag. No entries, no tag."""
+def _homered_on_last_game_day(entries: tuple[GameLogEntry, ...]) -> str | None:
+    """D-094/D-100: the ISO date of his most recent completed game day when
+    he homered in it, else None — the game log carries only final games, so
+    an in-progress one neither tags nor clears. A homer earlier with a
+    quieter game after it does not tag. No entries, no tag. D-126: the date
+    rides the tag so a pre-game read can tell last night's homer from
+    tonight's."""
     played = [entry for entry in entries if entry.plate_appearances > 0]
     if not played:
-        return False
+        return None
     last_day = max(entry.date for entry in played)
-    return any(entry.date == last_day and entry.home_runs > 0 for entry in played)
+    if any(entry.date == last_day and entry.home_runs > 0 for entry in played):
+        return last_day
+    return None
 
 
 def _recent_window_events(events: tuple[PitchEvent, ...]) -> tuple[PitchEvent, ...]:
