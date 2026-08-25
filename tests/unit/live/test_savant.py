@@ -272,6 +272,50 @@ def test_pitch_events_classify_contact_and_leave_fouls_unclassified() -> None:
     assert foul.event == ""
 
 
+_PLAYER_EVENTS_CSV = (
+    "game_pk,game_date,batter,pitcher,stand,p_throws,pitch_type,events,description,bb_type,"
+    "launch_speed,launch_angle,launch_speed_angle,hc_x,hc_y,estimated_woba_using_speedangle,"
+    "woba_value,woba_denom,hit_distance_sc,estimated_slg_using_speedangle,"
+    "estimated_ba_using_speedangle\n"
+    "777002,2026-06-10,101,201,R,L,SL,single,batted,fly_ball,101.4,24,5,120.0,140.0,"
+    "0.9,0.9,1,360,0.75,0.42\n"
+    "777002,2026-06-10,101,201,R,L,SL,,swinging_strike,,,,,,,,,,,\n"
+)
+
+
+def test_player_pitch_events_hit_the_player_lookup_url_and_parse_expected_rates() -> None:
+    """D-129: the dialog's lazy season split — the player-scoped search
+    pins the regular season and carries the per-event expected rates."""
+    transport = _FakeTransport(_PLAYER_EVENTS_CSV)
+    events = BaseballSavant(transport).fetch_player_pitch_events(
+        year=2026, role="pitcher", player_id=201, start="2026-03-01", end="2026-08-25"
+    )
+    assert not isinstance(events, FetchFailure)
+    url = transport.requested_urls[0]
+    assert "player_type=pitcher" in url
+    assert "pitchers_lookup%5B%5D=201" in url
+    assert "hfGT=R%7C" in url
+    assert "game_date_gt=2026-03-01" in url and "game_date_lt=2026-08-25" in url
+    hit, whiff = events
+    assert hit.estimated_slg == Decimal("0.75")
+    assert hit.estimated_ba == Decimal("0.42")
+    assert hit.pitcher_throws == "L"
+    assert whiff.estimated_slg is None
+    assert whiff.estimated_ba is None
+    assert whiff.description == "swinging_strike"
+
+
+def test_player_pitch_events_lookup_param_follows_the_role() -> None:
+    transport = _FakeTransport(_PLAYER_EVENTS_CSV)
+    events = BaseballSavant(transport).fetch_player_pitch_events(
+        year=2026, role="batter", player_id=101, start="2026-03-01", end="2026-08-25"
+    )
+    assert not isinstance(events, FetchFailure)
+    url = transport.requested_urls[0]
+    assert "player_type=batter" in url
+    assert "batters_lookup%5B%5D=101" in url
+
+
 def test_a_non_200_status_becomes_a_fetch_failure() -> None:
     failure = BaseballSavant(_FakeTransport("", status=503)).fetch_statcast_batters(year=2026)
     assert isinstance(failure, FetchFailure)

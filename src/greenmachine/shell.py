@@ -339,13 +339,13 @@ _COMPASS_DEGREES = {
 }
 
 
-def _wind_flow(angle_degrees: float) -> str:
+def _wind_flow(toward_degrees: float) -> str:
     """The animated wind: streaking lanes drifting across the field plus an
-    arrowhead, rotated to point the way the wind blows. Compass readings name
-    where it blows FROM, so the flow bears the opposite; SVG rotation runs
-    clockwise from east while compass bearings run clockwise from north, a
-    further quarter-turn between the two conventions."""
-    toward = (angle_degrees + 180.0 - 90.0) % 360.0
+    arrowhead, rotated to point the way the wind blows. ``toward_degrees``
+    is the finished SVG rotation (clockwise from east, zero unrotated) —
+    the caller resolves it from the compass reading, or from the park's
+    measured axis so the arrow and the field words agree (D-129)."""
+    toward = toward_degrees % 360.0
     # The lane offset lives on an outer group: a CSS animation transform
     # replaces the element's own transform attribute, so animating the same
     # element that carries the lane's placement would drop the lane at the
@@ -379,12 +379,21 @@ def field_wind_html(
     wind_speed_mph: float | None,
     wind_direction: str | None,
     wind_absent_text: str | None = None,
+    wind_words: str | None = None,
+    wind_from_degrees: float | None = None,
+    axis_degrees: float | None = None,
 ) -> str:
     """The drawn field panel: the diamond with its warning track, wall,
     infield and mound; the live wind as a rotated, animated flow when a
     reading exists, or the plain reason it does not (roofed venue, or the
     source absent). Original artwork, inline. Per-park wall heights are not
-    drawn: no ratified source for them exists yet."""
+    drawn: no ratified source for them exists yet.
+
+    Per D-129 (PO): when the venue's measured home-to-center axis and the
+    wind's from-bearing ride along, the flow rotates relative to the drawn
+    field (center field up) and the line speaks field words — "wind out
+    to right" — instead of the compass reading; without them the compass
+    frame stands in, as before."""
     field = (
         '<svg width="240" height="200" viewBox="0 0 240 200"'
         ' xmlns="http://www.w3.org/2000/svg" role="img">'
@@ -425,9 +434,20 @@ def field_wind_html(
         ' transform="rotate(45 120 168)" />'
     )
     if wind_speed_mph is not None and wind_direction is not None:
-        degrees = _COMPASS_DEGREES.get(wind_direction.upper())
-        flow = _wind_flow(degrees if degrees is not None else 0.0)
-        wind_line = f"wind {wind_speed_mph:.0f} mph from the {wind_direction.upper()}"
+        if wind_from_degrees is not None and axis_degrees is not None:
+            # Field frame: the wind blows toward (from + 180) true; the drawn
+            # field puts the park axis up, and SVG zero points east — one
+            # quarter-turn between the conventions, as in the compass path.
+            toward = (wind_from_degrees + 180.0 - axis_degrees - 90.0) % 360.0
+        else:
+            degrees = _COMPASS_DEGREES.get(wind_direction.upper())
+            toward = ((degrees if degrees is not None else 0.0) + 180.0 - 90.0) % 360.0
+        flow = _wind_flow(toward)
+        wind_line = (
+            f"wind {wind_speed_mph:.0f} mph {wind_words}"
+            if wind_words
+            else f"wind {wind_speed_mph:.0f} mph from the {wind_direction.upper()}"
+        )
         field += flow
     else:
         wind_line = wind_absent_text or "wind reading unavailable"

@@ -801,6 +801,120 @@ def test_pitch_lines_sort_by_usage_and_empty_scope_is_absent() -> None:
     assert [line.pitch_type for line in _pitch_lines(events)] == ["FF", "CH"]
 
 
+def test_pitch_lines_carry_the_season_breakup_counts_and_air_reads() -> None:
+    """D-129 (PO): at-bats and hits beside the rates, the raw barrel count,
+    the pull/oppo shares of measurable air (the form section's exact
+    convention), and the per-side expected ISO off the per-event expected
+    SLG/BA — every figure off the same scope of events."""
+    from greenmachine.live.pipeline import _pitch_lines
+
+    events = (
+        # a pulled air-ball barrel (spray +27 degrees for a right-hander)
+        _window_event(
+            pitch_type="FF",
+            event="home_run",
+            batter_side="R",
+            bb_type="fly_ball",
+            launch_speed=Decimal("108"),
+            launch_angle=Decimal("27"),
+            launch_speed_angle=6,
+            hc_x=Decimal("150"),
+            hc_y=Decimal("150"),
+            estimated_slg=Decimal("1.9"),
+            estimated_ba=Decimal("0.8"),
+        ),
+        # an opposite-field air out (spray -27.6 degrees), not a barrel
+        _window_event(
+            pitch_type="FF",
+            event="field_out",
+            batter_side="R",
+            bb_type="fly_ball",
+            launch_speed=Decimal("95"),
+            launch_angle=Decimal("30"),
+            launch_speed_angle=3,
+            hc_x=Decimal("100"),
+            hc_y=Decimal("150"),
+            estimated_slg=Decimal("0.3"),
+            estimated_ba=Decimal("0.2"),
+        ),
+        # a ground ball — never air, however it is sprayed
+        _window_event(
+            pitch_type="FF",
+            event="field_out",
+            batter_side="R",
+            bb_type="ground_ball",
+            launch_speed=Decimal("88"),
+            launch_angle=Decimal("4"),
+            launch_speed_angle=2,
+            hc_x=Decimal("150"),
+            hc_y=Decimal("150"),
+            estimated_slg=None,
+            estimated_ba=None,
+        ),
+        # a walk — a plate appearance, never an at-bat
+        _window_event(
+            pitch_type="FF",
+            event="walk",
+            batter_side="R",
+            bb_type="",
+            launch_speed=None,
+            launch_angle=None,
+            launch_speed_angle=None,
+            hc_x=None,
+            hc_y=None,
+            estimated_slg=None,
+            estimated_ba=None,
+        ),
+    )
+    (fastball,) = _pitch_lines(events)
+    assert fastball.plate_appearances == 4
+    assert fastball.at_bats == 3
+    assert fastball.hits == 1
+    assert fastball.batting_average == Decimal(1) / Decimal(3)
+    assert fastball.barrel_count == 1
+    assert fastball.barrel_share == Decimal(1) / Decimal(3)
+    assert fastball.pull_air_share == Decimal(1) / Decimal(2)
+    assert fastball.oppo_air_share == Decimal(1) / Decimal(2)
+    assert fastball.expected_iso is not None
+    assert fastball.expected_iso.quantize(Decimal("0.001")) == Decimal("0.600")
+
+
+def test_season_breakup_lines_scope_both_halves_to_the_matchup_hands() -> None:
+    """D-129 (PO): the default rebases every metric to the matchup's hands —
+    his pitches to the batter's side, the batter's pitches seen from the
+    starter's hand — and the unfiltered position rebases to all hands over
+    the identical records."""
+    from greenmachine.live.pipeline import season_breakup_lines
+
+    pitcher_events = (
+        _window_event(pitch_type="FF", batter_side="L"),
+        _window_event(pitch_type="FF", batter_side="L"),
+        _window_event(pitch_type="SL", batter_side="R"),
+        _window_event(pitch_type="SL", batter_side="L"),
+    )
+    batter_events = (
+        _window_event(pitch_type="FF", pitcher_throws="L"),
+        _window_event(pitch_type="FF", pitcher_throws="R"),
+        _window_event(pitch_type="FF", pitcher_throws="R"),
+        _window_event(pitch_type="CH", pitcher_throws="R"),
+    )
+    pitcher_lines, batter_lines = season_breakup_lines(
+        pitcher_events, batter_events, batter_side="L", pitcher_throws="L", hand_filter=True
+    )
+    assert {line.pitch_type for line in pitcher_lines} == {"FF", "SL"}
+    fastball = next(line for line in pitcher_lines if line.pitch_type == "FF")
+    assert fastball.pitches == 2
+    assert fastball.usage_share == Decimal(2) / Decimal(3)  # rebased to the LHB scope
+    assert set(batter_lines) == {"FF"}  # only the pitches he has seen from a lefty
+    assert batter_lines["FF"].pitches == 1
+    pitcher_all, batter_all = season_breakup_lines(
+        pitcher_events, batter_events, batter_side="L", pitcher_throws="L", hand_filter=False
+    )
+    assert {line.pitch_type for line in pitcher_all} == {"FF", "SL"}
+    assert set(batter_all) == {"FF", "CH"}
+    assert batter_all["FF"].pitches == 3
+
+
 def test_pitcher_season_lines_read_the_season_board() -> None:
     """D-087: the Arsenal table's figures are the season arsenal board's own,
     ISO derived pipeline-side, sorted by usage; the board publishes no home-run

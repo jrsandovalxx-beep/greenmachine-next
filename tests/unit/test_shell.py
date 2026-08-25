@@ -108,6 +108,41 @@ def test_the_field_panel_draws_the_diamond_and_the_wind_blows() -> None:
     assert "wind 9 mph from the W" in html
 
 
+def test_the_field_panel_speaks_field_words_on_the_measured_axis() -> None:
+    """D-129 (PO): with the park's measured axis and the wind's from-bearing
+    riding along, the line speaks field words and the flow rotates relative
+    to the drawn field — axis and arrow agree."""
+    from greenmachine.shell import field_wind_html
+
+    html = field_wind_html(
+        venue_name="Fenway Park",
+        detail_lines=(),
+        wind_speed_mph=12.0,
+        wind_direction="N",
+        wind_words="out to right",
+        wind_from_degrees=0.0,
+        axis_degrees=65.0,
+    )
+    assert "wind 12 mph out to right" in html
+    assert "from the N" not in html
+    # Field frame: toward = (0 + 180 - 65 - 90) = 25 degrees on the drawn field.
+    assert "rotate(25.0" in html
+
+
+def test_the_field_panel_keeps_the_compass_frame_without_an_axis() -> None:
+    from greenmachine.shell import field_wind_html
+
+    html = field_wind_html(
+        venue_name="Coors Field",
+        detail_lines=(),
+        wind_speed_mph=9.0,
+        wind_direction="W",
+        wind_words=None,
+    )
+    assert "rotate(0.0" in html
+    assert "wind 9 mph from the W" in html
+
+
 def test_the_field_panel_states_a_roofed_venue_without_a_flow() -> None:
     from greenmachine.shell import field_wind_html
 
