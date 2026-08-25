@@ -1623,6 +1623,37 @@ def test_slate_nav_regrades_the_chosen_day(monkeypatch: pytest.MonkeyPatch) -> N
     assert heading and all("(today" not in h for h in heading)
 
 
+def test_backtest_weather_readers_take_the_game_time_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-135: the backtest's absent-weather readers accept the pipeline's
+    two-argument game-time call (D-131). The one-arg lambdas it shipped
+    with made every real backtest build raise TypeError the moment a past
+    slate was regraded — a deployed break the suite never crossed because
+    every backtest test patched ``build_board`` whole. This one reads the
+    readers the function actually passes."""
+    import streamlit as st
+    import streamlit_app
+
+    from greenmachine.inputs.park_reference import PARK_VENUES
+
+    captured: dict[str, object] = {}
+
+    def fake_build(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return "board-sentinel"
+
+    # streamlit_app binds build_board by direct import, so the patch lands
+    # on the app's own namespace, not the pipeline module's.
+    monkeypatch.setattr(streamlit_app, "build_board", fake_build)
+    st.cache_data.clear()
+    assert streamlit_app._backtest_board("2026-08-20") == "board-sentinel"
+    venue = PARK_VENUES[0]
+    first_pitch = datetime(2026, 8, 20, 23, 0, tzinfo=UTC)
+    assert captured["temperature_for"](venue, first_pitch) is None  # type: ignore[operator]
+    assert captured["wind_for"](venue, first_pitch) is None  # type: ignore[operator]
+
+
 def test_backtest_button_swaps_the_view(monkeypatch: pytest.MonkeyPatch) -> None:
     """D-095: the top-right button opens the backtest view — pooled tallies
     per grade over past regraded slates — and the board button returns."""

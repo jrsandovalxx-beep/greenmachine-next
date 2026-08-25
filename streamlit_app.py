@@ -4181,6 +4181,14 @@ def render_parks_screen() -> None:
 _BACKTEST_RANGES = {"Last 7 days": 7, "Last 14 days": 14}
 
 
+def _absent_weather(venue: ParkVenue, at: datetime) -> None:
+    """The backtest's weather binding (D-095): weather is not reconstructed
+    for a past slate, so every conditions read is absent — two arguments
+    because D-131's game-time readers receive first pitch even here, where
+    the answer is always the same named absence (D-135)."""
+    return None
+
+
 @st.cache_data(ttl=DAY_EVENTS_TTL_SECONDS, show_spinner=False)
 def _backtest_board(slate_iso: str) -> SlateBoard | FetchFailure:
     """Regrade a past slate as of the prior evening (D-095). Weather is not
@@ -4200,9 +4208,9 @@ def _backtest_board(slate_iso: str) -> SlateBoard | FetchFailure:
         as_of=slate_as_of(slate_date),
         config=production_config(),
         fetch_day_events=fetch_day,  # type: ignore[arg-type]
-        temperature_for=lambda venue: None,  # type: ignore[arg-type]
+        temperature_for=_absent_weather,  # type: ignore[arg-type]
         park_factors=park_factor_table(),
-        wind_for=lambda venue: None,  # type: ignore[arg-type]
+        wind_for=_absent_weather,  # type: ignore[arg-type]
     )
 
 

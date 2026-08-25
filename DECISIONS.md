@@ -3370,3 +3370,32 @@ advisory).
 
 Full gate green on both Pythons, consistency check clean, all four
 showcase runners clean.
+
+## D-135 - Hotfix: the backtest's weather readers take the game-time call
+
+Source: found while implementing the morning refresh — a D-131
+regression, deployed.
+
+D-131 changed the pipeline's conditions readers to receive the game's
+scheduled start — ``temperature_for(venue, start_utc)`` — and updated
+every call site the gate exercises. It missed one: the backtest board
+build (D-095) still passed the one-argument ``lambda venue: None`` for
+temperature and wind, so every real backtest build raised ``TypeError``
+the moment a past slate was regraded. The backtest view on the deployed
+app was broken from the D-131 merge until this fix. The suite never
+crossed it because every backtest test patched ``build_board`` whole —
+the lambdas lived on the far side of the patch.
+
+**The fix.** The two lambdas are now one named reader,
+``_absent_weather(venue, at)``, whose signature takes the game-time
+call and whose docstring says why the answer is still always the same
+named absence (D-095 does not reconstruct past weather). The new
+regression test reads the readers the backtest function actually
+passes and calls them the way the pipeline now does — it fails on the
+old lambdas exactly as the deployed build did.
+
+No behavior change beyond the un-breaking: the backtest's weather
+cells name their absence precisely as before.
+
+Full gate green on both Pythons, consistency check clean, all four
+showcase runners clean.
