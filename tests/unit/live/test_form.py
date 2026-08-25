@@ -124,7 +124,7 @@ def test_oppo_is_signed_by_batter_side() -> None:
 def test_oppo_air_resolves_with_the_same_window_rules_as_pull() -> None:
     """Same L7→L14 resolution and INSUFFICIENT treatment as Pull Air % —
     an empty L7 falls back to the L14 sample, which keeps the 15-air-ball
-    floor (v2.2 split the floors: 8 at L7, 15 at L14+)."""
+    floor (v2.2 split the floors; D-133 set them to 5 at L7, 15 at L14+)."""
     recent = aggregate_form(())
     extended = aggregate_form(
         tuple(
@@ -139,31 +139,32 @@ def test_oppo_air_resolves_with_the_same_window_rules_as_pull() -> None:
     assert section.oppo_air_pct.sufficient
 
 
-def test_the_l7_air_floor_is_eight_air_balls() -> None:
-    """v2.2 (D-114): the L7 air-ball floor is 8 — a normal week is ~10 air
-    balls, so 15 was unreachable for everyday regulars. Eight air balls at
-    L7 resolves sufficient; seven stays visible under the advisory. The L14
-    floor is unchanged at 15 — a 12-ball L14 fallback stays insufficient."""
-    nine_air = aggregate_form(
+def test_the_l7_air_floor_is_five_air_balls() -> None:
+    """D-133 (PO): the L7 air-ball floor is 5 — 8 still read INSUFFICIENT on
+    too many everyday regulars, and a light week is 5-9 air balls. Five air
+    balls at L7 resolves sufficient; four stays visible under the advisory.
+    The L14 floor is unchanged at 15 — a 12-ball L14 fallback stays
+    insufficient."""
+    five_air = aggregate_form(
         tuple(
             _event(launch_speed_angle=4, bb_type="fly_ball", hc_x="90", hc_y="160", batter_side="R")
-            for _ in range(9)
+            for _ in range(5)
         )
     )
-    section = resolve_form_section(nine_air, aggregate_form(()), (), ())
+    section = resolve_form_section(five_air, aggregate_form(()), (), ())
     assert section.pull_air_pct is not None
     assert section.pull_air_pct.window_days == 7
-    assert section.pull_air_pct.sample == 9
+    assert section.pull_air_pct.sample == 5
     assert section.pull_air_pct.sufficient
-    seven_air = aggregate_form(
+    four_air = aggregate_form(
         tuple(
             _event(launch_speed_angle=4, bb_type="fly_ball", hc_x="90", hc_y="160", batter_side="R")
-            for _ in range(7)
+            for _ in range(4)
         )
     )
-    section = resolve_form_section(seven_air, aggregate_form(()), (), ())
+    section = resolve_form_section(four_air, aggregate_form(()), (), ())
     assert section.pull_air_pct is not None
-    assert section.pull_air_pct.sample == 7
+    assert section.pull_air_pct.sample == 4
     assert not section.pull_air_pct.sufficient
     twelve_air_l14 = aggregate_form(
         tuple(
