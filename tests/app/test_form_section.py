@@ -136,10 +136,11 @@ def test_absent_metric_reads_not_enough_data_available() -> None:
 def test_board_renders_with_selectable_grids_and_invites_selection(
     _staged_app: SlateBoard,  # noqa: F811
 ) -> None:
-    """The selectable Sluggers grid still renders the outage board cleanly and
-    names its invitation while nothing is selected; no dialog is called."""
+    """The Sluggers bubble rows still render the outage board cleanly and
+    name their invitation while no More button has been pressed; no dialog
+    is called (D-126: buttons replaced the selectable grid)."""
     at = AppTest.from_file(str(_APP_PATH), default_timeout=_TIMEOUT)
     at.run()
     assert not at.exception, [str(e.value) for e in at.exception]
     captions = [element.value for element in at.caption]
-    assert any("Select a row to open the batter's detail." in c for c in captions)
+    assert any("More opens the batter's detail." in c for c in captions)

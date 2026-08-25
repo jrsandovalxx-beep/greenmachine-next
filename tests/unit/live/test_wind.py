@@ -8,6 +8,7 @@ from decimal import Decimal
 from greenmachine.live.wind import (
     resolved_wind_mph,
     spray_field_bearing,
+    wind_field_words,
     wind_from_degrees,
 )
 
@@ -73,3 +74,42 @@ class TestSprayThirds:
     def test_bearings_wrap(self) -> None:
         assert spray_field_bearing(Decimal("5"), "R", "pull") == Decimal("335")
         assert spray_field_bearing(Decimal("357"), "L", "pull") == Decimal("27")
+
+
+class TestWindFieldWords:
+    """D-126 (PO): the plain-words direction on the field — the forecast's
+    from-bearing resolved against the park's home-to-center axis."""
+
+    def test_straight_out_and_straight_in(self) -> None:
+        # Wind FROM the outfield (180 off the axis) blows out to center;
+        # wind FROM behind home plate blows in to home.
+        assert wind_field_words(Decimal("270"), Decimal("90")) == "out to center"
+        assert wind_field_words(Decimal("90"), Decimal("90")) == "in to home"
+
+    def test_the_corners(self) -> None:
+        # 45 degrees off the axis, each way: a southwest wind blows out to
+        # the left-field corner of an east-facing park, a northwest wind
+        # out to the right-field one, and the mirror images blow in.
+        assert wind_field_words(Decimal("225"), Decimal("90")) == "out to left"
+        assert wind_field_words(Decimal("315"), Decimal("90")) == "out to right"
+        assert wind_field_words(Decimal("45"), Decimal("90")) == "in from left"
+        assert wind_field_words(Decimal("135"), Decimal("90")) == "in from right"
+
+    def test_the_crosswinds(self) -> None:
+        # Facing center field, a wind from the left pushes balls toward
+        # right field (left to right); from the right, the reverse.
+        assert wind_field_words(Decimal("0"), Decimal("90")) == "left to right"
+        assert wind_field_words(Decimal("180"), Decimal("90")) == "right to left"
+
+    def test_sector_boundaries(self) -> None:
+        # The center window is 45 degrees wide (22.5 each way); a boundary
+        # belongs to the next sector clockwise.
+        assert wind_field_words(Decimal("247.4"), Decimal("90")) == "out to left"
+        assert wind_field_words(Decimal("247.5"), Decimal("90")) == "out to center"
+        assert wind_field_words(Decimal("292.5"), Decimal("90")) == "out to right"
+        assert wind_field_words(Decimal("337.5"), Decimal("90")) == "left to right"
+
+    def test_wraparound_axes(self) -> None:
+        # A park pointing nearly north wraps the arithmetic, not the words.
+        assert wind_field_words(Decimal("180"), Decimal("357")) == "out to center"
+        assert wind_field_words(Decimal("0"), Decimal("357")) == "in to home"

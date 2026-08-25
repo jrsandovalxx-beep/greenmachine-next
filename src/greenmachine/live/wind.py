@@ -89,3 +89,37 @@ def spray_field_bearing(
     while bearing >= Decimal("360"):
         bearing -= Decimal("360")
     return bearing
+
+
+# D-126 (PO): the conditions column's plain-words wind direction — "out to
+# right", "in to home", "left to right" — resolved against the measured
+# park axis. Eight 45-degree sectors around the home-to-center bearing:
+# straight out and straight in get 45-degree windows, the two field
+# corners and the two crosswind directions the rest. Standing at home
+# facing center field, right field lies 90 degrees clockwise of left
+# field, so the relative bearing (toward - axis, degrees true) names the
+# sector directly.
+_FIELD_WORD_SECTORS: tuple[tuple[Decimal, str], ...] = (
+    (Decimal("22.5"), "out to center"),
+    (Decimal("67.5"), "out to right"),
+    (Decimal("112.5"), "left to right"),
+    (Decimal("157.5"), "in from left"),
+    (Decimal("202.5"), "in to home"),
+    (Decimal("247.5"), "in from right"),
+    (Decimal("292.5"), "right to left"),
+    (Decimal("337.5"), "out to left"),
+)
+
+
+def wind_field_words(wind_from: Decimal, axis_bearing: Decimal) -> str:
+    """The wind's plain-words direction on the field: "out to right",
+    "in to home", "left to right". ``wind_from`` is the forecast's
+    from-bearing (degrees true, NWS convention), ``axis_bearing`` the
+    park's home-to-center axis. Without a measured axis there are no field
+    words — the caller falls back to the compass reading, never a guessed
+    geometry."""
+    relative = (float(wind_from) + 180.0 - float(axis_bearing)) % 360.0
+    for ceiling, words in _FIELD_WORD_SECTORS:
+        if relative < float(ceiling):
+            return words
+    return "out to center"

@@ -268,7 +268,32 @@ def test_all_four_tabs_render_with_every_metric_missing(_staged_app: SlateBoard)
     assert not at.exception, [str(e.value) for e in at.exception]
     labels = [tab.label for tab in at.tabs]
     assert labels == ["Sluggers", "Arms", "Matchups", "Conditions"]
-    assert len(at.dataframe) >= 3  # sluggers, arms, conditions at minimum
+    # Arms and conditions dataframes at minimum — the shortlist renders as
+    # bubble rows, not a data grid (D-126).
+    assert len(at.dataframe) >= 2
+
+
+def test_sluggers_render_as_bubble_rows_with_more_buttons(_staged_app: SlateBoard) -> None:
+    """D-126 (PO): the shortlist renders as bubble rows — no dataframe, no
+    For-HR or Against-HR columns anywhere — with hoverable pills, header
+    definitions on hover, and a More button per row that opens the batter
+    detail."""
+    at = AppTest.from_file(str(_APP_PATH), default_timeout=_TIMEOUT)
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    tab = at.tabs[0]
+    assert len(list(tab.dataframe)) == 0
+    markup = "\n".join(element.value for element in tab.markdown)
+    assert "gm-pill" in markup
+    assert 'class="gm-head"' in markup
+    buttons = [button for button in tab.button if button.label == "More"]
+    assert len(buttons) == 2  # the two A/S batters on the staged board
+    buttons[0].click()
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    # The batter detail opened: its recent-form caption names the batter.
+    opened = "\n".join(element.value for element in at.markdown)
+    assert "Batter detail" in opened or "recent form" in opened.lower()
 
 
 def _display_values(element: object) -> pd.DataFrame:
@@ -290,16 +315,17 @@ def _display_values(element: object) -> pd.DataFrame:
 def test_missing_cells_name_their_reason(_staged_app: SlateBoard) -> None:
     """D-023/D-025 on the live surface: a missing metric is its reason in
     words — never a blank, a zero, or the literal string 'None'. On the
-    D-084 shortlist those reasons ride in the tags box."""
+    shortlist those reasons ride the note bubbles (D-126)."""
     at = AppTest.from_file(str(_APP_PATH), default_timeout=_TIMEOUT)
     at.run()
     assert not at.exception, [str(e.value) for e in at.exception]
-    display = _display_values(at.dataframe[0]).astype(str)
-    assert not display.isin(["None", "nan"]).any().any()
-    # The uncovered shortlist batter's tags name the absences in words.
-    tags = " ".join(display["Tags"].tolist()).lower()
-    assert "missing:" in tags
-    assert "source unavailable" in tags
+    for element in at.dataframe:
+        display = _display_values(element).astype(str)
+        assert not display.isin(["None", "nan"]).any().any()
+    # The shortlist batters' note bubbles name the absences in words.
+    markup = "\n".join(element.value for element in at.tabs[0].markdown).lower()
+    assert "missing:" in markup
+    assert "source unavailable" in markup
 
 
 def test_main_screen_is_the_shell_plus_the_live_board(_staged_app: SlateBoard) -> None:
@@ -371,69 +397,130 @@ def test_parks_snapshot_declares_a_live_weather_source() -> None:
     assert SOURCE in snapshot.sources
 
 
-def test_shortlist_keeps_only_a_and_s_with_the_d084_columns() -> None:
-    """D-084: the Sluggers tab is the shortlist — grades A and S only, and
-    exactly the shortlist columns; every cell is display text (D-076), the
-    grade is lit, and the cards stay row-aligned for selection (GMF-007).
-    D-124: the Form Score placeholder holds the dash, reason-styled, until
-    a rollup formula is ratified."""
+def test_shortlist_keeps_only_a_and_s_as_bubble_rows() -> None:
+    """D-084/D-126 (PO): the Sluggers tab is the shortlist — grades A and S
+    only, rendered as bubble rows in the PO's column order (identity, the
+    tag bubbles, the conditions, the parked reads, grade last, then the
+    More button). The For-HR and Against-HR columns are gone; their reads
+    live on as green and red pills."""
     import streamlit_app
 
-    texts, styles, cards = streamlit_app._slugger_frames(_graded_board())
-    assert list(texts.columns) == [
+    rows = streamlit_app._slugger_rows(_graded_board())
+    assert streamlit_app._SLUGGER_HEADERS == (
         "Batter",
         "HR",
         "Team",
         "Versus",
-        "Grade",
-        "Form Score",
-        "Park factor",
-        "Weather",
-        "For HR",
-        "Against HR",
         "Tags",
-    ]
-    assert set(texts["Form Score"]) == {"—"}
-    assert styles["Form Score"].tolist() == [streamlit_app._REASON_CSS] * 2
+        "Weather",
+        "Park factor",
+        "Form Score",
+        "Grade",
+        "",
+    )
+    assert [row.card.result.grade.value for row in rows] == ["S", "A"]
     # D-094: the outage board fetched no events, so no batter has a last
-    # game day at all and the money-tag column stays blank — never a guess.
-    assert texts["HR"].tolist() == ["", ""]
-    assert list(texts["Grade"]) == ["S", "A"]
-    assert styles["Grade"].tolist() == [streamlit_app._HIGHLIGHT] * 2
-    # Park factor formatted as the whole-number factor for the batting side.
-    assert texts["Park factor"].isin(["112", "98", "not covered"]).all()
+    # game day at all and the money tag stays blank — never a guess.
+    assert [row.money_day for row in rows] == [None, None]
     # The outage venue is roofed: the weather cell says so, in words.
-    assert set(texts["Weather"]) == {"roofed — indoor neutral value"}
-    # The third return is the card behind each row, in row order (GMF-007).
-    assert [card.full_name for card in cards] == list(texts["Batter"])
+    assert [row.weather for row in rows] == ["roofed — indoor neutral value"] * 2
+    assert not any(row.weather_absent for row in rows)
+    # Park factor formatted as the whole-number factor for the batting side.
+    assert all(row.factor_text in {"112", "98", "not covered"} for row in rows)
+    # Pills are (label, kind, explanation) triples — the full read rides
+    # the hover, the For/Against/note order keeps the D-114 reading order.
+    for row in rows:
+        for label, kind, explanation in row.pills:
+            assert kind in {"for", "against", "note"}
+            assert label and explanation
 
 
-def test_money_tag_marks_a_batter_who_homered() -> None:
-    """D-094: a neon "$" sits beside a shortlist batter whose record holds a
-    home run on or before the slate; a batter without one stays blank."""
+def test_money_tag_marks_a_batter_who_homered_with_the_date() -> None:
+    """D-094/D-126 (PO): the neon tag carries the homer's game date —
+    "$8/23" — so a pre-game read never passes last night's homer off as
+    tonight's; a batter without one stays blank."""
     import dataclasses
 
-    import pandas as _pd
     import streamlit_app
 
     board = _graded_board()
     game = board.games[0]
-    tagged = dataclasses.replace(game.home_batters[0], homered_on_last_game_day=True)
+    tagged = dataclasses.replace(game.home_batters[0], homered_on_last_game_day="2026-08-23")
     game = dataclasses.replace(game, home_batters=(tagged, *game.home_batters[1:]))
     board = dataclasses.replace(board, games=(game, *board.games[1:]))
-    texts, styles, _cards = streamlit_app._slugger_frames(board)
-    assert texts["HR"].tolist() == ["$", ""]
-    assert styles["HR"].iloc[0] == streamlit_app._MONEY_CSS
-    assert _pd.isna(styles["HR"].iloc[1])
+    rows = streamlit_app._slugger_rows(board)
+    assert rows[0].money_day == "8/23"
+    assert rows[0].money_iso == "2026-08-23"
+    assert rows[1].money_day is None
 
 
 def test_shortlist_empty_when_nothing_grades_a_or_s() -> None:
     """All-D slate: the shortlist is empty and the tab says so plainly."""
     import streamlit_app
 
-    texts, _styles, cards = streamlit_app._slugger_frames(_outage_board())
-    assert texts.empty
-    assert cards == []
+    assert streamlit_app._slugger_rows(_outage_board()) == []
+
+
+def test_pill_labels_take_the_tags_own_name() -> None:
+    """D-126: a bubble's face is the tag's own name before the colon; a
+    short colon-less tag is its own face; a long one truncates, and the
+    full read always rides the hover."""
+    import streamlit_app
+
+    assert streamlit_app._pill_label("x-gap: xISO +.006 (season, 564 PA)") == "x-gap"
+    assert streamlit_app._pill_label("power profile: EV 93.0 mph") == "power profile"
+    assert streamlit_app._pill_label("barrel 16.1% (320 BBE)") == "barrel 16.1% (320 BBE)"
+    assert streamlit_app._pill_label("bats 3rd") == "bats 3rd"
+    assert streamlit_app._pill_label("x" * 40).endswith("...")
+    pills = streamlit_app._tag_pills(
+        ["low sample: pull pct air balls"],
+        ["power profile: EV 93.0 mph, bat speed 79.7 mph (season)"],
+        ["high-K profile: K% 31.0 (402 PA)"],
+    )
+    assert [kind for _, kind, _ in pills] == ["for", "against", "note"]
+    assert pills[0][0] == "power profile"
+    assert pills[0][2] == "power profile: EV 93.0 mph, bat speed 79.7 mph (season)"
+    # The markup escapes the hover text and names the kind's class.
+    markup = streamlit_app._pills_html(pills)
+    assert 'class="gm-pill gm-pill-for"' in markup
+    assert 'title="power profile: EV 93.0 mph, bat speed 79.7 mph (season)"' in markup
+
+
+def test_conditions_text_speaks_field_words() -> None:
+    """D-126 (PO): the shortlist weather pairs the start-time temperature
+    with the wind in field words off the measured axis — "84°F · 12 mph
+    out to right" — the compass reading as the honest fallback, a roof as
+    the indoor neutral value, nothing sourced as the plain reason."""
+    import dataclasses
+    from decimal import Decimal
+
+    import streamlit_app
+
+    from greenmachine.inputs.contract import VenueType
+
+    board = _graded_board()
+    game = board.games[0]
+    assert streamlit_app._conditions_text(game) == ("roofed — indoor neutral value", False)
+    open_air = dataclasses.replace(
+        game,
+        venue_type=VenueType.OPEN_AIR,
+        temperature_fahrenheit=Decimal("84"),
+        wind_speed_mph=Decimal("12"),
+        wind_from_degrees=Decimal("315"),
+        park_orientation_degrees=Decimal("90"),
+        wind_direction="NW",
+    )
+    assert streamlit_app._conditions_text(open_air) == ("84°F · 12 mph out to right", False)
+    no_axis = dataclasses.replace(open_air, park_orientation_degrees=None)
+    assert streamlit_app._conditions_text(no_axis) == ("84°F · 12 mph NW", False)
+    empty = dataclasses.replace(
+        open_air,
+        temperature_fahrenheit=None,
+        wind_speed_mph=None,
+        wind_from_degrees=None,
+        wind_direction=None,
+    )
+    assert streamlit_app._conditions_text(empty) == ("source unavailable", True)
 
 
 def _pitch_event(**overrides: object) -> object:

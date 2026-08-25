@@ -1553,7 +1553,7 @@ def test_money_tag_marks_a_homer_in_the_last_game_day() -> None:
     }
     board = _build(_FakeApi(game_logs=logs), _FakeSavant())
     assert not isinstance(board, FetchFailure)
-    assert board.games[0].away_batters[0].homered_on_last_game_day is True
+    assert board.games[0].away_batters[0].homered_on_last_game_day == "2026-08-18"
 
     quieter_after = {
         BATTER_ID: (
@@ -1564,7 +1564,7 @@ def test_money_tag_marks_a_homer_in_the_last_game_day() -> None:
     }
     board = _build(_FakeApi(game_logs=quieter_after), _FakeSavant())
     assert not isinstance(board, FetchFailure)
-    assert board.games[0].away_batters[0].homered_on_last_game_day is False
+    assert board.games[0].away_batters[0].homered_on_last_game_day is None
 
 
 def test_money_tag_stays_off_without_a_homer_in_the_record() -> None:
@@ -1573,11 +1573,11 @@ def test_money_tag_stays_off_without_a_homer_in_the_record() -> None:
     logs = {BATTER_ID: (_log_entry("2026-08-19", home_runs=0),)}
     board = _build(_FakeApi(game_logs=logs), _FakeSavant())
     assert not isinstance(board, FetchFailure)
-    assert board.games[0].away_batters[0].homered_on_last_game_day is False
+    assert board.games[0].away_batters[0].homered_on_last_game_day is None
 
     board = _build(_FakeApi(), _FakeSavant())
     assert not isinstance(board, FetchFailure)
-    assert board.games[0].away_batters[0].homered_on_last_game_day is False
+    assert board.games[0].away_batters[0].homered_on_last_game_day is None
 
 
 def test_money_tag_stays_off_when_the_log_source_fails() -> None:
@@ -1585,7 +1585,7 @@ def test_money_tag_stays_off_when_the_log_source_fails() -> None:
     the build still completes."""
     board = _build(_FakeApi(game_logs=FetchFailure("game-logs: HTTP 503")), _FakeSavant())
     assert not isinstance(board, FetchFailure)
-    assert board.games[0].away_batters[0].homered_on_last_game_day is False
+    assert board.games[0].away_batters[0].homered_on_last_game_day is None
 
 
 def test_money_tag_ignores_zero_pa_entries() -> None:
@@ -1599,4 +1599,4 @@ def test_money_tag_ignores_zero_pa_entries() -> None:
     }
     board = _build(_FakeApi(game_logs=logs), _FakeSavant())
     assert not isinstance(board, FetchFailure)
-    assert board.games[0].away_batters[0].homered_on_last_game_day is True
+    assert board.games[0].away_batters[0].homered_on_last_game_day == "2026-08-18"

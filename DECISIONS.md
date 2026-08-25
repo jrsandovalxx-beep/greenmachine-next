@@ -2832,3 +2832,65 @@ a 27.9 ft/s sprint, an insufficient spray record, and a suppressive home
 park — correctly carries no over-performance tag. Full gate green on
 both Pythons (3409 passed, 1 skipped), consistency check clean, all four
 showcase runners clean.
+
+## D-126 - Sluggers becomes bubble rows: For/Against columns out, tags as hover pills, weather in field words, the $ carries its date
+
+**Decided:** 2026-08-25 · **Status:** shipped (staging)
+
+Four items off the PO's change list (uploaded 2026-08-25) land together
+because they all reshape the same surface.
+
+**Items 7-8 — the columns.** The For-HR and Against-HR columns are gone
+("these were a fluke") and the row reorders to the PO's sequence:
+Batter, HR, Team, Versus, Tags, Weather, Park factor, Form Score,
+Grade. Nothing the two columns said is lost — every read already lived
+as a tag string, so the columns' semantics survive as pill COLOR: green
+bubbles argue for the home run, red against it, grey the notes. The
+caption and the Tags header hover say so.
+
+**Item 9 — tags as bubbles.** A dataframe cell cannot render a hoverable
+bubble, so the shortlist leaves st.dataframe for a per-row column layout:
+each tag is a pill span whose native hover carries the full read with
+its samples, and each column header is a span whose hover carries its
+one-line definition — which also satisfies the list's hover-every-title
+item for this tab. Row selection is gone with the grid; a **More**
+button per row opens the same batter detail the row click used to. The
+pill label is the tag's own name (the head before its colon, trimmed to
+fit); the full text rides the hover, never truncated there.
+
+**Item 10 — weather you can use.** The old cell named a compass
+direction and left the geometry to the reader. The wind now resolves on
+the park's measured home-plate-to-center axis into field words — eight
+45-degree sectors: out to center/left/right, in to home, in from
+left/right, left to right, right to left (`wind_field_words` in
+`greenmachine.live.wind`, sweep-verified across the full rotation and
+at every sector boundary). The cell reads "84°F · 12 mph out to right";
+a park with no measured axis falls back to the compass point, a calm
+reading says calm, a roofed stadium reads the indoor neutral value, and
+a missing feed names itself ("source unavailable") — the absence rules
+are untouched.
+
+**Item 49 — the Schwarber $.** Investigation finding: not a bug. D-094's
+tag means "homered in his most recent completed game day," and Schwarber
+had homered the night before the slate the PO saw it on — the tag was
+telling the truth and reading like "homered tonight." The fix is a
+date-stamp, not a logic change: the pipeline field now carries the
+tagging game day's ISO date (or None), the tab renders a neon **$8/23**,
+and the hover says which game it was and that the tag clears once his
+next game goes final. A pre-game read can no longer pass last night's
+homer off as tonight's.
+
+**Held:** Form Score stays a clearly-marked placeholder dash — v2.2
+ratifies no rollup formula, so the dash holds until one exists rather
+than inventing a number (disclosed to the PO).
+
+Live-verified on the 2026-08-24 slate with the live NWS adapter: fifteen
+A/S rows render as bubbles (Caminero's green "power profile"/"platoon
+advantage" against red "air allowed"; Vargas keeps his D-125 "x-gap"
+green and "wrong-side park" red as pills), the weather column speaks
+field words off real readings ("66°F · 3 mph out to center" at Comerica,
+"70°F · 5 mph in from left" at Guaranteed Rate, "82°F · 5 mph out to
+left" at Angel Stadium, roofed venues neutral), the date-stamped $
+renders with its hover, and More opens the batter detail. Full gate
+green on both Pythons (3417 passed, 1 skipped), consistency check
+clean, all four showcase runners clean.
