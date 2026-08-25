@@ -2782,3 +2782,53 @@ dialog renders the per-pitch LA with its floor notes (Valdez's sinker
 column config, locked by a suite test. Full gate green on both Pythons
 (3408 passed, 1 skipped), consistency check clean, all four showcase
 runners clean.
+
+## D-125 - regression reads leave the grid: Sluggers tags with reliability bands and why-riders
+
+**Decided:** 2026-08-25 · **Status:** shipped (staging)
+
+The PO's change list (uploaded 2026-08-25, items 43-44) settled the open
+x-gap question his earlier "No preference" had left to the recommended
+option: "Instead of showing the difference for xISO-ISO and xwOBA-wOBA,
+remove them and make tags for regression or whatever term you think best,
+only tag batters when they meet the criteria (these tags will only show in
+sluggers tab)" — and "Keep iso and xwoba column." This supersedes the
+grid-column half of the keep-plus-band plan; the band-and-rider half
+ships inside the tags, which are now the gaps' only surface.
+
+**The grid change (Matchups).** The xISO-ISO and xwOBA-wOBA columns are
+gone from the season view (the L30 view never carried them), star
+entries, hover definitions and all; ISO and xwOBA themselves stay, and
+the season LA keeps its place after EV. The season view's only starred
+metric is now EV. The captions say where the gaps went.
+
+**The tags (Sluggers, unchanged columns).** The D-115 under-performance
+flag keeps its v2.2 lines (xISO-ISO >= +.050 or xwOBA-wOBA >= +.015) and
+now carries the reliability band off its season sample — thin under
+200 PA, readable 200-399, established 400+ — so a May gap and an August
+gap stop reading alike. **Disclosure:** the two band lines are builder
+judgment informed by the ratified stabilization anchors (ISO ~160 AB,
+BB% ~120 PA — an L30 window is too noisy for a gap read); they are NOT
+v2.2 firing lines, and both print in the captions per D-079. A
+suppressive home park attaches a why-rider — "home park HR factor 78
+(LHB) can hold the gap open — x-stats are park-neutral" — read off the
+pinned per-handedness snapshot at the batter's HOME venue (half the
+season sample lives there; tonight's venue factor remains the D-118
+tag's business). The D-110 over-performance advisory keeps its ~.040
+gate and now names every structural reason present — sprint >= 28 ft/s,
+a pull-heavy air profile (>= 40% of measurable air balls, sufficient
+record only), a boosting home park (HR factor >= 110) — closing with the
+park-neutral-and-direction-blind note. No reason present, no tag: an
+over-performance with no identified driver says nothing rather than
+implying regression due.
+
+Live-verified on the 2026-08-24 slate: all 20 batter grids in both views
+carry no gap column (ISO/xwOBA stay; LA after EV); Vargas reads "x-gap:
+xISO +.006, xwOBA +.022 (season, 564 PA · established); home park HR
+factor 89 (RHB) can hold the gap open", Nootbaar "(season, 234 PA ·
+readable); home park HR factor 78 (LHB)...", Bohm carries no rider (his
+home park boosts, not suppresses), and Valdez — over the .040 gate with
+a 27.9 ft/s sprint, an insufficient spray record, and a suppressive home
+park — correctly carries no over-performance tag. Full gate green on
+both Pythons (3409 passed, 1 skipped), consistency check clean, all four
+showcase runners clean.

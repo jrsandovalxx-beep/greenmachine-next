@@ -83,6 +83,7 @@ from greenmachine.grid import (
 )
 from greenmachine.inputs import InputSnapshot, WeatherForecast, Window
 from greenmachine.inputs.contract import Handedness, ParkFactor, ParkVenue, VenueType
+from greenmachine.inputs.park_reference import PARK_VENUES
 from greenmachine.inputs.savant_park_factors import basis_statement, read_factors
 from greenmachine.inputs.wind_receptiveness import WindReceptiveness, read_receptiveness
 from greenmachine.live.backtest import (
@@ -681,6 +682,13 @@ _POWER_EV_LINE = Decimal("91")
 _POWER_BAT_SPEED_LINE = Decimal("73")
 _AOE_WOBA_GAP_LINE = Decimal("0.04")
 _AOE_SPRINT_LINE = Decimal("28")
+# D-125 (PO): x-gap reliability bands. Builder-judgment bands informed by
+# the ratified stabilization anchors (ISO ~160 AB, BB% ~120 PA — an L30
+# window is too noisy for a gap read) — NOT v2.2 firing lines, and both
+# lines print in the captions that render them (D-079). The gaps stay
+# descriptive; the band stops a May gap and an August gap reading alike.
+_GAP_READABLE_PA = 200
+_GAP_ESTABLISHED_PA = 400
 _SQUARED_UP_LINE = Decimal("0.35")
 _CONTACT_BAT_SPEED_LINE = Decimal("70")
 _TOP5_SLOT = 5
@@ -916,16 +924,26 @@ def _card_tags(
             boosters.append(f"fly-ball vulnerable: avg LA {float(season_la):.1f}° (season)")
     # v2.2 (D-115): the x-gap flag — an under-performance read, so the
     # positive side only (expected above actual); both gaps always shown,
-    # no expected-stats row, no tag.
+    # no expected-stats row, no tag. D-125: the reliability band rides the
+    # sample, and a suppressive home park attaches its why-rider — the
+    # expected stats are park-neutral, so a tough home park can hold a
+    # positive gap open without any regression coming.
     gaps = card.season_gaps
     if gaps is not None and (
         gaps.xiso_minus_iso >= _X_ISO_GAP_LINE or gaps.xwoba_minus_woba >= _X_WOBA_GAP_LINE
     ):
-        boosters.append(
+        tag = (
             f"x-gap: xISO {_signed_avg_text(gaps.xiso_minus_iso)}, "
             f"xwOBA {_signed_avg_text(gaps.xwoba_minus_woba)} "
-            f"(season, {gaps.plate_appearances} PA)"
+            f"(season, {gaps.plate_appearances} PA · {_gap_band(gaps.plate_appearances)})"
         )
+        home_factor = _home_park_hr_factor(card.team, card.batting_side)
+        if home_factor is not None and home_factor.factor <= _WRONG_SIDE_PARK_LINE:
+            tag += (
+                f"; home park HR factor {float(home_factor.factor):.0f} "
+                f"({card.batting_side}HB) can hold the gap open — x-stats are park-neutral"
+            )
+        boosters.append(tag)
     # Barrel-elite and the power profile read the season Statcast board;
     # both carry the v2.2 power-badge gate (≥ 50 BBE, BBE-denominated).
     statcast = card.statcast
@@ -944,19 +962,40 @@ def _card_tags(
                 f"power profile: EV {float(statcast.exit_velocity_avg):.1f} mph, "
                 f"bat speed {float(card.squared_up_bat_speed):.1f} mph (season)"
             )
-    # Actual-over-expected is context only (v2.2): no automatic speed
-    # attribution — it rides the neutral column.
-    if (
-        gaps is not None
-        and gaps.xwoba_minus_woba <= -_AOE_WOBA_GAP_LINE
-        and card.sprint_speed_fps is not None
-        and card.sprint_speed_fps >= _AOE_SPRINT_LINE
-    ):
-        advisories.append(
-            f"actual over expected: wOBA {_signed_avg_text(-gaps.xwoba_minus_woba)} "
-            f"over xwOBA (season, {gaps.plate_appearances} PA), "
-            f"sprint {float(card.sprint_speed_fps):.1f} ft/s"
-        )
+    # Actual-over-expected is context only (v2.2): no automatic
+    # attribution — it rides the neutral column. D-125: the advisory now
+    # names every structural reason present (the expected stats are
+    # direction-blind and park-neutral, and footspeed beats them on the
+    # ground), so an over-performance with a known driver stops reading
+    # like regression due. No reason present, no tag.
+    if gaps is not None and gaps.xwoba_minus_woba <= -_AOE_WOBA_GAP_LINE:
+        aoe_reasons: list[str] = []
+        if card.sprint_speed_fps is not None and card.sprint_speed_fps >= _AOE_SPRINT_LINE:
+            aoe_reasons.append(f"sprint {float(card.sprint_speed_fps):.1f} ft/s")
+        form = card.form
+        pull_air = form.pull_air_pct if form is not None else None
+        if (
+            pull_air is not None
+            and pull_air.sufficient
+            and pull_air.value is not None
+            and pull_air.value >= _PULL_AIR_SHARE_LINE
+        ):
+            aoe_reasons.append(
+                f"pull-air {float(pull_air.value):.0f}% "
+                f"({pull_air.sample} air balls L{pull_air.window_days})"
+            )
+        home_factor = _home_park_hr_factor(card.team, card.batting_side)
+        if home_factor is not None and home_factor.factor >= _PARK_BOOST_LINE:
+            aoe_reasons.append(
+                f"home park HR factor {float(home_factor.factor):.0f} ({card.batting_side}HB)"
+            )
+        if aoe_reasons:
+            advisories.append(
+                f"actual over expected: wOBA {_signed_avg_text(-gaps.xwoba_minus_woba)} "
+                f"over xwOBA (season, {gaps.plate_appearances} PA · "
+                f"{_gap_band(gaps.plate_appearances)}) — likely structural: "
+                f"{'; '.join(aoe_reasons)}; x-stats are park-neutral and direction-blind"
+            )
     # Platoon advantage (v2.2): the batter's resolved side against the
     # starter's throwing hand — a contact-quality signal, with the 2025
     # anomaly caveat stated in the caption.
@@ -1202,6 +1241,24 @@ def _side_factor(game: GameCard, side: str | None) -> ParkFactor | None:
     return None
 
 
+_VENUE_BY_TEAM = {venue.team: venue for venue in PARK_VENUES}
+_HOME_SIDES = {"L": Handedness.LEFT, "R": Handedness.RIGHT}
+
+
+def _home_park_hr_factor(team: str, side: str | None) -> ParkFactor | None:
+    """D-125: the hand-split HR factor at the batter's HOME park — the
+    why-rider behind an x-gap read. The season gaps accumulate half their
+    plate appearances there, and the expected stats are park-neutral, so
+    an extreme home park can hold a gap open on its own. Tonight's venue
+    factor is the D-118 tag's business; this one explains the gap. A side
+    outside L/R or a venue outside the snapshot reads a silent None."""
+    handedness = _HOME_SIDES.get(side or "")
+    venue = _VENUE_BY_TEAM.get(team)
+    if handedness is None or venue is None or venue.savant_venue_id is None:
+        return None
+    return park_factor_table().get(venue.savant_venue_id, {}).get(handedness)
+
+
 # --------------------------------------------------------------------------
 # GMF-007: the recent-form section (D-068) behind the batter detail dialog
 # --------------------------------------------------------------------------
@@ -1382,6 +1439,16 @@ def _avg_text(value: Decimal | None) -> str:
         return "—"
     text = f"{float(value):.3f}"
     return text[1:] if text.startswith("0") else text
+
+
+def _gap_band(plate_appearances: int) -> str:
+    """The D-125 reliability band behind an x-gap read: thin under 200 PA,
+    readable 200-399, established at 400+ (the lines print in the captions)."""
+    if plate_appearances >= _GAP_ESTABLISHED_PA:
+        return "established"
+    if plate_appearances >= _GAP_READABLE_PA:
+        return "readable"
+    return "thin"
 
 
 def _signed_avg_text(value: Decimal) -> str:
@@ -1873,7 +1940,11 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "on the Arms tab, L30 view only (D-116). Batter reads (v2.2, D-115): the "
         "x-gap flag is under-performance evidence — xISO-ISO ≥ +.050 or "
         "xwOBA-wOBA ≥ +.015, both sides of a gap off the same "
-        "expected-statistics board; barrel elite at barrel% ≥ 15 over "
+        "expected-statistics board — descriptive, not predictive, with a "
+        "reliability band off the season sample (D-125: thin under "
+        "200 PA, readable 200-399, established 400+) and a rider when a "
+        "suppressive home park (HR factor ≤ 90) can hold the gap open; "
+        "barrel elite at barrel% ≥ 15 over "
         "≥ 50 season BBE; the power profile at season EV ≥ 91 mph AND "
         "bat speed ≥ 73 mph; a top-5 slot is the 4-5 PA tier, leadoff "
         "adds the extra look; platoon advantage reads the batter's side "
@@ -1883,8 +1954,11 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "375+ ft balls that stayed in the park over the last 7 days. "
         "Contact-first is a veto: squared-up ≥ 35% of competitive swings "
         "with a sub-70 mph bat speed — a contact profile, not power. "
-        "Actual over expected (wOBA-xwOBA ≥ ~.040 with sprint ≥ 28 ft/s) "
-        "is context only — no automatic speed attribution. "
+        "Actual over expected (wOBA-xwOBA ≥ ~.040) is context only — "
+        "the advisory names the structural reasons present (sprint "
+        "≥ 28 ft/s, pull-air ≥ 40% of measurable air balls, home park "
+        "HR factor ≥ 110), because the expected stats are park-neutral "
+        "and direction-blind; no reason, no tag (D-125). "
         "Park & weather reads (v2.2, D-118): the park boost at a "
         "batter-side HR factor ≥ 110 (strong ≥ 115), the wrong-side park "
         "at ≤ 90 (strong ≤ 85); the heat boost at ≥ 85°F (strong ≥ 90°F) "
@@ -2190,7 +2264,9 @@ def _insert_after(texts: dict[str, str], after: str, additions: dict[str, str]) 
 # season view stars the power-profile EV and the two regression gaps, the
 # L30 mix view stars the two spray shares. One source of truth: the grid's
 # own rename and the hover-help config both read these maps.
-_GRID_STARS_SEASON = {"EV": "EV ★", "xISO-ISO": "xISO-ISO ★", "xwOBA-wOBA": "xwOBA-wOBA ★"}
+# D-125 (PO): the gap columns left the grid, so EV is the season view's
+# only starred metric — the regression reads live as Sluggers tags.
+_GRID_STARS_SEASON = {"EV": "EV ★"}
 _GRID_STARS_WINDOW = {"Pull Air %": "Pull Air % ★", "Oppo Air %": "Oppo Air % ★"}
 
 # D-124: every batter-grid column's one-line definition, shown on header
@@ -2217,9 +2293,6 @@ _MATCHUPS_HELP: dict[str, str] = {
     "AVG": "Batting average over the scope.",
     "SLG": "Slugging over the scope.",
     "ISO": "Isolated power — slugging minus batting average — over the scope.",
-    "xISO-ISO": (
-        "Expected minus actual ISO, season scope — ≥ +.050 flags under-performance (v2.2)."
-    ),
     "Robbed HR": (
         "375+ ft balls that stayed in the park, last 7 days — a raw count, never a rate."
     ),
@@ -2232,9 +2305,6 @@ _MATCHUPS_HELP: dict[str, str] = {
         "reads against the opposite-side factor (v2.2)."
     ),
     "xwOBA": "Expected wOBA from contact quality over the scope.",
-    "xwOBA-wOBA": (
-        "Expected minus actual wOBA, season scope — ≥ +.015 flags under-performance (v2.2)."
-    ),
     "Swing-Str %": "Whiffs per swing over the scope.",
     "Grade": "The provisional v1 grade — always the L30 computation, whichever view shows.",
     "Total": "The provisional v1 model's total score.",
@@ -2286,9 +2356,9 @@ def _grid_line_cells(
     """One batter's metric cells for the matchups grid (D-079). A None
     scope or a None rate renders as a named absence, never an invented
     zero; a scope missing at every reach states 'no data available'
-    (D-081). ``include_gaps`` is the season view's alone: the D-110
-    regression-gap columns appear only there, each with its PA sample, and
-    the season average launch angle rides after EV (D-124). Starred headers
+    (D-081). ``include_gaps`` is the season view's alone: the season
+    average launch angle rides after EV (D-124), and the D-110 regression
+    gaps left the grid for the Sluggers tags (D-125, PO). Starred headers
     mark the metrics carrying a ratified v2.2 firing line (D-124)."""
     if line is None:
         texts = {
@@ -2361,21 +2431,9 @@ def _grid_line_cells(
             styles["LA"] = _REASON_CSS
         else:
             texts = _insert_after(texts, "EV", {"LA": f"{float(launch_angle):.1f}°"})
-        gaps = line.gaps if line is not None else None
-        gap_cells = {
-            "xISO-ISO": gaps.xiso_minus_iso if gaps is not None else None,
-            "xwOBA-wOBA": gaps.xwoba_minus_woba if gaps is not None else None,
-        }
-        for anchor, name in (("ISO", "xISO-ISO"), ("xwOBA", "xwOBA-wOBA")):
-            value = gap_cells[name]
-            if value is None:
-                texts = _insert_after(texts, anchor, {name: "—"})
-                styles[name] = _REASON_CSS
-            else:
-                sample = gaps.plate_appearances if gaps is not None else 0
-                texts = _insert_after(
-                    texts, anchor, {name: f"{_signed_avg_text(value)} ({sample} PA)"}
-                )
+        # D-125 (PO): the D-110 regression gaps no longer grid — they read
+        # as Sluggers tags with reliability bands and a home-park rider.
+        # ISO and xwOBA themselves stay (PO: keep both).
     # D-124: a star on the header marks a metric that carries a ratified
     # v2.2 firing line (each line prints in the tab caption). LA stays
     # unstarred — an average carries no line.
@@ -2590,9 +2648,11 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
         "≥ 40% of measurable air balls with a boosting same-side park "
         "factor reads the pull-air match, Oppo Air % over 20% reads "
         "against the opposite-side factor (D-120); season view: EV at "
-        "≥ 91 mph with a bat speed ≥ 73 mph reads the power profile, and "
-        "xISO-ISO ≥ +.050 or xwOBA-wOBA ≥ +.015 flags under-performance "
-        "(D-115). The season view's LA is the batter's season average "
+        "≥ 91 mph with a bat speed ≥ 73 mph reads the power profile. "
+        "The regression gaps (xISO-ISO, xwOBA-wOBA) "
+        "no longer grid — they read as Sluggers tags with a reliability "
+        "band and a home-park rider (D-125, PO); ISO and xwOBA themselves "
+        "stay. The season view's LA is the batter's season average "
         "launch angle — context, deliberately unstarred: v2.2 reads the "
         "share of contact above the 18° HR launch floor, never the "
         "average, and the season boards publish no share."
@@ -2603,10 +2663,7 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
         key="matchups_season_view",
         help=(
             "D-079's toggle. Season Robbed HR, Pull Air % and Oppo Air % "
-            "have no published source, so those cells name the absence. This "
-            "view alone carries the D-110 regression gaps, xISO-ISO and "
-            "xwOBA-wOBA — expected minus actual, both sides off the same "
-            "expected-statistics board so the denominators match."
+            "have no published source, so those cells name the absence."
         ),
     )
     selected: BatterCard | None = None
@@ -2659,10 +2716,9 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
                     st.caption(
                         f"Scope: {scope_text}. "
                         + (
-                            "Columns read the batter's season sources; the "
-                            "xISO-ISO and xwOBA-wOBA gaps are season-scope "
-                            "reads off the expected-statistics board, shown "
-                            "on this view only (D-110)."
+                            "Columns read the batter's season sources "
+                            "(D-110's regression gaps moved to the "
+                            "Sluggers tags, D-125)."
                             if season_view
                             else (
                                 "Columns read the batter's last 30 days "
