@@ -528,11 +528,195 @@ def park_factor_table() -> dict[int, dict[Handedness, ParkFactor]]:
     return read_factors()
 
 
-@st.cache_data(ttl=DAY_EVENTS_TTL_SECONDS, show_spinner=False)
-def _day_events(day_iso: str, year: int) -> object:
-    """One day's pitches, cached: a past day never changes."""
+# ---------------------------------------------------------------------------
+# D-136 (PO): the morning refresh. The season sources update overnight, so
+# the board trusts one morning's answer for the whole day — "refresh every
+# morning whenever savant and the rest update their numbers from day
+# before." The anchor flips at noon UTC (5:00 AM in Arizona, where the PO
+# reads the board). A future date clicked mid-day still loads on request,
+# exactly as before: the anchor governs the season sources, never the
+# slate itself.
+
+SEASON_DATA_REFRESH_HOUR_UTC = 12
+
+# Anchored entries live past midnight so the anchor — not the wall clock —
+# decides when a season answer goes stale; a finalized day's event file
+# gets the same long read because it never changes once the morning update
+# has landed.
+SEASON_DATA_TTL_SECONDS = 26 * 3600
+FINAL_DAY_EVENTS_TTL_SECONDS = 26 * 3600
+
+
+def _season_data_anchor(now: datetime) -> str:
+    """The ISO date the season sources were last trusted (D-136): today
+    once the morning update has landed, yesterday before it."""
+    day = (
+        now.date() if now.hour >= SEASON_DATA_REFRESH_HOUR_UTC else (now - timedelta(days=1)).date()
+    )
+    return day.isoformat()
+
+
+class _SeasonFetchError(Exception):
+    """A season-source failure carried OUT of the cache: st.cache_data never
+    caches a raised call, so a morning transient refetches on the next
+    build instead of poisoning the whole anchored day (D-136)."""
+
+    def __init__(self, failure: FetchFailure) -> None:
+        super().__init__(failure.reason)
+        self.failure = failure
+
+
+def _season_source_call(kind: str, params: tuple[object, ...]) -> object:
+    """The one place the anchored kinds reach the real clients."""
+    api, savant = live_mlb_adapters()
+    if kind == "statcast_batters":
+        return savant.fetch_statcast_batters(year=int(params[0]), minimum=int(params[1]))
+    if kind == "batted_ball":
+        return savant.fetch_batted_ball(year=int(params[0]), minimum=int(params[1]))
+    if kind == "expected_stats":
+        return savant.fetch_expected_stats(year=int(params[0]))
+    if kind == "sprint_speed":
+        return savant.fetch_sprint_speed(year=int(params[0]))
+    if kind == "squared_up":
+        return savant.fetch_squared_up(year=int(params[0]), minimum=int(params[1]))
+    if kind == "pitcher_expected_stats":
+        return savant.fetch_pitcher_expected_stats(year=int(params[0]))
+    if kind == "statcast_pitchers":
+        return savant.fetch_statcast_pitchers(year=int(params[0]))
+    if kind == "pitch_arsenal":
+        return savant.fetch_pitch_arsenal(
+            kind=params[0],  # type: ignore[arg-type]  # the two call sites pass the literals
+            year=int(params[1]),
+        )
+    if kind == "bat_tracking":
+        return savant.fetch_bat_tracking(
+            year=int(params[0]),
+            minimum=int(params[1]),
+            start=str(params[2]),
+            end=str(params[3]),
+        )
+    if kind == "season_hitting":
+        return api.fetch_season_hitting(tuple(int(p) for p in params))
+    if kind == "season_pitching":
+        return api.fetch_season_pitching(tuple(int(p) for p in params))
+    raise ValueError(f"unknown season source kind: {kind}")
+
+
+@st.cache_data(ttl=SEASON_DATA_TTL_SECONDS, show_spinner=False)
+def _season_fetch(kind: str, anchor: str, params: tuple[object, ...]) -> object:
+    """One day-anchored season-source fetch (D-136): the anchor date is
+    part of the cache key, so the morning flip — and only the flip —
+    refetches. Failures raise out of the cache; the proxies translate
+    them back to the FetchFailure values the pipeline already handles."""
+    result = _season_source_call(kind, params)
+    if isinstance(result, FetchFailure):
+        raise _SeasonFetchError(result)
+    return result
+
+
+class _DayAnchoredSavant:
+    """The Savant client with its season-bulk boards day-anchored (D-136).
+
+    Only the fetches ``build_board`` makes against the overnight-updated
+    season sources are wrapped — one fetch per anchor day serves every
+    board build until the morning flip. Everything else (the per-day
+    event feed, the per-player dialog fetch) delegates untouched.
+    """
+
+    def __init__(self, inner: BaseballSavant, anchor: str) -> None:
+        self._inner = inner
+        self._anchor = anchor
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._inner, name)
+
+    def _season(self, kind: str, params: tuple[object, ...]) -> object:
+        try:
+            return _season_fetch(kind, self._anchor, params)
+        except _SeasonFetchError as exc:
+            return exc.failure
+
+    def fetch_statcast_batters(self, *, year: int, minimum: int = 0) -> object:
+        return self._season("statcast_batters", (year, minimum))
+
+    def fetch_batted_ball(self, *, year: int, minimum: int = 0) -> object:
+        return self._season("batted_ball", (year, minimum))
+
+    def fetch_expected_stats(self, *, year: int) -> object:
+        return self._season("expected_stats", (year,))
+
+    def fetch_sprint_speed(self, *, year: int) -> object:
+        return self._season("sprint_speed", (year,))
+
+    def fetch_squared_up(self, *, year: int, minimum: int = 0) -> object:
+        return self._season("squared_up", (year, minimum))
+
+    def fetch_pitcher_expected_stats(self, *, year: int) -> object:
+        return self._season("pitcher_expected_stats", (year,))
+
+    def fetch_statcast_pitchers(self, *, year: int) -> object:
+        return self._season("statcast_pitchers", (year,))
+
+    def fetch_pitch_arsenal(self, *, kind: str, year: int) -> object:
+        return self._season("pitch_arsenal", (kind, year))
+
+    def fetch_bat_tracking(
+        self, *, year: int, minimum: int = 0, start: str = "", end: str = ""
+    ) -> object:
+        return self._season("bat_tracking", (year, minimum, start, end))
+
+
+class _DayAnchoredMlbApi:
+    """The MLB client with its two season fetches day-anchored (D-136).
+
+    The slate, batting orders, and recent logs delegate LIVE — the morning
+    refresh is about the season sources, and the game logs must stay
+    intraday-fresh for the D-130 slate-day money tag.
+    """
+
+    def __init__(self, inner: MlbStatsApi, anchor: str) -> None:
+        self._inner = inner
+        self._anchor = anchor
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._inner, name)
+
+    def _season(self, kind: str, params: tuple[object, ...]) -> object:
+        try:
+            return _season_fetch(kind, self._anchor, params)
+        except _SeasonFetchError as exc:
+            return exc.failure
+
+    def fetch_season_hitting(self, player_ids: tuple[int, ...]) -> object:
+        return self._season("season_hitting", tuple(player_ids))
+
+    def fetch_season_pitching(self, player_ids: tuple[int, ...]) -> object:
+        return self._season("season_pitching", tuple(player_ids))
+
+
+@st.cache_data(ttl=FINAL_DAY_EVENTS_TTL_SECONDS, show_spinner=False)
+def _final_day_events(day_iso: str, year: int) -> object:
+    """A finalized day's pitches (D-136): once the morning update has
+    landed, that day never changes again."""
     _, savant = live_mlb_adapters()
     return savant.fetch_pitch_events(year=year, day=day_iso)
+
+
+@st.cache_data(ttl=DAY_EVENTS_TTL_SECONDS, show_spinner=False)
+def _recent_day_events(day_iso: str, year: int) -> object:
+    """A still-resolving day's pitches (D-136): today and yesterday until
+    the morning update lands — the hourly read, as before."""
+    _, savant = live_mlb_adapters()
+    return savant.fetch_pitch_events(year=year, day=day_iso)
+
+
+def _day_events(day_iso: str, year: int, anchor: str) -> object:
+    """Route by finality (D-136): days before the anchor are final and
+    cache long; the anchor day and later still resolve and keep the
+    hourly read."""
+    if day_iso < anchor:
+        return _final_day_events(day_iso, year)
+    return _recent_day_events(day_iso, year)
 
 
 @st.cache_data(ttl=DAY_EVENTS_TTL_SECONDS, show_spinner=False)
@@ -622,18 +806,23 @@ def _humidity_lookup(diagnostics: list[str]) -> object:
 def live_board(slate_iso: str, batter_window_days: int) -> SlateBoard | FetchFailure:
     """Assemble and grade the slate; cached so a rerun is not a refetch.
     D-128 (PO): the cache key is the slate AND the Matchups tab's batter
-    window — a new window is a fresh build, exactly like a new date."""
+    window — a new window is a fresh build, exactly like a new date.
+    D-136 (PO): the build reads the season sources through the day-anchored
+    proxies, so a rebuild every fifteen minutes costs the slate, the
+    orders, the logs, the recent event days and the weather — the season
+    boards come off the morning's anchor."""
     api, savant = live_mlb_adapters()
     slate_date = date.fromisoformat(slate_iso)
     year = slate_date.year
+    anchor = _season_data_anchor(datetime.now(UTC))
 
     def fetch_day(day: date) -> object:
-        return _day_events(day.isoformat(), year)
+        return _day_events(day.isoformat(), year, anchor)
 
     weather_diagnostics: list[str] = []
     board = build_board(
-        api=api,
-        savant=savant,
+        api=_DayAnchoredMlbApi(api, anchor),  # type: ignore[arg-type]
+        savant=_DayAnchoredSavant(savant, anchor),  # type: ignore[arg-type]
         slate_date=slate_date,
         as_of=datetime.now(UTC),
         config=production_config(),
@@ -4043,7 +4232,9 @@ def render_live_board() -> None:
     st.caption(
         f"Slate of {board.official_date}, assembled {board.as_of:%H:%M UTC}. "
         f"{len(board.games)} game(s). Board refreshes every "
-        f"{BOARD_TTL_SECONDS // 60} minutes; form windows hourly."
+        f"{BOARD_TTL_SECONDS // 60} minutes; form windows hourly; the season "
+        "sources refresh each morning (5 AM Arizona) — a future date loads "
+        "on request (D-136)."
     )
     sluggers, arms, matchups, conditions = st.tabs(["Sluggers", "Arms", "Matchups", "Conditions"])
     selected: BatterCard | None = None
@@ -4197,13 +4388,17 @@ def _backtest_board(slate_iso: str) -> SlateBoard | FetchFailure:
     api, savant = live_mlb_adapters()
     slate_date = date.fromisoformat(slate_iso)
     year = slate_date.year
+    # D-136: a past slate's season sources are the same overnight-updated
+    # boards the live build reads — the day-anchored proxies serve a
+    # backtest range without refetching each day of it.
+    anchor = _season_data_anchor(datetime.now(UTC))
 
     def fetch_day(day: date) -> object:
-        return _day_events(day.isoformat(), year)
+        return _day_events(day.isoformat(), year, anchor)
 
     return build_board(
-        api=api,
-        savant=savant,
+        api=_DayAnchoredMlbApi(api, anchor),  # type: ignore[arg-type]
+        savant=_DayAnchoredSavant(savant, anchor),  # type: ignore[arg-type]
         slate_date=slate_date,
         as_of=slate_as_of(slate_date),
         config=production_config(),

@@ -3399,3 +3399,57 @@ cells name their absence precisely as before.
 
 Full gate green on both Pythons, consistency check clean, all four
 showcase runners clean.
+
+## D-136 - Morning refresh: season sources day-anchor, a cron warms the board
+
+Source: PO directive — "Let's have it refresh every morning whenever
+savant and the rest update their numbers from day before. Unless you
+click on a future date then obviously load it at the time of request."
+
+**The anchor.** The season sources (the nine Savant season boards the
+build reads, plus the MLB season hitting/pitching lines) update
+overnight, so the board now trusts one morning's answer for the whole
+day: ``_season_data_anchor`` flips at noon UTC — 5:00 AM in Arizona,
+where the PO reads the board. Two composition-root proxies
+(``_DayAnchoredSavant``, ``_DayAnchoredMlbApi``) wrap exactly those
+season fetches in a cache keyed on the anchor date; the flip — and only
+the flip — refetches. Everything intraday stays live: the slate, the
+batting orders, the weather, and the game logs (the D-130 slate-day
+money tag depends on their freshness). A board rebuild every fifteen
+minutes now costs the slate, the orders, the logs, the resolving event
+days and the weather — the expensive season boards come off the
+morning's anchor. The backtest's regrade builds ride the same proxies.
+
+**Failures never poison a day.** A season fetch that fails raises out
+of the cache (``_SeasonFetchError``) — st.cache_data never caches a
+raised call — and the proxy hands the pipeline the ordinary
+FetchFailure it already renders as a named absence. The next build asks
+the source again; a morning transient costs minutes, not a day.
+
+**Day events split by finality.** A day before the anchor is final and
+caches for 26 hours (it never changes once the morning update lands);
+the anchor day and later keep the hourly read — yesterday becomes
+"final" exactly when the refresh says its numbers landed.
+
+**Future dates load on request — unchanged.** The anchor governs the
+season sources, never the slate: clicking a future date builds that
+slate on demand against the morning's season data, which is the only
+season data that exists.
+
+**The wake.** ``.github/workflows/morning-refresh.yml`` runs at 12:30
+UTC (after the flip, with slack for the sources' publishes): a headless
+browser opens the deployed app and waits for the board to render —
+three attempts, long waits, loud failure — so the new anchor day's
+season fetches and today's board build happen on the schedule, and the
+first real visitor of the morning lands on a warm board instead of a
+cold multi-minute build. The job needs no secrets (the app's own URL
+only) and is also manually dispatchable.
+
+The board caption now states the discipline: board every 15 minutes,
+form windows hourly, season sources each morning (5 AM Arizona), a
+future date on request. Tests prove the flip hour, the once-per-anchor
+caching, the failure-never-cached rule, the slate staying live, and the
+finality routing.
+
+Full gate green on both Pythons (3446 passed, 1 skipped), consistency
+check clean, all four showcase runners clean.

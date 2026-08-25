@@ -1,0 +1,38 @@
+name: Morning refresh
+
+# D-136 (PO): "refresh every morning whenever savant and the rest update
+# their numbers from day before." The app's season sources day-anchor at
+# 12:00 UTC (5:00 AM Arizona); this job wakes the deployed app right after
+# the flip and loads the board, so the season fetches for the new anchor
+# day and today's board build happen HERE — the first real visitor of the
+# morning lands on a warm board instead of a cold multi-minute build.
+# A future date still loads on request; nothing about that path changes.
+
+"on":
+  schedule:
+    # 12:30 UTC — after the noon-UTC anchor flip, with slack for the
+    # sources' overnight publishes to settle.
+    - cron: "30 12 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  wake:
+    name: Wake the app and build today's board
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install a headless browser
+        run: |
+          npm init -y >/dev/null
+          npm install playwright-core@latest >/dev/null 2>&1
+          npx playwright-core install --with-deps chromium
+
+      - name: Load the board and wait for it to render
+        run: node .github/workflows/morning-refresh.mjs
