@@ -3264,3 +3264,41 @@ consistency check clean, all four showcase runners clean.
 `savant_venue_id` in the park registry, so its park-factor reads are
 named absences; that is a data-registry gap predating this change and
 is queued for a future decision.
+
+## D-132 - Form Score shows the actual graded form subtotal
+
+Source: PO directive — "For form score place holder, this acc ore will
+be the score graded as part as the complete grade. In the future we
+will be making adjustments to the weight and scoring itself. For right
+now 2 is max score I believe. Go ahead and let the form score show the
+actual score for recent form."
+
+The D-124 placeholder dash is dead. Both Form Score surfaces — the
+shortlist's column and the detail popup's form table — now show the
+batter's actual form subtotal from his own grade: the
+``CategoryScore`` for the ``form`` category, points awarded out of the
+category's configured maximum ("1.5 / 2"). The maximum is read from
+the one production config (2 in v1, as the PO confirmed) rather than
+hardcoded, so a future weight change edits the config and nowhere
+else. No new computation exists: the scoring core already graded the
+form category; the screens simply stopped hiding it. Per the PO, the
+weights and scoring may change later — the column is a read of the
+current grade, not a new formula, and every hover/caption says the
+weights may change.
+
+Absence honesty is unchanged: a batter whose grade is not an evaluated
+one (the Matchups tab can open one) reads "not evaluated" in the
+muted-reason style — a named absence, never an invented number; the
+shortlist only carries A/S-graded batters, so its cell always has a
+real subtotal to show, with the dim dash left purely as the defensive
+fallback.
+
+The hovers and the shortlist caption now describe the live read and
+name the max (2 in v1); the popup's form-table help says the same.
+Tests: the placeholder assertion became the actual-subtotal assertion
+(present value with no reason fill; non-evaluated names the absence),
+and a shortlist seam test proves every row's cell ends " / 2" off the
+production config's maximum.
+
+Full gate green on both Pythons, consistency check clean, all four
+showcase runners clean.

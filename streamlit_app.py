@@ -63,8 +63,8 @@ import streamlit as st
 from greenmachine.common.clock import SystemClock
 from greenmachine.config.loader import load_config
 from greenmachine.config.schema import GreenMachineConfig
-from greenmachine.domain.enums import Grade, SampleStatus
-from greenmachine.domain.grade_result import EvaluatedGradeResult
+from greenmachine.domain.enums import Category, Grade, SampleStatus
+from greenmachine.domain.grade_result import EvaluatedGradeResult, GradeResult
 from greenmachine.fixtures import FixtureWeatherAdapter, grid_demo_snapshot, parks_demo_snapshot
 from greenmachine.grid import (
     DENSITY_ROWS,
@@ -1502,8 +1502,8 @@ font-size:.78rem;line-height:1.55;white-space:nowrap;cursor:help}
 
 # The shortlist's column ratios and headers (D-126, PO's order): identity
 # and the pitcher he faces, the bubble tags, the conditions, then the
-# parked reads — Park factor, the Form Score placeholder, Grade last —
-# and the More button that opens the detail popup.
+# reads — Park factor, Form Score (D-132: the actual graded subtotal),
+# Grade last — and the More button that opens the detail popup.
 _SLUGGER_SPECS = [1.7, 0.55, 1.6, 1.6, 3.6, 1.9, 0.85, 0.95, 0.7, 0.8]
 _SLUGGER_HEADERS = (
     "Batter",
@@ -1719,8 +1719,9 @@ _FORM_HELP: dict[str, str] = {
         "(D-116/D-129)."
     ),
     "Form Score": (
-        "A placeholder: v2.2 ratifies the form reads but no rollup "
-        "formula, so the dash holds until one is (D-124)."
+        "His actual form score from the grade: the recent-form reads "
+        "scored against the category max (2 in v1; weights may change — "
+        "D-132, PO)."
     ),
 }
 _FORM_PRECISION = {
@@ -1736,11 +1737,44 @@ _FORM_PRECISION = {
 _FORM_ABSENT_TEXT = "not enough data available"
 
 
-def _form_section_frames(form: FormSection) -> tuple[pd.DataFrame, pd.DataFrame]:
+def _form_max_points(config: GreenMachineConfig) -> Decimal:
+    """The form category's maximum from the one approved config (D-132)."""
+    return next(
+        allocation.max_points
+        for allocation in config.allocations.categories
+        if allocation.category is Category.FORM
+    )
+
+
+def _form_score_text(result: GradeResult, form_max: Decimal) -> str | None:
+    """The batter's graded form subtotal as 'points / max' (D-132, PO): the
+    placeholder dash is dead — the cell shows the actual form score the
+    grade already computed (max 2 in v1; weights and scoring may change in a
+    future version). None when there is no evaluated grade to read, so the
+    cell names the absence rather than inventing a number."""
+    if not isinstance(result, EvaluatedGradeResult):
+        return None
+    points = next(
+        (
+            score.points_awarded
+            for score in result.category_scores
+            if score.category is Category.FORM
+        ),
+        None,
+    )
+    if points is None:
+        return None
+    return f"{format(points.normalize(), 'f')} / {format(form_max.normalize(), 'f')}"
+
+
+def _form_section_frames(
+    form: FormSection, form_score_text: str | None = None
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """(texts, styles) for ``styled_text_frame`` — D-068's one-row section,
     re-columned by D-129 (PO): SwSp% and Hard% left the table, the Form
-    Score placeholder closes it (D-124's dash until v2.2 ratifies a rollup
-    formula), and every graded rate wears its researched band (the six-bucket
+    Score closes it with the actual graded form subtotal (D-132, PO — the
+    D-124 placeholder dash is dead), and every graded rate wears its
+    researched band (the six-bucket
     D-127 scale; the form edges are window-independent, derivations in
     DECISIONS D-129). A metric present and sufficient shows its value; one
     resolved on the L14 fallback names the window ("· L14"); one below its
@@ -1801,9 +1835,14 @@ def _form_section_frames(form: FormSection) -> tuple[pd.DataFrame, pd.DataFrame]
             styles["Pulled BRL"] = _BAND_G2_CSS
         elif count == 1:
             styles["Pulled BRL"] = _BAND_G1_CSS
-    # D-124/D-129: the Form Score placeholder closes the table — the dash
-    # holds until v2.2 ratifies a rollup formula.
-    texts["Form Score"] = "—"
+    # D-132 (PO): the actual graded form subtotal out of the category's max
+    # closes the table — the D-124 placeholder dash is dead. A card with no
+    # evaluated grade names the absence rather than inventing a number.
+    if form_score_text is None:
+        texts["Form Score"] = "not evaluated"
+        styles["Form Score"] = _REASON_CSS
+    else:
+        texts["Form Score"] = form_score_text
     return pd.DataFrame([texts]), pd.DataFrame([styles])
 
 
@@ -2242,7 +2281,10 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
             "retrieved for this board, so no window could be resolved."
         )
     else:
-        texts, styles = _form_section_frames(card.form)
+        texts, styles = _form_section_frames(
+            card.form,
+            _form_score_text(card.result, _form_max_points(production_config())),
+        )
         st.dataframe(
             styled_text_frame(texts, styles),
             hide_index=True,
@@ -2559,10 +2601,10 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "bat reads as the other hand for the park, because his damaging "
         'air contact goes to that field; a "wind … out to" rider joins '
         "when the forecast also resolves out to the matching field at "
-        "≥ 8 mph. **Form Score** is a placeholder column (D-124): v2.2 "
-        "ratifies the form reads but no rollup formula, so the dash holds "
-        "until one is — never an invented number. Hover any column header "
-        "for its one-line definition."
+        "≥ 8 mph. **Form Score** is his actual graded form subtotal out "
+        "of the category max — 2 in v1, and the weights may change in a "
+        "future version (D-132, PO; the D-124 placeholder dash is dead). "
+        "Hover any column header for its one-line definition."
     )
     rows = _slugger_rows(board)
     if not rows:
@@ -2583,6 +2625,7 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
                 unsafe_allow_html=True,
             )
     selected: BatterCard | None = None
+    form_max = _form_max_points(config)
     for row in rows:
         cells = st.columns(_SLUGGER_SPECS, vertical_alignment="center")
         cells[0].markdown(html.escape(row.card.full_name), unsafe_allow_html=True)
@@ -2606,9 +2649,15 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
             f'<span class="gm-dim">{factor}</span>' if row.factor_absent else factor,
             unsafe_allow_html=True,
         )
-        # D-124: the Form Score placeholder — the dash holds until v2.2
-        # ratifies a rollup formula, never an invented number.
-        cells[7].markdown('<span class="gm-dim">—</span>', unsafe_allow_html=True)
+        # D-132 (PO): the actual graded form subtotal out of its max — the
+        # placeholder dash is dead, never an invented number. (Every row is
+        # graded A/S, so an evaluated result is guaranteed; the dim dash is
+        # the defensive absence, not a state a reader should meet.)
+        form_text = _form_score_text(row.card.result, form_max)
+        cells[7].markdown(
+            form_text if form_text is not None else '<span class="gm-dim">—</span>',
+            unsafe_allow_html=True,
+        )
         cells[8].markdown(
             f'<span class="gm-grade">{row.card.result.grade.value}</span>',
             unsafe_allow_html=True,
@@ -3121,8 +3170,8 @@ _SLUGGERS_HELP: dict[str, str] = {
     ),
     "Grade": "The provisional v1 grade — only A and S make this shortlist (D-084).",
     "Form Score": (
-        "A placeholder: v2.2 ratifies the form reads but no rollup formula, "
-        "so the dash holds until one is (D-124)."
+        "His actual form score from the grade: the recent-form reads scored "
+        "against the category max — 2 in v1, weights may change (D-132, PO)."
     ),
     "Park factor": (
         "The batter-side home-run factor: 100 is neutral, ≥ 110 boosts, ≤ 90 suppresses (v2.2)."
