@@ -3302,3 +3302,32 @@ production config's maximum.
 
 Full gate green on both Pythons, consistency check clean, all four
 showcase runners clean.
+
+## D-133 - L7 air-ball floor drops from 8 to 5
+
+Source: PO directive — "Let's move the minimum for L7 from 8 to 5, we
+are still getting a lot of insufficient."
+
+``MIN_AIR_BALLS_FORM_L7`` is now 5 (was 8, D-114). The L7 spray reads —
+Pull Air %, Oppo Air %, and every tag built on them (the wind reads'
+dominant air field, the spray-alignment reads) — resolve sufficient at
+five measurable air balls in the week. The L14 floor is untouched at
+15: the split by window stands, only the short window lightens. Five
+is still an honest read — roughly three games' air contact — while 8
+was marking everyday regulars INSUFFICIENT through ordinary light
+weeks (5-9 air balls), which is the complaint the PO named.
+
+Present-with-marker semantics are unchanged (D-023/D-025): a 3- or
+4-ball week still shows its value with its exact sample and the amber
+INSUFFICIENT marker — the floor moved, the honesty did not.
+
+Every surface that prints the floor now says 5 at L7: the form-table
+caption, the shortlist caption, the wind-read comment and docstring,
+and the form module's own comment. The floor-boundary test moved with
+it (5 resolves sufficient, 4 stays under the advisory; the 12-ball
+L14 fallback still stays insufficient). That same form-table caption
+also still named the Form Score a D-124 placeholder — text D-132 made
+stale — and now names the actual graded subtotal instead.
+
+Full gate green on both Pythons, consistency check clean, all four
+showcase runners clean.

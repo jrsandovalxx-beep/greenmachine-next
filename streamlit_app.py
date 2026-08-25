@@ -992,7 +992,7 @@ _COLD_SUPPRESS_LINE = Decimal("45")
 # line and the caption says so). The severe COLD_SUPPRESS below 38°F needs
 # an in-wind along the axis of ≥ 5 mph. A roofed venue, an unmeasured axis,
 # an unparseable compass reading, or a spray record under the ratified
-# floors (8 air balls L7 / 15 L14+) is a silent tag, never an invented one.
+# floors (5 air balls L7 / 15 L14+; D-133) is a silent tag, never an invented one.
 _WIND_ASSIST_LINE = Decimal("8")
 _WIND_ASSIST_STRONG_LINE = Decimal("12")
 _WIND_KILL_IN_LINE = Decimal("10")
@@ -1052,7 +1052,8 @@ def _air_field(card: BatterCard) -> tuple[str, str] | None:
     """(field, name) of the batter's dominant air field, or None.
 
     The spray record is the form section's pull/oppo air shares — L7 falling
-    back to L14 under the ratified floors (8 air balls L7, 15 at L14+) —
+    back to L14 under the ratified floors (5 air balls L7 per D-133, 15 at
+    L14+) —
     because the season view publishes no spray read (D-116). Those shares
     are D-071's signed halves over measurable air balls (a dead-center ball
     claims no direction), so "dominant" is the larger of pull, oppo, and
@@ -2301,9 +2302,11 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
             "the same denominator. Pulled BRL counts barrels hit to the pull "
             "side — a raw count with its BBE sample, never a rate: a regular "
             "averages about one barrel a week, so 0 is neutral, not cold "
-            "(D-116). Its air-ball floor splits by window: 8 at L7, 15 at "
+            "(D-116). Its air-ball floor splits by window: 5 at L7 (D-133), "
+            "15 at "
             "L14 (v2.2). D-129 (PO): SwSp% and Hard% left this table, the Form "
-            "Score placeholder closes it (D-124), and **cell colors** grade "
+            "Score closes it with the actual graded subtotal (D-132), and "
+            "**cell colors** grade "
             "the rates on researched 2026 league scales — the edges: "
             + _FORM_SCALE_TEXT
             + ". Oppo Air % stays neutral (a fit read); Pulled BRL grades "
@@ -2584,7 +2587,7 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "roofed stadium is the indoor neutral value. "
         "Wind reads (D-119): the forecast resolved against the batter's "
         "dominant air field — pull or oppo, the larger half of his "
-        "measurable air balls in the form record (8 air balls L7 / 15 at "
+        "measurable air balls in the form record (5 air balls L7 / 15 at "
         "L14+) — on the measured park axis. The "
         "wind assist at ≥ 8 mph resolved out toward his field (strong "
         "≥ 12), the wind kill at ≥ 10 mph resolved in from it or ≥ 8 mph "

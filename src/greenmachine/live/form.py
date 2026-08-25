@@ -33,10 +33,13 @@ _HOME_PLATE_X = Decimal("125.42")
 _HOME_PLATE_DEPTH_Y = Decimal("198.27")
 
 MIN_BBE_FORM = 15
-# v2.2 (D-114): the air-ball floor splits by window — 8 over the L7 window
-# (a normal week is ~10 air balls; 15 was unreachable for everyday
-# regulars), 15 over L14 and longer. Supersedes part of D-068, append-only.
-MIN_AIR_BALLS_FORM_L7 = 8
+# v2.2 (D-114): the air-ball floor splits by window — L7 gets the lighter
+# short-window floor, 15 over L14 and longer. D-133 (PO) lowers the L7
+# floor to 5: 8 still read INSUFFICIENT on too many everyday regulars —
+# a light week is 5-9 air balls, and 5 keeps the read honest (roughly
+# three games' worth) without leaving the window dark. Supersedes part
+# of D-068/D-114, append-only.
+MIN_AIR_BALLS_FORM_L7 = 5
 MIN_AIR_BALLS_FORM = 15
 MIN_COMPETITIVE_SWINGS_FORM = 25
 
@@ -235,8 +238,8 @@ def _pick(
     """Per-metric window resolution: prefer L7, fall back to L14 on empty.
 
     ``floor`` binds the L14 window; ``floor_l7`` binds the L7 window where
-    v2.2 ratified a lighter short-window floor (air balls: 8 at L7, 15 at
-    L14+) — it defaults to ``floor`` for every other metric."""
+    v2.2 ratified a lighter short-window floor (air balls: 5 at L7 per
+    D-133, 15 at L14+) — it defaults to ``floor`` for every other metric."""
     short_floor = floor if floor_l7 is None else floor_l7
     if sample_l7 > 0 and value_l7 is not None:
         return FormValue(
