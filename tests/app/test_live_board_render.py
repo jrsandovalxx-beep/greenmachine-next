@@ -444,21 +444,21 @@ def test_shortlist_keeps_only_a_and_s_as_bubble_rows() -> None:
 
 
 def test_money_tag_marks_a_batter_who_homered_with_the_date() -> None:
-    """D-094/D-126 (PO): the neon tag carries the homer's game date —
-    "$8/23" — so a pre-game read never passes last night's homer off as
-    tonight's; a batter without one stays blank."""
+    """D-130 (PO): the neon tag carries the slate day's date — "$8/20" —
+    and marks only a homer ON the viewed slate day; a batter without one
+    stays blank, so a pre-game slate shows no tags at all."""
     import dataclasses
 
     import streamlit_app
 
     board = _graded_board()
     game = board.games[0]
-    tagged = dataclasses.replace(game.home_batters[0], homered_on_last_game_day="2026-08-23")
+    tagged = dataclasses.replace(game.home_batters[0], homered_on_slate_day="2026-08-20")
     game = dataclasses.replace(game, home_batters=(tagged, *game.home_batters[1:]))
     board = dataclasses.replace(board, games=(game, *board.games[1:]))
     rows = streamlit_app._slugger_rows(board)
-    assert rows[0].money_day == "8/23"
-    assert rows[0].money_iso == "2026-08-23"
+    assert rows[0].money_day == "8/20"
+    assert rows[0].money_iso == "2026-08-20"
     assert rows[1].money_day is None
 
 

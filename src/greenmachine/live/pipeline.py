@@ -364,13 +364,14 @@ class BatterCard:
     mix_line: BatterGridLine | None
     season_line: BatterGridLine | None
     mix_label: str
-    # D-094/D-100: the ISO date of the batter's most recent completed game
-    # day when he homered in it — the Sluggers tab's neon "$" tag, read
-    # from the near-real-time game log and shown WITH its date (D-126, PO:
-    # an undated "$" before first pitch read as "homered tonight" when the
-    # homer was last night's). None when the latest played day held no
-    # homer, and never a guess: no log, no tag.
-    homered_on_last_game_day: str | None
+    # D-130 (PO): the viewed slate day when he homered on it, else None —
+    # the Sluggers tab's neon "$" tag answers "who got the day of the
+    # slate I'm looking at", so a slate whose games have not begun tags
+    # nobody (supersedes D-094/D-126's last-game-day read, which tagged
+    # last night's homer on today's pre-game board). The game log carries
+    # only final games, so the tag lands within a board refresh of his
+    # game going final. Never a guess: no log, no tag.
+    homered_on_slate_day: str | None
     result: EvaluatedGradeResult | NotEvaluableGradeResult
     # SP-1 (D-109): season strikeout share (K/PA) for the high-K tags —
     # computed here, selected by the view.
@@ -700,19 +701,13 @@ class SlateBoard:
     diagnostics: tuple[str, ...]
 
 
-def _homered_on_last_game_day(entries: tuple[GameLogEntry, ...]) -> str | None:
-    """D-094/D-100: the ISO date of his most recent completed game day when
-    he homered in it, else None — the game log carries only final games, so
-    an in-progress one neither tags nor clears. A homer earlier with a
-    quieter game after it does not tag. No entries, no tag. D-126: the date
-    rides the tag so a pre-game read can tell last night's homer from
-    tonight's."""
-    played = [entry for entry in entries if entry.plate_appearances > 0]
-    if not played:
-        return None
-    last_day = max(entry.date for entry in played)
-    if any(entry.date == last_day and entry.home_runs > 0 for entry in played):
-        return last_day
+def _homered_on_slate_day(entries: tuple[GameLogEntry, ...], slate_day: str) -> str | None:
+    """D-130 (PO): the slate day when he homered on it, else None — the
+    neon "$" tags only the day of the slate being viewed, so a pre-game
+    board shows no tags at all. The game log carries only final games: an
+    in-progress slate day neither tags nor clears. No log, no tag."""
+    if any(entry.date == slate_day and entry.home_runs > 0 for entry in entries):
+        return slate_day
     return None
 
 
@@ -2094,8 +2089,8 @@ def build_board(
                             batted_ball=batted_ball.get(player_id),
                         ),
                         mix_label=mix_label,
-                        homered_on_last_game_day=_homered_on_last_game_day(
-                            game_logs.get(player_id, ())
+                        homered_on_slate_day=_homered_on_slate_day(
+                            game_logs.get(player_id, ()), slate.official_date
                         ),
                         result=result,
                         season_k_share=(

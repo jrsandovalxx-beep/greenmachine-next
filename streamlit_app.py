@@ -870,9 +870,10 @@ def _apply_bands(
             styles[column] = css
 
 
-# Neon-green money tag (D-094): a "$" beside a shortlist batter who homered
-# in his most recent game day on or before this slate. Text shadow gives the
-# neon glow; no background, so the cell keeps its theme fill.
+# Neon-green money tag (D-130, PO): a "$" beside a shortlist batter who
+# homered on the slate day being viewed — a pre-game board tags nobody.
+# Text shadow gives the neon glow; no background, so the cell keeps its
+# theme fill.
 
 
 class _FieldWind(NamedTuple):
@@ -1481,8 +1482,8 @@ def _card_tags(
 # D-126 (PO): the shortlist's tag bubbles — pill markup, injected once per
 # render. Green argues for the home run, red against it, grey a note; the
 # native hover (title) carries the full read with its samples, and the
-# neon money span dates the last-game-day homer so a pre-game read can
-# tell last night from tonight.
+# neon money span marks a homer on the viewed slate day (D-130, PO) —
+# before that day's games go final, no tag shows at all.
 _SLUGGERS_CSS = """
 <style>
 .gm-pill{display:inline-block;border-radius:999px;padding:0 9px;margin:1px 2px;
@@ -1587,7 +1588,7 @@ def _slugger_rows(board: SlateBoard) -> list[_SluggerRow]:
                 factor = _side_factor(game, card.batting_side)
                 weather, weather_absent = _conditions_text(game)
                 advisories, boosters, vetoes = _card_tag_lists(card, opposing, game=game)
-                money_iso = card.homered_on_last_game_day
+                money_iso = card.homered_on_slate_day
                 money_day = None
                 if money_iso is not None:
                     _, month, day = money_iso.split("-")
@@ -2496,9 +2497,9 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "factor; weather is the start-time reading with the wind in field "
         "words (out to right, in to home, left to right) resolved on the "
         "measured park axis. A neon **$ with its date** marks a batter who "
-        "homered in his most recent completed game day — the date says "
-        "which game, so a pre-game read never passes last night's homer off "
-        "as tonight's (D-094, D-126). **More** opens the batter's detail. "
+        "homered on this slate day — it appears once his game goes final, "
+        "so a slate whose games have not begun shows no tags at all "
+        "(D-130). **More** opens the batter's detail. "
         "Firing lines — K reads: the unlock needs K% ≥ 22% of season plate "
         "appearances AND an arsenal-wide whiff ≤ 20%, both; without that "
         "matchup K% ≥ 28% reads binary and ≥ 30% is the high-K caution. "
@@ -2585,9 +2586,8 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         cells[0].markdown(html.escape(row.card.full_name), unsafe_allow_html=True)
         if row.money_day is not None:
             cells[1].markdown(
-                f'<span class="gm-money" title="Homered in his most recent '
-                f"completed game day ({row.money_iso}) — the tag clears once "
-                f'his next game goes final (D-094/D-126)">${row.money_day}</span>',
+                f'<span class="gm-money" title="Homered on this slate day '
+                f'({row.money_iso}) (D-130)">${row.money_day}</span>',
                 unsafe_allow_html=True,
             )
         cells[2].markdown(html.escape(row.card.team), unsafe_allow_html=True)
@@ -3106,9 +3106,9 @@ _PITCHER_SCALE_TEXT = "; ".join(
 _SLUGGERS_HELP: dict[str, str] = {
     "Batter": "The batter's name.",
     "HR": (
-        "A neon $ with a date marks a batter who homered in his most "
-        "recent completed game day — the date says which game, and the tag "
-        "clears once his next game goes final (D-094/D-126)."
+        "A neon $ with a date marks a batter who homered on this slate "
+        "day — it appears once his game goes final, so a slate whose "
+        "games have not begun shows no tags at all (D-130)."
     ),
     "Team": "His club on this slate.",
     "Versus": "The expected opposing starter — TBD until probables post.",

@@ -3157,3 +3157,41 @@ geometry unchanged.
 
 Full gate green on both Pythons (3434 passed, 1 skipped), consistency
 check clean, all four showcase runners clean.
+
+## D-130 - Money tag marks only homers on the viewed slate day
+
+The PO caught Scharber wearing a neon "$" on the Sluggers tab before
+his game had even started. Cause: the tag followed D-094/D-126's
+last-game-day read — a batter who homered on his most recent completed
+game day kept the tag into the next slate, so last night's homer showed
+on today's pre-game board (the date rider was D-126's mitigation, but
+the tag itself still read as "homered tonight"). The PO's rule,
+verbatim: "I only want to see who got the day of the slate I'm looking
+at — if I'm looking at today's I shouldn't see any dollar signs since
+games haven't begun."
+
+**The fix.** The BatterCard field is now `homered_on_slate_day`: the
+board build asks the game log one question — did he homer ON the viewed
+slate day? — and carries the day's ISO date when yes, None otherwise
+(supersedes `_homered_on_last_game_day`). The game log carries only
+final games (D-100), so a pre-game slate tags nobody, and the tag lands
+within a board refresh of his game going final. No log, no failed log,
+no tag — absence semantics unchanged. The view reads the field
+directly; the tooltip, the shortlist caption, and the column help now
+say "homered on this slate day — appears once his game goes final, so a
+slate whose games have not begun shows no tags at all."
+
+**Why pipeline-side rather than a view filter:** a view-side comparison
+against the old field would still under-tag a past slate — a batter who
+homered on day D but played HR-less after it shows None under the
+last-game-day read, so viewing slate D later would miss him. Asking the
+log about the slate day directly answers the PO's question for every
+viewed slate, past or present, with the data the build already holds.
+
+The zero-PA guard left with the old function: the new question needs no
+"last played day" logic, and a home run implies plate appearances. The
+backtest's per-day "Homered" column is untouched — it already names the
+day being graded.
+
+Full gate green on both Pythons (3433 passed, 1 skipped), consistency
+check clean, all four showcase runners clean.
