@@ -3453,3 +3453,35 @@ finality routing.
 
 Full gate green on both Pythons (3446 passed, 1 skipped), consistency
 check clean, all four showcase runners clean.
+
+
+## D-137 - Force a clean Cloud rebuild after the deploy served a crash page
+
+2026-08-26. After D-136 merged, the deployed app at
+greenmachine.streamlit.app stopped serving the dashboard and instead
+rendered Streamlit's redacted crash page: ``ImportError`` at the
+``greenmachine.live.pipeline`` import in ``streamlit_app.py``. Every
+check against the exact deployed commit (staging ``1adeb63``) passes
+outside the host: the full gate on both Pythons was green at merge, a
+fresh interpreter imports ``streamlit_app`` cleanly, all thirteen
+imported names exist in the pipeline module, and no dependency changed
+in any of D-131..D-136 (every addition was stdlib or internal). The
+code at the tip is not the problem; the host's reused install
+environment is the only remaining suspect — Streamlit Community Cloud
+caches its package environment between deploys and rebuilds it only
+when ``requirements.txt`` changes, and none of the six merges changed
+it, so a corrupted or half-updated cache could ride forward across all
+of them.
+
+The remediation is operational, not a behavior change: a dated comment
+in ``requirements.txt`` (a cache-bust marker) changes the file, which
+forces the host to discard the cached environment and rebuild from
+scratch on this deploy. No runtime specification moved — same bounds,
+same packages. If the crash survives the clean rebuild, the next step
+is the app's manage-console logs (owner-only), which would name the
+specific unredacted failure; the expectation is that it does not
+survive, because nothing in the code can produce the observed failure.
+
+The verification discipline holds either way: the live dashboard is
+re-checked end to end after the rebuild before the morning-refresh
+work is called done.
