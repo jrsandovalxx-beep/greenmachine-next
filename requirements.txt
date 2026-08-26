@@ -9,6 +9,11 @@
 # Development-only tools (pytest, hypothesis, ruff, mypy, pre-commit) are
 # deliberately absent: they install via `pip install -e ".[dev,ui]"` for
 # local work, never on the host.
+# D-137 (2026-08-26): cache-bust marker. Streamlit Community Cloud reuses its
+# cached install environment while this file is unchanged; after D-136's
+# deploy the app served an ImportError crash page while the identical code
+# imported cleanly everywhere else, so this comment changes the file and
+# forces the host to rebuild its environment from scratch on the next deploy.
 -e .
 streamlit>=1.37,<2
 pandas>=2.1,<4
