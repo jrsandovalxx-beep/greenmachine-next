@@ -3551,11 +3551,15 @@ morning-refresh workflow could never fire: GitHub registers scheduled
 workflows only from the repository's default branch, and ``main`` here
 is the initial commit. The PO authorizes a scheduler-only presence on
 ``main``: ``.github/workflows/morning-refresh.yml`` and its driver
-``morning-refresh.mjs`` are committed there directly, byte-identical to
-the staging copies — no application code crosses, and the
-staging-first discipline for the app itself is untouched. Future edits
-to either file must land on both branches (the workflow's header
-comment now says so).
+``morning-refresh.mjs`` are now on ``main``, byte-identical to the
+staging copies — no application code crosses, and the staging-first
+discipline for the app itself is untouched. Future edits to either
+file must land on both branches (the workflow's header comment now
+says so). Because ``main`` is protected and its required checks can
+never run against main's tree (no project code lives there), the merge
+(PR #92) went in during a minutes-long, fully restored lift of the
+required-status-check rule; the final protection configuration was
+verified field-by-field identical to the original.
 
 **The flip moves to 5 AM Eastern — the earliest defensible hour.** The
 PO asked for the earliest Eastern startup, so the season-source anchor
