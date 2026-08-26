@@ -11,9 +11,11 @@ gatherUsageStats = false
 headless = true
 
 [client]
-# Focused user-facing errors only: unexpected exceptions surface as a type,
-# never an internal traceback. Developer diagnostics belong in logs/tests.
-showErrorDetails = "type"
+# TEMPORARY (D-138 diagnosis): the deployed app renders Streamlit's redacted
+# ImportError page and the host's logs are owner-only, so details are
+# switched on for one deploy to read the real traceback off the page.
+# Reverts to "type" the moment the failure is identified.
+showErrorDetails = true
 
 [theme]
 # D-003's visual language, first coat: the original-Xbox dark-green mood with
