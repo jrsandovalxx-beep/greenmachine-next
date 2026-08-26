@@ -96,21 +96,27 @@ from greenmachine.live.backtest import (
 from greenmachine.live.form import BARREL_CLASSIFICATION, FormSection, FormValue, is_pull_air
 from greenmachine.live.grading import QUALIFYING_USAGE_SHARE, ROOFED_VENUE_NEUTRAL_FAHRENHEIT
 from greenmachine.live.mlb_api import FetchFailure, GameLogEntry, MlbStatsApi
-from greenmachine.live.pipeline import (
-    MATCHUP_WINDOW_DAYS,
-    SEASON_IDS_PER_REQUEST,
-    BatterCard,
-    BatterGridLine,
-    GameCard,
-    PitcherCard,
-    PitcherRecentLine,
-    PitcherSeasonReads,
-    PitchLine,
-    SlateBoard,
-    StarterWorkload,
-    build_board,
-    season_breakup_lines,
-)
+
+# TEMPORARY DIAGNOSTIC (reverts with the fix): surface the real import
+# failure on the deployed crash page instead of the redacted ImportError.
+try:
+    from greenmachine.live.pipeline import (
+        MATCHUP_WINDOW_DAYS,
+        SEASON_IDS_PER_REQUEST,
+        BatterCard,
+        BatterGridLine,
+        GameCard,
+        PitcherCard,
+        PitcherRecentLine,
+        PitcherSeasonReads,
+        PitchLine,
+        SlateBoard,
+        StarterWorkload,
+        build_board,
+        season_breakup_lines,
+    )
+except ImportError as exc:
+    raise RuntimeError(f"GM-DIAG pipeline import failed: {exc!r}") from exc
 from greenmachine.live.savant import BaseballSavant, PitchEvent
 from greenmachine.live.transport import UrllibTransport as MlbTransport
 from greenmachine.live.wind import resolved_wind_mph, spray_field_bearing, wind_field_words
