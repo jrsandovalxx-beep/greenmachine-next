@@ -71,12 +71,12 @@ def _wire(monkeypatch: pytest.MonkeyPatch) -> tuple[_RecordingApi, _RecordingSav
     return api, savant
 
 
-def test_the_anchor_flips_at_noon_utc() -> None:
+def test_the_anchor_flips_at_nine_utc() -> None:
     """The PO's "refresh every morning": before the flip the board trusts
-    yesterday's season data; at and after it, today's. Noon UTC is 5 AM in
-    Arizona, where the board is read."""
-    before = datetime(2026, 8, 26, 11, 59, tzinfo=UTC)
-    at = datetime(2026, 8, 26, 12, 0, tzinfo=UTC)
+    yesterday's season data; at and after it, today's. 09:00 UTC is 5 AM
+    Eastern through the season (D-139)."""
+    before = datetime(2026, 8, 26, 8, 59, tzinfo=UTC)
+    at = datetime(2026, 8, 26, 9, 0, tzinfo=UTC)
     after_midnight = datetime(2026, 8, 26, 0, 30, tzinfo=UTC)
     assert streamlit_app._season_data_anchor(before) == "2026-08-25"
     assert streamlit_app._season_data_anchor(after_midnight) == "2026-08-25"

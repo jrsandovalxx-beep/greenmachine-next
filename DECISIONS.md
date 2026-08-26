@@ -3539,3 +3539,38 @@ to the app URL. Flagged for the PO alongside the redeploy steps.
 Full gate green on both Pythons (3446 passed, 1 skipped), consistency
 check clean, all four showcase runners clean. Live verification of
 D-132..D-136 runs the moment the app is back.
+
+
+## D-139 - Refresh anchor moves to 5 AM Eastern; the cron file lives on main
+
+2026-08-26 (PO: "Put file on main. Let's change the time to EST for
+earliest start up"). Two directives, one entry.
+
+**The wake file goes to the default branch.** D-138 found the
+morning-refresh workflow could never fire: GitHub registers scheduled
+workflows only from the repository's default branch, and ``main`` here
+is the initial commit. The PO authorizes a scheduler-only presence on
+``main``: ``.github/workflows/morning-refresh.yml`` and its driver
+``morning-refresh.mjs`` are committed there directly, byte-identical to
+the staging copies — no application code crosses, and the
+staging-first discipline for the app itself is untouched. Future edits
+to either file must land on both branches (the workflow's header
+comment now says so).
+
+**The flip moves to 5 AM Eastern — the earliest defensible hour.** The
+PO asked for the earliest Eastern startup, so the season-source anchor
+flips at 09:00 UTC (5:00 AM Eastern through the baseball season, EDT;
+4 AM in winter), moved from noon UTC (D-136). Earliest, not earlier:
+West Coast slates finish as late as 1–2 AM Eastern, and the sources'
+overnight publishes trail the final pitch — anchoring at, say,
+midnight would risk the morning fetch landing before yesterday's
+numbers post and caching day-old season data for the whole day (the
+anchor's 26-hour trust is exactly the wrong failure to invite). 5 AM
+Eastern keeps roughly three hours of slack after the latest possible
+finish; if a stale morning ever shows, the knob is
+``SEASON_DATA_REFRESH_HOUR_UTC`` and the cron half-hour after it. The
+cron moves to 09:30 UTC on both branches, the board caption reads
+"5 AM Eastern," and the anchor-flip test moves to the new hour.
+
+Full gate green on both Pythons (3446 passed, 1 skipped), consistency
+check clean, all four showcase runners clean.
