@@ -932,6 +932,11 @@ def _pitch_lines(events: Sequence[PitchEvent]) -> tuple[PitchLine, ...]:
     return tuple(lines)
 
 
+# D-138: this marker (2026-08-26) also serves as the content change that
+# forces Streamlit Community Cloud's cached clone to rewrite this file — the
+# host was serving a frozen copy of this module that predated the function
+# below while every other file tracked staging, which crashed the app at
+# import time until the fresh copy landed.
 def season_breakup_lines(
     pitcher_events: Sequence[PitchEvent],
     batter_events: Sequence[PitchEvent],
