@@ -3485,3 +3485,57 @@ survive, because nothing in the code can produce the observed failure.
 The verification discipline holds either way: the live dashboard is
 re-checked end to end after the rebuild before the morning-refresh
 work is called done.
+
+
+## D-138 - The deployed crash is a wedged host-side checkout, not the code
+
+2026-08-26. The crash page D-137 chased survived the forced environment
+rebuild, so the diagnosis went deeper. Two temporary diagnostics shipped
+to staging and were reverted within the incident:
+
+1. ``client.showErrorDetails`` flipped to full for one deploy — the
+   crash page stayed redacted, so the host redacts startup import
+   failures regardless of the app's setting.
+2. The ``greenmachine.live.pipeline`` import in ``streamlit_app.py``
+   was wrapped so the failure re-raises as a dynamically named
+   exception whose TYPE carries the original message — the crash page
+   always prints the type even when it redacts messages. That read the
+   answer straight off the deployed page: ``cannot import name
+   'season_breakup_lines' from 'greenmachine.live.pipeline'``.
+
+**Root cause.** The host's copy of
+``src/greenmachine/live/pipeline.py`` is frozen at a state that matches
+no committed version: it holds ``PitchLine`` (defined at line 203) and
+``build_board`` (line 1528) but lacks ``season_breakup_lines`` (line
+935) — all three added in the same D-129 commit, so no checkout of any
+commit can produce that mix. Every other file, ``streamlit_app.py``
+included, tracked staging perfectly across five diagnostic pushes. The
+host's cached clone is wedged (a skip-worktree-style index freeze or a
+partial checkout that nothing rewrites): a content change to the file
+itself (a marker comment, shipped and reverted) did not update the
+served copy, which rules out every push-side remedy. The app code at
+staging is healthy — the gate, a fresh-venv import, and CI on every
+push all pass — and no code change can fix a file the host refuses to
+write.
+
+**Remediation.** The fix is console-side and owner-only: reboot the
+app first (ten seconds); if the crash page persists, delete the app in
+the Streamlit console and redeploy it from the same repo and branch
+(``staging``, entrypoint ``streamlit_app.py``) — a fresh clone replaces
+the wedged one, and the custom subdomain is reclaimed by naming the new
+app the same. Repo state was left clean for exactly that redeploy:
+diagnostics reverted, error policy back to type-only, pipeline source
+byte-identical to D-136.
+
+**Adjacent finding.** The D-136 morning-refresh workflow can never
+fire on its cron: GitHub registers scheduled workflows only from the
+repository's default branch, and this repo's default branch is the
+initial-commit ``main``, which the staging-first discipline never
+touches. The workflow remains manually dispatchable; making the 5 AM
+wake real needs either a workflow-only file on ``main`` (the PO's call,
+since the no-push-to-main rule is theirs) or an external morning ping
+to the app URL. Flagged for the PO alongside the redeploy steps.
+
+Full gate green on both Pythons (3446 passed, 1 skipped), consistency
+check clean, all four showcase runners clean. Live verification of
+D-132..D-136 runs the moment the app is back.

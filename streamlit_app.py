@@ -96,30 +96,21 @@ from greenmachine.live.backtest import (
 from greenmachine.live.form import BARREL_CLASSIFICATION, FormSection, FormValue, is_pull_air
 from greenmachine.live.grading import QUALIFYING_USAGE_SHARE, ROOFED_VENUE_NEUTRAL_FAHRENHEIT
 from greenmachine.live.mlb_api import FetchFailure, GameLogEntry, MlbStatsApi
-
-# TEMPORARY DIAGNOSTIC (reverts with the fix): surface the real import
-# failure on the deployed crash page instead of the redacted ImportError.
-try:
-    from greenmachine.live.pipeline import (
-        MATCHUP_WINDOW_DAYS,
-        SEASON_IDS_PER_REQUEST,
-        BatterCard,
-        BatterGridLine,
-        GameCard,
-        PitcherCard,
-        PitcherRecentLine,
-        PitcherSeasonReads,
-        PitchLine,
-        SlateBoard,
-        StarterWorkload,
-        build_board,
-        season_breakup_lines,
-    )
-except ImportError as exc:
-    _detail = "".join(
-        c if c.isalnum() or c in "_.-" else "_" for c in f"{type(exc).__name__}:{exc}"
-    )[:150]
-    raise type(f"GMdiag_{_detail}", (Exception,), {})(str(exc)) from exc
+from greenmachine.live.pipeline import (
+    MATCHUP_WINDOW_DAYS,
+    SEASON_IDS_PER_REQUEST,
+    BatterCard,
+    BatterGridLine,
+    GameCard,
+    PitcherCard,
+    PitcherRecentLine,
+    PitcherSeasonReads,
+    PitchLine,
+    SlateBoard,
+    StarterWorkload,
+    build_board,
+    season_breakup_lines,
+)
 from greenmachine.live.savant import BaseballSavant, PitchEvent
 from greenmachine.live.transport import UrllibTransport as MlbTransport
 from greenmachine.live.wind import resolved_wind_mph, spray_field_bearing, wind_field_words
