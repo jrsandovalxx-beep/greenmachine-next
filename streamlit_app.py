@@ -532,12 +532,14 @@ def park_factor_table() -> dict[int, dict[Handedness, ParkFactor]]:
 # D-136 (PO): the morning refresh. The season sources update overnight, so
 # the board trusts one morning's answer for the whole day — "refresh every
 # morning whenever savant and the rest update their numbers from day
-# before." The anchor flips at noon UTC (5:00 AM in Arizona, where the PO
-# reads the board). A future date clicked mid-day still loads on request,
-# exactly as before: the anchor governs the season sources, never the
-# slate itself.
+# before." Per D-139 the anchor flips at 09:00 UTC — 5:00 AM Eastern
+# through the baseball season (EDT; 4 AM in winter) — the earliest hour
+# that still clears the West Coast finishes and the sources' overnight
+# publishes; earlier risks caching day-old numbers for the whole day. A
+# future date clicked mid-day still loads on request, exactly as before:
+# the anchor governs the season sources, never the slate itself.
 
-SEASON_DATA_REFRESH_HOUR_UTC = 12
+SEASON_DATA_REFRESH_HOUR_UTC = 9
 
 # Anchored entries live past midnight so the anchor — not the wall clock —
 # decides when a season answer goes stale; a finalized day's event file
@@ -4233,8 +4235,8 @@ def render_live_board() -> None:
         f"Slate of {board.official_date}, assembled {board.as_of:%H:%M UTC}. "
         f"{len(board.games)} game(s). Board refreshes every "
         f"{BOARD_TTL_SECONDS // 60} minutes; form windows hourly; the season "
-        "sources refresh each morning (5 AM Arizona) — a future date loads "
-        "on request (D-136)."
+        "sources refresh each morning (5 AM Eastern) — a future date loads "
+        "on request (D-136/D-139)."
     )
     sluggers, arms, matchups, conditions = st.tabs(["Sluggers", "Arms", "Matchups", "Conditions"])
     selected: BatterCard | None = None
