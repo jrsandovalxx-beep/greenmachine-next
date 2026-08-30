@@ -1060,15 +1060,15 @@ def _sp_line() -> PitcherRecentLine:
     )
 
 
-def test_sp_recent_row_names_the_two_month_absences() -> None:
+def test_sp_recent_row_names_the_three_month_absences() -> None:
     """D-111: the event scope publishes no innings and no per-event expected
     SLG, so HR/9 and xISO name their absences and the HR count shows.
-    D-128 (PO): the scope is the last two months now, and wOBA left the
+    D-142 (PO): the scope is the last three months now, and wOBA left the
     pitcher tables."""
     import streamlit_app
 
-    row, styles = streamlit_app._sp_recent_row("vs L (2M)", _sp_line(), vulnerability_floor=True)
-    assert row["Scope"] == "vs L (2M) — 41 BF · 33 BBE · INSUFFICIENT"
+    row, styles = streamlit_app._sp_recent_row("vs L (3M)", _sp_line(), vulnerability_floor=True)
+    assert row["Scope"] == "vs L (3M) — 41 BF · 33 BBE · INSUFFICIENT"
     assert row["HR"] == "3"
     assert row["HR/9"] == "—"
     assert row["xISO"] == "—"
@@ -1081,8 +1081,8 @@ def test_sp_recent_row_names_the_two_month_absences() -> None:
     assert styles["xwOBA"] == streamlit_app._INSUFFICIENT_CSS
     assert row["xwOBA"] == ".310"
     # An empty scope names itself.
-    row, styles = streamlit_app._sp_recent_row("vs R (2M)", None)
-    assert row["Scope"] == "vs R (2M) — no recent record"
+    row, styles = streamlit_app._sp_recent_row("vs R (3M)", None)
+    assert row["Scope"] == "vs R (3M) — no recent record"
     assert styles["xwOBA"] == streamlit_app._REASON_CSS
 
 
@@ -1092,7 +1092,7 @@ def test_sp_recent_row_at_the_floor_carries_no_advisory() -> None:
     import streamlit_app
 
     line = dataclasses.replace(_sp_line(), plate_appearances=50, batted_balls=30)
-    row, styles = streamlit_app._sp_recent_row("vs R (2M)", line, vulnerability_floor=True)
+    row, styles = streamlit_app._sp_recent_row("vs R (3M)", line, vulnerability_floor=True)
     assert "INSUFFICIENT" not in row["Scope"]
     assert streamlit_app._INSUFFICIENT_CSS not in styles.values()
     # 50% hard-hit against is past the elite edge on the vulnerability scale.
@@ -1155,7 +1155,7 @@ def test_arms_metrics_mirror_the_card_rules_on_both_scopes() -> None:
     """D-111: the Arms tab carries the card metrics plus the air mirror,
     with the samples as their own columns; the season scope names the air
     share absent (the board's fbld/gb columns are exit velocities, not a
-    split), and the two-month scope names HR/9 and xISO absent exactly like
+    split), and the three-month scope names HR/9 and xISO absent exactly like
     the cards. D-128 (PO): wOBA and ISO left the pitcher tables — xwOBA
     and xISO stay — and Hard-Hit % joined both scopes."""
     import streamlit_app
@@ -1308,7 +1308,7 @@ def test_band_registries_cover_every_graded_table() -> None:
         "PA",
         "BBE",
         "HR",
-        "HR/9",  # a season read — the two-month cell names its absence
+        "HR/9",  # a season read — the three-month cell names its absence
         "xISO",  # same
     }
     assert recent_columns <= set(streamlit_app._PITCHER_BANDS)
@@ -1926,15 +1926,15 @@ def test_card_tags_carry_the_v22_pitcher_side_reads() -> None:
             throws=None,
         )
 
-    # GB profile off the two-month share, plain and extreme — D-116 (PO):
+    # GB profile off the three-month share, plain and extreme — D-116 (PO):
     # the tag fires on the share but never quotes the GB% number. D-128
-    # (PO): the record behind it is the last two months now.
+    # (PO): the record behind it is the last three months now.
     _, _, vetoes = streamlit_app._card_tags(card, arm("1.10", "10.2", "0.52"))
-    assert "air allowed: low — ground-ball profile (2-month record)" in vetoes
+    assert "air allowed: low — ground-ball profile (3-month record)" in vetoes
     assert "52.0%" not in vetoes
     _, _, vetoes = streamlit_app._card_tags(card, arm("1.10", "10.2", "0.56"))
-    assert "extreme ground-ball profile (2-month record)" in vetoes
-    # The season LA line carries it when the two-month share is unpublished.
+    assert "extreme ground-ball profile (3-month record)" in vetoes
+    # The season LA line carries it when the three-month share is unpublished.
     _, _, vetoes = streamlit_app._card_tags(card, arm("1.10", "7.8", None))
     assert "air allowed: low — ground-ball profile (avg LA 7.8°, season)" in vetoes
     # Suppressor, gas, and fly-vulnerable.

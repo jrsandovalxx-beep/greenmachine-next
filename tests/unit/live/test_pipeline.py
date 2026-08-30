@@ -1061,7 +1061,7 @@ def test_mix_line_counts_only_the_qualifying_mix_pitches() -> None:
     starter's qualifying (>=14% usage) mix pitches — a fringe pitch the
     starter barely throws never enters a denominator. With no probable
     named there is no scope and no line (D-081). D-128 (PO): with no
-    arsenal board at either year the mix falls back to the two-month
+    arsenal board at either year the mix falls back to the three-month
     event record, labelled."""
     pitcher_events = tuple(
         _window_event(batter_id=555, pitcher_id=PITCHER_ID, pitch_type="FF") for _ in range(20)
@@ -1074,7 +1074,7 @@ def test_mix_line_counts_only_the_qualifying_mix_pitches() -> None:
     board = _build(_FakeApi(), _FakeSavant(), events=pitcher_events + batter_events)
     assert not isinstance(board, FetchFailure)
     away = board.games[0].away_batters[0]
-    assert away.mix_label == "last 60 days"
+    assert away.mix_label == "last 90 days"
     line = away.mix_line
     assert line is not None
     assert line.pitches == 4
@@ -1085,7 +1085,7 @@ def test_mix_line_counts_only_the_qualifying_mix_pitches() -> None:
 
 def test_the_mix_reads_the_season_board_first() -> None:
     """D-128 (PO): the mix scope is the starter's whole season off the
-    arsenal board, labelled "season" — the two-month record and last
+    arsenal board, labelled "season" — the three-month record and last
     season's board are fallbacks now. The board's usage decides the
     qualifying mix even when the event record disagrees."""
     # The record is all sliders; the board says the curveball is a real
@@ -1112,9 +1112,9 @@ def test_the_mix_reads_the_season_board_first() -> None:
     assert line.at_bats == 4  # the board's curveball qualifies the scope
 
 
-def test_the_mix_falls_back_to_the_two_month_record_without_a_board() -> None:
+def test_the_mix_falls_back_to_the_three_month_record_without_a_board() -> None:
     """D-128 (PO): with no arsenal board at either year the mix reads the
-    two-month event record, labelled. D-081's separate L45 reach is
+    three-month event record, labelled. D-081's separate L45 reach is
     subsumed — the fetch spans sixty-one days on every build, so a pitch
     thrown forty-five days back still makes the mix and no second fetch
     ever fires."""
@@ -1143,8 +1143,8 @@ def test_the_mix_falls_back_to_the_two_month_record_without_a_board() -> None:
     )
     assert not isinstance(board, FetchFailure)
     away = board.games[0].away_batters[0]
-    assert away.mix_label == "last 60 days"
-    assert min(fetched) == date(2026, 6, 21)  # one 61-day record, no reach
+    assert away.mix_label == "last 90 days"
+    assert min(fetched) == date(2026, 5, 22)  # one 91-day record, no reach
     line = away.mix_line
     assert line is not None
     assert line.at_bats == 1
@@ -1158,7 +1158,7 @@ def test_the_batter_window_parameter_rewindows_the_grid_and_reaches() -> None:
     """D-128 (PO): the Matchups tab's timeframe selector passes its own
     batter window — the grid scope and the precomputed dialog reaches
     follow it, the robbed count keeps its own L7 basis on both lines, and
-    the fetch still spans the two-month pitcher record."""
+    the fetch still spans the three-month pitcher record."""
     batter_events = (
         _window_event(
             pitch_type="FF", event="single", pitcher_id=999, game_date="2026-08-15"
@@ -1209,7 +1209,7 @@ def test_the_batter_window_parameter_rewindows_the_grid_and_reaches() -> None:
     season_line = away.season_line
     assert season_line is not None
     assert season_line.robbed_hr_count == 1  # D-128 (PO): shown on both views
-    assert min(fetched) == date(2026, 6, 21)  # the pitcher reach still governs
+    assert min(fetched) == date(2026, 5, 22)  # the pitcher reach still governs
 
 
 def test_the_batter_window_cannot_undercut_the_robbed_basis() -> None:
@@ -1741,7 +1741,7 @@ def test_innings_notation_is_outs_not_tenths() -> None:
 
 
 def test_the_pitcher_recent_lines_read_the_kept_events_by_side() -> None:
-    """D-111, rewindowed by D-128 (PO) to the last two months: the default
+    """D-111, rewindowed to three months by D-142 (PO): the default
     slate's kept events all belong to the starter and every one came
     against a left-handed batter, so his overall and vs-L lines carry the
     record while vs-R names its empty scope."""

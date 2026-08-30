@@ -1317,7 +1317,7 @@ def _pitcher_profile_tags(opposing: PitcherCard) -> tuple[list[str], list[str]]:
     """(boosters, vetoes) — the pitcher-side reads (D-114): HR/9 is a
     season-scope read (the event record publishes no innings); the
     ground-ball share reads the event record because the season boards
-    publish no GB% — the last two months since D-128 (PO) rewindowed the
+    publish no GB% — the last three months since D-142 (PO) rewindowed the
     starter's recent reads; the firing conditions are unchanged. D-116
     (PO): the GB% number itself lives on the Arms tab only — these tags
     keep their firing conditions but never quote the share. Shared by the
@@ -1332,7 +1332,7 @@ def _pitcher_profile_tags(opposing: PitcherCard) -> tuple[list[str], list[str]]:
     gb_share = recent.ground_ball_share if recent is not None else None
     if gb_share is not None and gb_share >= _GB_PROFILE_SHARE_LINE:
         extreme = "extreme " if gb_share >= _GB_PROFILE_EXTREME_LINE else ""
-        vetoes.append(f"air allowed: low — {extreme}ground-ball profile (2-month record)")
+        vetoes.append(f"air allowed: low — {extreme}ground-ball profile (3-month record)")
     elif season_la is not None and season_la <= _GB_PROFILE_LA_LINE:
         vetoes.append(
             f"air allowed: low — ground-ball profile (avg LA {float(season_la):.1f}°, season)"
@@ -1370,7 +1370,7 @@ def _pitcher_tag_lists(pitcher: PitcherCard) -> tuple[list[str], list[str], list
     if workload is not None and workload.thin_sample:
         count = workload.starts_in_window
         advisories.append(
-            f"thin sample: {count} start" + ("" if count == 1 else "s") + " in the 2-month record"
+            f"thin sample: {count} start" + ("" if count == 1 else "s") + " in the 3-month record"
         )
     return advisories, boosters, vetoes
 
@@ -2450,10 +2450,10 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
                 value=False,
                 key=f"sp_recent_popup_{card.player_id}",
                 help=(
-                    "D-111, rewindowed by D-128 (PO). The overall row flips "
-                    "from the season boards to the starter's last two "
-                    "months of kept pitch events. The side rows always "
-                    "read that two-month window."
+                    "D-111, rewindowed to three months by D-142 (PO). The "
+                    "overall row flips from the season boards to the "
+                    "starter's last three months of kept pitch events. The "
+                    "side rows always read that three-month window."
                 ),
             )
             opposing_team = game.away_team if card.team == game.home_team else game.home_team
@@ -2690,8 +2690,8 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
             st.caption(
                 f"Stuff drift — primary pitch {drift.pitch_name}: whiff "
                 f"{float(drift.whiff_season) * 100:.0f}% season → "
-                f"{whiff_window_text} 2M ({drift.pitches_in_window} pitches "
-                f"2M), usage {float(drift.usage_season) * 100:.0f}% → "
+                f"{whiff_window_text} 3M ({drift.pitches_in_window} pitches "
+                f"3M), usage {float(drift.usage_season) * 100:.0f}% → "
                 f"{usage_window_text}."
             )
     if pitcher is not None:
@@ -2750,9 +2750,9 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "appearances AND an arsenal-wide whiff ≤ 20%, both; without that "
         "matchup K% ≥ 28% reads binary and ≥ 30% is the high-K caution. "
         "Pitcher reads: low-whiff arm at whiff ≤ 20%; gas at season HR/9 "
-        "≥ 1.50 with a two-month ground-ball share under 40% of classified "
+        "≥ 1.50 with a three-month ground-ball share under 40% of classified "
         "BBE; fly-ball vulnerable at a season avg launch angle allowed "
-        "≥ 18°; the ground-ball profile at a two-month ground-ball share "
+        "≥ 18°; the ground-ball profile at a three-month ground-ball share "
         "≥ 50% (extreme ≥ 55%) or a season avg LA allowed ≤ 8°; the "
         "suppressor at season HR/9 ≤ 0.80. The season boards publish no "
         "ground-ball share, so that read is recent-only — the last two "
@@ -2971,7 +2971,8 @@ def _arms_recent_metrics(
     line: PitcherRecentLine | None,
 ) -> tuple[dict[str, str], dict[str, str]]:
     """The recent-form starter-metric columns on the Arms tab (D-111) —
-    the last two months of kept events since D-128 (PO), L30 before. The
+    the last three months of kept events (D-142, PO; two months under D-128,
+    L30 before). The
     scope publishes no innings and no per-event expected SLG, so HR/9 and
     xISO name their absences and the HR count shows instead; amber contact
     reads below the ratified 15-BBE floor (D-068)."""
@@ -3029,8 +3030,9 @@ def _render_arms(board: SlateBoard) -> None:
         value=False,
         key="arms_recent_view",
         help=(
-            "D-111, rewindowed by D-128 (PO): the recent-form read is the "
-            "last two months. Season metrics read the expected-statistics "
+            "D-111, rewindowed to three months by D-142 (PO): the "
+            "recent-form read is the last three months. Season metrics read "
+            "the expected-statistics "
             "and Statcast boards against plus the statsapi season line. The "
             "event scope publishes no innings (HR/9 stays a season read, "
             "the HR count shows) and no per-event expected SLG (xISO stays "
@@ -3300,13 +3302,13 @@ _ARMS_HELP: dict[str, str] = {
     "BBE": "Batted-ball events against over the scope — the contact reads' sample (D-014).",
     "Air %": _pitcher_help(
         "Fly-ball-plus-line-drive share of the recent record's batted balls "
-        "against — a two-month read (D-128); the season board publishes no "
+        "against — a three-month read (D-142); the season board publishes no "
         "air split.",
         "Air %",
     ),
     "GB %": _pitcher_help(
         "Ground-ball share of the recent record's classified batted balls "
-        "against — a two-month read (D-116/D-128).",
+        "against — a three-month read (D-116/D-128, rewindowed D-142).",
         "GB %",
     ),
     "Arsenal": "The pitches he actually throws, at or above the qualifying usage share.",
@@ -3589,8 +3591,8 @@ def _sp_recent_row(
     vulnerability_floor: bool = False,
 ) -> tuple[dict[str, str], dict[str, str]]:
     """One recent-form row of a starter header card (D-111) — the toggle's
-    overall row, or an always-recent side row — over the last two months
-    of kept events (D-128, PO; L30 before). The event scope publishes no
+    overall row, or an always-recent side row — over the last three months
+    of kept events (D-142, PO; two months under D-128, L30 before). The event scope publishes no
     innings and no per-event expected SLG, so HR/9 and xISO name their
     absences and the HR count shows instead. ``vulnerability_floor`` is
     the side rows' ratified 50-BF / 30-BBE line (D-134); the overall row
@@ -3642,7 +3644,7 @@ def _sp_recent_row(
 def _sp_card(card: PitcherCard | None, team: str, *, recent: bool, key_suffix: str = "") -> None:
     """One starter header card (D-111): name, team, and hand over the scope
     rows. An unannounced starter names the absence. D-128 (PO): the
-    recent-form read is the last two months (L30 before). D-129 (PO): the
+    recent-form read is the last three months (D-142, PO; L30 before D-128). D-129 (PO): the
     batter detail popup reuses this card beside the stadium — ``key_suffix``
     keeps its widget key distinct from the tab copy behind the dialog."""
     if card is None:
@@ -3652,12 +3654,12 @@ def _sp_card(card: PitcherCard | None, team: str, *, recent: bool, key_suffix: s
     throws = f" · throws {card.throws}" if card.throws else ""
     st.markdown(f"**{card.full_name}** — {team}{throws}")
     overall = (
-        _sp_recent_row("2M", card.recent_overall) if recent else _sp_season_row(card.season_reads)
+        _sp_recent_row("3M", card.recent_overall) if recent else _sp_season_row(card.season_reads)
     )
     rows = [
         overall,
-        _sp_recent_row("vs L (2M)", card.recent_vs_left, vulnerability_floor=True),
-        _sp_recent_row("vs R (2M)", card.recent_vs_right, vulnerability_floor=True),
+        _sp_recent_row("vs L (3M)", card.recent_vs_left, vulnerability_floor=True),
+        _sp_recent_row("vs R (3M)", card.recent_vs_right, vulnerability_floor=True),
     ]
     sp_frame = pd.DataFrame([row for row, _ in rows])
     st.dataframe(
@@ -3675,7 +3677,7 @@ def _sp_card(card: PitcherCard | None, team: str, *, recent: bool, key_suffix: s
     if workload is not None and workload.thin_sample:
         count = workload.starts_in_window
         st.caption(
-            f"2-month record: {count} start" + ("" if count == 1 else "s") + " — a thin "
+            f"3-month record: {count} start" + ("" if count == 1 else "s") + " — a thin "
             "sample: check who he faced."
         )
 
@@ -3835,10 +3837,10 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
                 value=False,
                 key=f"sp_recent_{game.game_pk}",
                 help=(
-                    "D-111, rewindowed by D-128 (PO). The overall row flips "
-                    "from the season boards to the starter's last two "
-                    "months of kept pitch events. The side rows always "
-                    "read that two-month window."
+                    "D-111, rewindowed to three months by D-142 (PO). The "
+                    "overall row flips from the season boards to the "
+                    "starter's last three months of kept pitch events. The "
+                    "side rows always read that three-month window."
                 ),
             )
             away_column, field_column, home_column = st.columns([5, 4, 5])
@@ -3851,9 +3853,9 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
             st.caption(
                 "Starter cards (D-111): the overall row reads the season "
                 "boards (expected-statistics and Statcast boards against, "
-                "statsapi season line) or, on the toggle, the last two "
-                "months of kept events (D-128, PO); the side rows always "
-                "read that two-month window. Green marks only the digest's "
+                "statsapi season line) or, on the toggle, the last three "
+                "months of kept events (D-142, PO); the side rows always "
+                "read that three-month window. Green marks only the digest's "
                 "pitcher-vulnerability read — HR/9 ≥ 1.5 (v2.2). The "
                 "event scope publishes no innings and no per-event "
                 "expected SLG, so HR/9 and xISO stay season reads and the "

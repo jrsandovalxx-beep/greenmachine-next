@@ -92,21 +92,24 @@ RECENT_EVENT_GAMES_CAP = 7
 MATCHUP_WINDOW_DAYS = 30
 # D-128 (PO): the starter's recent-form lines, his per-side usage and
 # pitch sets, and his stuff drift all read this many days — the pitcher
-# tables' recent-form toggle is the last two months. Season-long PER-SIDE
+# tables' recent-form toggle is the last three months. Season-long PER-SIDE
 # mix splits have no published board (the arsenal CSV ignores its hand
 # parameter — verified live 2026-08-25), so the event record is the only
 # per-side basis and it reaches this far on every build.
-PITCHER_RECENT_WINDOW_DAYS = 60
+# D-128 (PO) set two months; D-142 (PO) rewindows to three.
+PITCHER_RECENT_WINDOW_DAYS = 90
 # The arsenal breakup's batter half is precomputed at each of these reaches
 # (D-106): weeks one through four plus the full month the pitch record
 # carries — the dialog's window control selects, never derives. A batter
 # window under thirty days caps the list at the window (D-128).
 MATCHUP_LINE_WINDOWS_DAYS = (7, 14, 21, 28, 30)
 GAME_LOG_LOOKBACK_DAYS = 5
-# SP-3 (D-123): the pitching game log's reach. It mirrors the pitch
-# window's full month so the start count behind the thin-sample caption
-# is the same record the hand splits read.
-PITCHING_LOG_LOOKBACK_DAYS = 31
+# SP-3 (D-123): the pitching game log's reach. It mirrors the pitcher
+# recent window so the start count behind the thin-sample caption is the
+# same record the hand splits read. D-142 (PO): pinned to the constant
+# itself — D-128 stretched the event record to two months and left this
+# at 31 days, so the caption's count silently under-read the record.
+PITCHING_LOG_LOOKBACK_DAYS = PITCHER_RECENT_WINDOW_DAYS
 # The robbed-HR column (PO 2026-08-24, replacing D-090's +350 ft column):
 # batted balls at or past this projected distance that STAYED IN THE PARK
 # (a ball that left was not robbed of anything), over the batter's last 7
@@ -422,7 +425,7 @@ class PitcherRecentLine:
     """D-111: one recent-form scope of the starter's record — overall, or
     against one batting side — computed here from the kept events (§GMF-008:
     the view formats, never derives). D-128 (PO) stretched the scope from
-    thirty days to the last two months. Rates are None where their
+    thirty days to two months; D-142 (PO) rewindows to three. Rates are None where their
     denominator is empty. The event scope publishes no innings, so HR/9
     stays a season read and the HR count shows instead; it publishes no
     per-event expected SLG, so xISO stays a season read — the surface
@@ -563,7 +566,8 @@ def _pitcher_season_reads(
 
 def _pitcher_recent_line(events: tuple[PitchEvent, ...]) -> PitcherRecentLine | None:
     """One recent-form scope of the starter's record off the kept events —
-    the last two months since D-128 (PO), L30 before that (D-111). None
+    the last three months (D-142, PO; two months before under D-128,
+    L30 before that under D-111). None
     when the scope has no events at all — the surface names the absence.
     wOBA sums the per-event values over the per-event denominators, the
     same convention the expected-wOBA read uses."""
@@ -633,7 +637,8 @@ class PitcherCard:
     # recent record — the only per-side usage split anywhere, since the
     # arsenal leaderboard publishes usage across all batters only and its
     # hand filter is inert (verified live 2026-08-25). D-128 (PO) stretched
-    # the record from thirty days to the last two months.
+    # the record from thirty days to two months; D-142 (PO) rewindows to
+    # three months.
     usage_vs_left: dict[str, Decimal]
     usage_vs_right: dict[str, Decimal]
     # SP-1 (D-109): arsenal-wide whiff — the pitch-weighted mean over his
@@ -641,8 +646,8 @@ class PitcherCard:
     season_whiff_weighted: Decimal | None = None
     # D-111: the header-card and Arms reads — season figures off the named
     # boards, and the recent-form lines (overall, per batting side) off the
-    # kept events — the last two months since D-128 (PO). Each None names
-    # its scope's absence.
+    # kept events — the last three months (D-142, PO; D-128 set two).
+    # Each None names its scope's absence.
     season_reads: PitcherSeasonReads | None = None
     recent_overall: PitcherRecentLine | None = None
     recent_vs_left: PitcherRecentLine | None = None
@@ -1217,7 +1222,7 @@ def _window_mix_rows(
     from the board keeps put_away_share None; the derivation skips it
     rather than inventing a zero. Since D-128 (PO) this builder is the
     last resort: the season board is the mix scope, and only a starter
-    with no arsenal board at either year reads his two-month record."""
+    with no arsenal board at either year reads his three-month record."""
     counts: dict[str, int] = {}
     for event in window_events:
         if event.pitch_type:
@@ -1647,7 +1652,7 @@ def build_board(
 
     # SP-3 (D-123): the probables' pitching game logs — the raw workload
     # facts and the start count behind the thin-sample caption. The reach
-    # mirrors the pitch window's month so both read the same record.
+    # mirrors the pitcher recent window (D-142) so both read the same record.
     pitching_logs: dict[int, tuple[PitchingLogEntry, ...]] = {}
     if probable_ids:
         pitching_log_start = (slate_date - timedelta(days=PITCHING_LOG_LOOKBACK_DAYS)).strftime(
@@ -1799,7 +1804,7 @@ def build_board(
         events_by_pitcher.setdefault(event.pitcher_id, []).append(event)
     # The batter scope (grid line, grade leg, robbed count, dialog reaches)
     # reads the selected window; the starter scope (recent-form lines,
-    # per-side usage, stuff drift) reads the two-month pitcher reach.
+    # per-side usage, stuff drift) reads the three-month pitcher reach.
     matchup_cutoff = (as_of - timedelta(days=batter_window_days)).date().isoformat()
     pitcher_cutoff = (as_of - timedelta(days=PITCHER_RECENT_WINDOW_DAYS)).date().isoformat()
     window_cutoffs = {
@@ -1812,7 +1817,7 @@ def build_board(
 
     # Each probable's mix (D-128, PO): his season arsenal board — the whole
     # mix for the whole season — else last season's board (labelled, D-087),
-    # else the two-month event record (the only remaining source). The
+    # else the three-month event record (the only remaining source). The
     # label names which. D-081's L45 reach is subsumed: the record now
     # spans sixty days on every build, so no second fetch ever fires.
     mix_by_pitcher: dict[int, tuple[PitchMixRow, ...]] = {}
@@ -1831,7 +1836,7 @@ def build_board(
             mix_label_by_pitcher[pid] = "last season"
         elif pitcher_window:
             mix_by_pitcher[pid] = _window_mix_rows(pitcher_window, ())
-            mix_label_by_pitcher[pid] = "last 60 days"
+            mix_label_by_pitcher[pid] = "last 90 days"
         else:
             mix_by_pitcher[pid] = ()
             mix_label_by_pitcher[pid] = ""
@@ -1898,7 +1903,7 @@ def build_board(
                     year,
                     # D-128 (PO): the starter's event reads — recent-form
                     # lines, per-side usage and pitch sets, stuff drift —
-                    # all read the two-month pitcher record now.
+                    # all read the three-month pitcher record now.
                     tuple(
                         event
                         for event in events_by_pitcher.get(probable.player_id, ())
