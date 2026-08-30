@@ -3578,3 +3578,18 @@ cron moves to 09:30 UTC on both branches, the board caption reads
 
 Full gate green on both Pythons (3446 passed, 1 skipped), consistency
 check clean, all four showcase runners clean.
+
+
+## D-140 - The morning wake never checked out the repo
+
+2026-08-30 (PO P0: "5 AM refresh failed, check why and fix if
+possible"). All four morning-refresh runs since the scheduler landed on
+``main`` (D-139) failed the same way: ``MODULE_NOT_FOUND`` for
+``.github/workflows/morning-refresh.mjs`` before the app was ever
+touched. Cause: the job installs Node and a headless browser but never
+runs ``actions/checkout`` — a fresh runner's workspace is empty, and the
+workflow file itself reaching GitHub's scheduler says nothing about the
+workspace. One added step (``actions/checkout@v4``, first in the job)
+fixes it; the file ships on both branches per the D-139 keep-identical
+rule. A manual dispatch after the merge is the proof of life — the next
+scheduled run lands at 09:30 UTC (5:30 AM Eastern).
