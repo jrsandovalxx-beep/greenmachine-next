@@ -3622,3 +3622,34 @@ the 30-minute job timeout killed it. Two causes, both now fixed:
 
 Proof of life is a manual dispatch that reaches "board rendered on
 attempt 1"; the next scheduled run lands 09:30 UTC (5:30 AM Eastern).
+
+
+## D-142 - Pitcher recent form rewindows to the last three months
+
+2026-08-30 (PO change doc: "change pitcher recent form to the last 3
+months everywhere applicable — currently 2 months").
+``PITCHER_RECENT_WINDOW_DAYS`` goes 60 → 90. That single constant feeds
+every pitcher recent-form read, so they all move together: the starter
+cards' overall row on the toggle and the always-recent side rows (now
+labelled "3M" / "vs L (3M)" / "vs R (3M)"), the Arms tab's recent view,
+the per-side pitch usage and pitch sets, the stuff-drift caption, the
+ground-ball-profile tags ("3-month record"), and the arsenal-mix
+fallback ("last 90 days"). Captions, help texts, and the thin-sample
+string all read three months now.
+
+Two things checked along the way:
+
+- The thin-sample start count had quietly gone stale. SP-3's pitching
+  game-log reach was 31 days — it mirrored the window when the window
+  was a month, D-128 stretched the event record to two months and left
+  the log at 31, so the caption "2-month record: N starts" was counting
+  starts over one month. ``PITCHING_LOG_LOOKBACK_DAYS`` is now pinned
+  to ``PITCHER_RECENT_WINDOW_DAYS`` by construction.
+- The D-134 floors stay 50 BF / 30 BBE. They are a minimum-credible-
+  sample line, not a window-relative one; under three months more side
+  rows clear them, which is the point of the longer window. The 15-BBE
+  contact floor and the ≤2-starts thin-sample line are unchanged for
+  the same reason — two starts in three months is genuinely thin.
+
+Full gate green (3446 passed, 1 skipped), consistency check clean, all
+four showcase runners clean.
