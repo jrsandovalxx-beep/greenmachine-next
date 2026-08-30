@@ -19,7 +19,10 @@ name: Morning refresh
     - cron: "30 9 * * *"
   workflow_dispatch:
 
-permissions: {}
+# Read-only contents: the checkout needs it (the repo is private — {} got
+# the job's token "repository not found" on fetch, D-140). Nothing else.
+permissions:
+  contents: read
 
 jobs:
   wake:
