@@ -3593,3 +3593,32 @@ workspace. One added step (``actions/checkout@v4``, first in the job)
 fixes it; the file ships on both branches per the D-139 keep-identical
 rule. A manual dispatch after the merge is the proof of life — the next
 scheduled run lands at 09:30 UTC (5:30 AM Eastern).
+
+
+## D-141 - The wake job's markers watched the wrong frame
+
+2026-08-30 (PO P0: "5 AM refresh failed, check why and fix if
+possible", continued). With the checkout fixed the job got three steps
+further — and hung on "Load the board and wait for it to render" until
+the 30-minute job timeout killed it. Two causes, both now fixed:
+
+1. Empty permissions (fixed in the same D-140 round, recorded here
+   because that merge changed only the workflow file). ``permissions:
+   {}`` gave the job token no scopes, so the checkout of this private
+   repo failed with "Repository not found." The job now declares
+   ``permissions: contents: read`` — the minimum the checkout needs,
+   nothing else.
+2. Frame-blind markers. The script waited on page-level ``text=``
+   selectors ("The shortlist", the empty-board and schedule-failure
+   texts), but Streamlit renders the app inside a child ``/~/+/``
+   frame — the top page is a management shell. Page-level selectors can
+   never match app content (the same lesson the live-verification
+   suite learned), and the three markers were awaited *sequentially*
+   with 480-second timeouts, so the step ran to the job timeout. The
+   checker now polls the ``/~/+/`` frame on a 5-second interval under
+   one 300-second deadline per attempt, checking all three markers each
+   pass; 300 seconds also keeps three attempts plus browser install
+   comfortably inside the 30-minute job budget.
+
+Proof of life is a manual dispatch that reaches "board rendered on
+attempt 1"; the next scheduled run lands 09:30 UTC (5:30 AM Eastern).
