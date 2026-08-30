@@ -19,7 +19,10 @@ name: Morning refresh
     - cron: "30 9 * * *"
   workflow_dispatch:
 
-permissions: {}
+# Read-only contents: the checkout needs it (the repo is private — {} got
+# the job's token "repository not found" on fetch, D-140). Nothing else.
+permissions:
+  contents: read
 
 jobs:
   wake:
@@ -27,6 +30,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      # D-140: the runner's workspace starts empty — without this checkout the
+      # driver script isn't on disk and the job died four mornings running
+      # with MODULE_NOT_FOUND before ever touching the app.
+      - name: Check out the workflow files
+        uses: actions/checkout@v4
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
