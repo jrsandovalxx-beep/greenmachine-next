@@ -49,6 +49,13 @@ MIN_COMPETITIVE_SWINGS_FORM = 25
 _FIELD_AVERAGE_BAT_SPEED = "avg_bat_speed"
 
 
+# Plate-appearance event semantics (D-144): which PA-ending events are not
+# at-bats, and each hit's total bases. One definition — the form section's
+# AB/H counts and the grid's AVG/SLG denominators can never drift apart.
+NON_AT_BAT_EVENTS = frozenset({"walk", "hit_by_pitch", "sac_fly", "sac_bunt", "catcher_interf"})
+HIT_BASES = {"single": 1, "double": 2, "triple": 3, "home_run": 4}
+
+
 @dataclass(frozen=True)
 class FormMetrics:
     """Raw observed form over one window; rates are PERCENT-scale values."""
@@ -67,6 +74,16 @@ class FormMetrics:
     # v2.2 (D-116): barrels hit to the pull side — a raw count, never a
     # rate (a regular averages ~1 barrel a week; 0 in a week is neutral).
     pulled_barrels: int = 0
+    # D-144 (PO): the window's volume counts (plate appearances, at-bats,
+    # hits) and the all-contact pull read — pulled measurable contacts over
+    # measurable contacts, the air reads' measurability widened past the
+    # air-ball filter. Percent scale, None when the denominator is empty.
+    plate_appearances: int = 0
+    at_bats: int = 0
+    hits: int = 0
+    measurable_contacts: int = 0
+    pulled_contacts: int = 0
+    pull_pct: Decimal | None = None
 
 
 def is_measurable_air(event: PitchEvent) -> bool:
@@ -82,12 +99,28 @@ def is_measurable_air(event: PitchEvent) -> bool:
     )
 
 
+def is_measurable_contact(event: PitchEvent) -> bool:
+    """Whether one batted ball has a measurable spray: coordinates present
+    and the batter's side known — the air reads' measurability without the
+    air-ball filter. Pull %'s denominator (D-144, PO)."""
+    return event.hc_x is not None and event.hc_y is not None and event.batter_side in ("L", "R")
+
+
+def is_pull(event: PitchEvent) -> bool:
+    """Whether one measurable contact went to the batter's pull side
+    (D-071's signed spray convention, D-144's all-contact scope)."""
+    spray = _spray_degrees(event)
+    if spray is None:
+        return False
+    return (event.batter_side == "R" and spray > 0) or (event.batter_side == "L" and spray < 0)
+
+
 def _spray_degrees(event: PitchEvent) -> float | None:
-    """The signed spray angle of one air ball (D-071's convention: positive
+    """The signed spray angle of one contact (D-071's convention: positive
     toward a right-hander's pull side), or None when the contact is not
     measurable. The one geometry pull and oppo share, so the two mirrors
     can never drift apart."""
-    if not is_measurable_air(event):
+    if not is_measurable_contact(event):
         return None
     assert event.hc_x is not None and event.hc_y is not None  # the guard just checked both
     return math.degrees(
@@ -103,10 +136,7 @@ def is_pull_air(event: PitchEvent) -> bool:
     convention): air-ball contact whose spray angle points to the batter's
     pull side. Unmeasurable coordinates or an unknown side read as not-pull
     rather than inventing a direction."""
-    spray = _spray_degrees(event)
-    if spray is None:
-        return False
-    return (event.batter_side == "R" and spray > 0) or (event.batter_side == "L" and spray < 0)
+    return event.bb_type in AIR_BALL_TYPES and is_pull(event)
 
 
 def is_oppo_air(event: PitchEvent) -> bool:
@@ -114,6 +144,8 @@ def is_oppo_air(event: PitchEvent) -> bool:
     exact mirror of the pull test over the identical measurable-air
     denominator. Spray exactly 0 is neither pull nor oppo — a dead-center
     ball claims no direction."""
+    if event.bb_type not in AIR_BALL_TYPES:
+        return False
     spray = _spray_degrees(event)
     if spray is None:
         return False
@@ -133,6 +165,8 @@ def is_straight_air(event: PitchEvent) -> bool:
     set), so a ball just off center reads as both straight and its signed
     side — the three shares are one denominator, not a partition, and
     the straight hover says so."""
+    if event.bb_type not in AIR_BALL_TYPES:
+        return False
     spray = _spray_degrees(event)
     if spray is None:
         return False
@@ -173,10 +207,19 @@ def aggregate_form(events: tuple[PitchEvent, ...]) -> FormMetrics:
         for event in measurable_air
         if is_pull_air(event) and event.launch_speed_angle == BARREL_CLASSIFICATION
     )
+    # D-144 (PO): the window's volume counts — PA-ending events, at-bats
+    # (PA-ending less walks, hit by pitches, sacrifices, interference) and
+    # hits — and the all-contact pull read over the measurable contacts.
+    ending = [event for event in events if event.event]
+    measurable = [event for event in bbe if is_measurable_contact(event)]
+    pulled = sum(1 for event in measurable if is_pull(event))
     ev_avg: Decimal | None = None
     if speeds:
         ev_avg = sum(speeds) / Decimal(len(speeds))
     return FormMetrics(
+        plate_appearances=len(ending),
+        at_bats=sum(1 for event in ending if event.event not in NON_AT_BAT_EVENTS),
+        hits=sum(1 for event in ending if event.event in HIT_BASES),
         batted_ball_events=len(bbe),
         barrels=barrels,
         barrel_pct=_pct(barrels, len(bbe)),
@@ -189,6 +232,9 @@ def aggregate_form(events: tuple[PitchEvent, ...]) -> FormMetrics:
         oppo_air_balls=oppos,
         oppo_air_pct=_pct(oppos, len(measurable_air)),
         pulled_barrels=pulled_barrels,
+        measurable_contacts=len(measurable),
+        pulled_contacts=pulled,
+        pull_pct=_pct(pulled, len(measurable)),
     )
 
 
@@ -225,6 +271,14 @@ class FormSection:
     # averages ~1 barrel a week, so 0 is a real observation, not a cold
     # streak; None only when neither window holds a measurable air ball.
     pulled_barrels: FormValue | None = None
+    # D-144 (PO): the window's volume counts (the value is the count, the
+    # sample the window's plate appearances — a count carries no sample
+    # floor) and the all-contact pull read. None names the absence (no
+    # plate appearance at either reach for the counts, no measurable
+    # contact for the pull share).
+    at_bats: FormValue | None = None
+    hits: FormValue | None = None
+    pull_pct: FormValue | None = None
 
 
 def _pick(
@@ -279,6 +333,18 @@ def _pulled_barrels(recent: FormMetrics, extended: FormMetrics) -> FormValue:
     return FormValue(value=None, sample=0, window_days=7, sufficient=False)
 
 
+def _window_count(count_l7: int, count_l14: int, pa_l7: int, pa_l14: int) -> FormValue | None:
+    """A raw window count's L7/L14 resolution (D-144): the L7 count when
+    the L7 window holds a plate appearance, else the L14 count, else None.
+    A count carries no sample floor — 0 is a real observation of a played
+    window (0 hits in a 20-AB week says something; no PA says nothing)."""
+    if pa_l7 > 0:
+        return FormValue(value=Decimal(count_l7), sample=pa_l7, window_days=7, sufficient=True)
+    if pa_l14 > 0:
+        return FormValue(value=Decimal(count_l14), sample=pa_l14, window_days=14, sufficient=True)
+    return None
+
+
 def _tracking_value(
     rows_recent: tuple[BatTrackingRow, ...],
     rows_extended: tuple[BatTrackingRow, ...],
@@ -304,7 +370,8 @@ def resolve_form_section(
     recent_tracking: tuple[BatTrackingRow, ...],
     extended_tracking: tuple[BatTrackingRow, ...],
 ) -> FormSection:
-    """Resolve the eight form metrics with per-metric L7 to L14 fallback."""
+    """Resolve the form metrics with per-metric L7 to L14 fallback (D-144
+    added the volume counts and the all-contact pull read)."""
     aa_value_recent, aa_sample_recent, aa_value_extended, aa_sample_extended = _tracking_value(
         recent_tracking, extended_tracking, "attack_angle"
     )
@@ -387,4 +454,17 @@ def resolve_form_section(
             MIN_COMPETITIVE_SWINGS_FORM,
         ),
         pulled_barrels=_pulled_barrels(recent, extended),
+        at_bats=_window_count(
+            recent.at_bats, extended.at_bats, recent.plate_appearances, extended.plate_appearances
+        ),
+        hits=_window_count(
+            recent.hits, extended.hits, recent.plate_appearances, extended.plate_appearances
+        ),
+        pull_pct=_pick(
+            recent.pull_pct,
+            recent.measurable_contacts,
+            extended.pull_pct,
+            extended.measurable_contacts,
+            MIN_BBE_FORM,
+        ),
     )

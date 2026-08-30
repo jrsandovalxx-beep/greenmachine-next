@@ -1649,17 +1649,9 @@ def _card_tag_lists(
                 and oppo_v.value is not None
             ):
                 sample_text = f"{pull_v.sample} air balls L{pull_v.window_days}"
-                factor = _side_factor(game, side)
-                if (
-                    pull_v.value >= _PULL_AIR_SHARE_LINE
-                    and factor is not None
-                    and factor.factor >= _PARK_BOOST_LINE
-                ):
-                    boosters.append(
-                        f"pull-air match: {float(pull_v.value):.0f}% pull air "
-                        f"({sample_text}), {side}HB factor {float(factor.factor):.0f}"
-                        f"{_wind_rider_text(game, side, 'pull')}"
-                    )
+                # D-144 (PO): the pull-air match tag is retired — removed
+                # completely at the PO's direction. The oppo-air match (an
+                # oppo-power read against the opposite-side factor) stays.
                 other = "L" if side == "R" else "R"
                 other_factor = _side_factor(game, other)
                 if (
@@ -1883,17 +1875,28 @@ def _home_park_hr_factor(team: str, side: str | None) -> ParkFactor | None:
 # a fit read against the park, never a quality grade (D-127). Pulled BRL
 # is a raw count against D-116's one-pulled-barrel week: 1/2/3+ land the
 # three greens, 0 stays neutral — never red, 0 is not cold.
+# D-144 (PO): AtkAng left the table; Pull % joined — pulled measurable
+# CONTACTS per 100 (the air reads' measurability over all batted balls).
+# The green anchor is the PO's line: 40. The spread mirrors the Pull Air %
+# band spacing around a ~36-37% league-average pull share (qualified
+# hitters, 2026 Savant boards) — 36 is the neutral midpoint, so the reds
+# open below it.
 _FORM_BANDS: dict[str, _BandSpec] = {
     "Barrel%": _BandSpec("high", 13, 10, 8.5, 6, 4, 2.5),
     "EV": _BandSpec("high", 91, 90, 89, 88, 87, 85.5),
-    "AtkAng": _BandSpec("high", 13.5, 12, 10.5, 9, 7.5, 6),
     "IdealAtkAng%": _BandSpec("high", 60, 56, 53, 47, 43, 39),
+    "Pull %": _BandSpec("high", 48, 44, 40, 36, 32, 28),
     "Pull Air %": _BandSpec("high", 43, 38, 33, 27, 22, 17),
 }
 _FORM_SCALE_TEXT = "; ".join(
     f"{name} — {_band_scale_text(spec)}" for name, spec in _FORM_BANDS.items()
 )
 _FORM_HELP: dict[str, str] = {
+    "AB": (
+        "At-bats over the window — plate appearances less walks, hit by "
+        "pitches, sacrifices and interference (D-144)."
+    ),
+    "H": "Hits over the window — singles, doubles, triples and home runs (D-144).",
     "Barrel%": (
         "Barrels per 100 batted balls over the window. "
         f"Cell colors: {_band_scale_text(_FORM_BANDS['Barrel%'])}."
@@ -1902,13 +1905,15 @@ _FORM_HELP: dict[str, str] = {
         "Average exit velocity in mph over the window's batted balls. "
         f"Cell colors: {_band_scale_text(_FORM_BANDS['EV'])}."
     ),
-    "AtkAng": (
-        "Average attack angle in degrees over the window's competitive "
-        f"swings. Cell colors: {_band_scale_text(_FORM_BANDS['AtkAng'])}."
-    ),
     "IdealAtkAng%": (
         "Per 100 competitive swings, how many land in the ideal 5-20° "
         f"attack-angle band. Cell colors: {_band_scale_text(_FORM_BANDS['IdealAtkAng%'])}."
+    ),
+    "Pull %": (
+        "Pulled batted balls per 100 measurable contacts (coordinates "
+        "and a known batting side — the air reads' measurability over "
+        "ALL batted balls, D-144). Cell colors: "
+        f"{_band_scale_text(_FORM_BANDS['Pull %'])}."
     ),
     "Pull Air %": (
         "Pulled air balls per 100 measurable air balls (fly balls, line "
@@ -1920,12 +1925,6 @@ _FORM_HELP: dict[str, str] = {
         "denominator. No cell colors — a fit read against the park, not "
         "a quality grade (D-127)."
     ),
-    "Pulled BRL": (
-        "Barrels hit to the pull side — a raw count with its batted-ball "
-        "sample, never a rate. A regular averages about one a week, so 0 "
-        "is neutral (no fill); 1 / 2 / 3+ land the three greens "
-        "(D-116/D-129)."
-    ),
     "Form Score": (
         "His actual form score from the grade: the recent-form reads "
         "scored against the category max (2 in v1; weights may change — "
@@ -1935,8 +1934,8 @@ _FORM_HELP: dict[str, str] = {
 _FORM_PRECISION = {
     "Barrel%": 1,
     "EV": 1,
-    "AtkAng": 1,
     "IdealAtkAng%": 1,
+    "Pull %": 1,
     "Pull Air %": 1,
     "Oppo Air %": 1,
 }
@@ -1979,7 +1978,9 @@ def _form_section_frames(
     form: FormSection, form_score_text: str | None = None
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """(texts, styles) for ``styled_text_frame`` — D-068's one-row section,
-    re-columned by D-129 (PO): SwSp% and Hard% left the table, the Form
+    re-columned by D-144 (PO): the AB/H volume counts open it, Pull %
+    (all-contact pull share) sits before Pull Air %, and the AtkAng and
+    Pulled BRL columns left. Before that D-129 (PO): SwSp% and Hard% left the table, the Form
     Score closes it with the actual graded form subtotal (D-132, PO — the
     D-124 placeholder dash is dead), and every graded rate wears its
     researched band (the six-bucket
@@ -1991,16 +1992,26 @@ def _form_section_frames(
     observations at either reach reads "not enough data available" (D-078).
     An amber INSUFFICIENT cell and a named absence always outrank a band.
     """
+    texts: dict[str, str] = {}
+    styles: dict[str, str] = {}
+    # D-144 (PO): the volume counts open the table — plain integers, the
+    # L14 fallback named; no bands (volume is context, not quality).
+    for count_column, count_metric in (("AB", form.at_bats), ("H", form.hits)):
+        if count_metric is None or count_metric.value is None:
+            texts[count_column] = _FORM_ABSENT_TEXT
+            styles[count_column] = _REASON_CSS
+        else:
+            texts[count_column] = str(int(count_metric.value)) + (
+                " · L14" if count_metric.window_days == 14 else ""
+            )
     fields: tuple[tuple[str, FormValue | None], ...] = (
         ("Barrel%", form.barrel_pct),
         ("EV", form.exit_velocity),
-        ("AtkAng", form.attack_angle_degrees),
         ("IdealAtkAng%", form.ideal_attack_angle_pct),
+        ("Pull %", form.pull_pct),
         ("Pull Air %", form.pull_air_pct),
         ("Oppo Air %", form.oppo_air_pct),
     )
-    texts: dict[str, str] = {}
-    styles: dict[str, str] = {}
     for column, metric in fields:
         if metric is None or metric.value is None:
             texts[column] = _FORM_ABSENT_TEXT
@@ -2023,26 +2034,6 @@ def _form_section_frames(
             if column in _FORM_BANDS  # Oppo Air % stays neutral (a fit read)
         },
     )
-    # v2.2 (D-116): pulled barrels as a raw count with its BBE sample —
-    # never a rate, no sample floor (0 is a real observation, a regular
-    # averages ~1 barrel a week). The L14 fallback names its window.
-    # D-129: the count grades against the one-pulled-barrel week — 1/2/3+
-    # land the three greens, 0 stays neutral, never red.
-    pulled = form.pulled_barrels
-    if pulled is None or pulled.value is None:
-        texts["Pulled BRL"] = _FORM_ABSENT_TEXT
-        styles["Pulled BRL"] = _REASON_CSS
-    else:
-        count = int(pulled.value)
-        texts["Pulled BRL"] = f"{count} ({pulled.sample} BBE)" + (
-            " · L14" if pulled.window_days == 14 else ""
-        )
-        if count >= 3:
-            styles["Pulled BRL"] = _BAND_G3_CSS
-        elif count == 2:
-            styles["Pulled BRL"] = _BAND_G2_CSS
-        elif count == 1:
-            styles["Pulled BRL"] = _BAND_G1_CSS
     # D-132 (PO): the actual graded form subtotal out of the category's max
     # closes the table — the D-124 placeholder dash is dead. A card with no
     # evaluated grade names the absence rather than inventing a number.
@@ -2307,11 +2298,6 @@ def _arsenal_breakup_html(
                 if batter.hard_hit_share is not None
                 else "—"
             )
-            air_text = (
-                (_pct_text(batter.air_ball_share) + insufficient_note)
-                if batter.air_ball_share is not None
-                else "—"
-            )
             pull_air_text = (
                 (_pct_text(batter.pull_air_share) + insufficient_note)
                 if batter.pull_air_share is not None
@@ -2335,7 +2321,6 @@ def _arsenal_breakup_html(
                 f"<td>{hard_hit_text}</td>",
                 f"<td>{_avg_text(batter.expected_woba)}</td>",
                 f"<td>{_pct_text(batter.whiff_share)}</td>",
-                f"<td>{air_text}</td>",
                 f"<td>{pull_air_text}</td>",
                 f"<td>{oppo_air_text}</td>",
             ]
@@ -2364,14 +2349,14 @@ def _arsenal_breakup_html(
     header = (
         '<tr class="gm-halves"><th colspan="2"></th>'
         f'<th colspan="11" class="gm-half">Pitcher — {html.escape(pitcher_scope_label)}</th>'
-        f'<th colspan="15" class="gm-half gm-half-boundary">Batter — '
+        f'<th colspan="14" class="gm-half gm-half-boundary">Batter — '
         f"{html.escape(batter_scope_label)}</th></tr>"
         '<tr class="gm-cols"><th>Pitch</th><th>Usage%</th>'
         "<th>PA</th><th>AVG</th><th>SLG</th><th>xISO</th><th>wOBA</th><th>xwOBA</th>"
         "<th>Whiff%</th><th>K%</th><th>Hard-Hit%</th><th>BRL</th>"
         '<th class="gm-half-boundary">AB</th><th>H</th><th>LA</th><th>Barrel%</th><th>EV</th>'
         "<th>AVG</th><th>SLG</th><th>ISO</th><th>HR</th><th>Hard-Hit%</th><th>xwOBA</th>"
-        "<th>Swing-Str%</th><th>Air%</th><th>Pull Air%</th><th>Oppo Air%</th></tr>"
+        "<th>Swing-Str%</th><th>Pull Air%</th><th>Oppo Air%</th></tr>"
     )
     return (
         '<div class="gm-breakup-wrap"><table class="gm-breakup"><thead>'
@@ -2507,21 +2492,21 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
             "empty falls back to its L14 window, marked '· L14'. A metric below "
             "its sample floor keeps its value with its exact sample and an "
             "INSUFFICIENT marker; one with no observations at either reach reads "
-            "'not enough data available' (D-068). Oppo Air % = opposite-field "
-            "share of measurable air balls (fly balls, line drives and popups "
-            "with hit coordinates and a known batting side); Pull Air % uses "
-            "the same denominator. Pulled BRL counts barrels hit to the pull "
-            "side — a raw count with its BBE sample, never a rate: a regular "
-            "averages about one barrel a week, so 0 is neutral, not cold "
-            "(D-116). Its air-ball floor splits by window: 5 at L7 (D-133), "
-            "15 at "
-            "L14 (v2.2). D-129 (PO): SwSp% and Hard% left this table, the Form "
+            "'not enough data available' (D-068). AB and H are the window's "
+            "plain volume counts (D-144). Pull % = pulled share of measurable "
+            "CONTACTS (all batted balls with coordinates and a known batting "
+            "side); Pull Air % and Oppo Air % share the narrower measurable-"
+            "air denominator (fly balls, line drives and popups). The "
+            "air-ball floor splits by window: 5 at L7 (D-133), 15 at "
+            "L14 (v2.2). D-129 (PO): SwSp% and Hard% left this table, and "
+            "D-144 (PO) took the AtkAng and Pulled BRL columns with it; the "
+            "Form "
             "Score closes it with the actual graded subtotal (D-132), and "
             "**cell colors** grade "
             "the rates on researched 2026 league scales — the edges: "
             + _FORM_SCALE_TEXT
-            + ". Oppo Air % stays neutral (a fit read); Pulled BRL grades "
-            "against the one-barrel week — 1/2/3+ green, 0 neutral. An amber "
+            + ". Oppo Air % stays neutral (a fit read), and the AB/H counts "
+            "carry no colors (volume, not quality). An amber "
             "INSUFFICIENT cell and a named absence always outrank a band."
         )
 
@@ -2807,11 +2792,10 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "and the severe cold suppress below 38°F with an in-wind ≥ 5 mph "
         "along the axis. A roofed venue or an insufficient spray record "
         "carries no wind read. "
-        "Spray-alignment reads (D-120): the pull-air match at a pull "
-        "share ≥ 40% of measurable air balls (the same signed halves as "
-        "the wind reads) with the same-side HR factor at the "
-        "boost line (≥ 110), and the oppo-air match at an oppo share "
-        "over 20% read against the OPPOSITE-side factor — an oppo-power "
+        "Spray-alignment reads (D-120): the oppo-air match at an oppo "
+        "share over 20% of measurable air balls (the same signed halves "
+        "as the wind reads) read against the OPPOSITE-side factor — an "
+        "oppo-power "
         "bat reads as the other hand for the park, because his damaging "
         'air contact goes to that field; a "wind … out to" rider joins '
         "when the forecast also resolves out to the matching field at "
