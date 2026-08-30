@@ -337,6 +337,108 @@ def _build(api: object, savant: object, events: object = None) -> object:
     )
 
 
+def _build_with_pitcher_season_events(
+    season_events: object,
+) -> object:
+    """D-143 (PO): a board build wiring the per-probable season pitch record."""
+
+    def fetch_day(day: date) -> tuple[PitchEvent, ...]:
+        return ()
+
+    def fetch_season(pid: int) -> object:
+        return season_events if pid == PITCHER_ID else ()
+
+    return build_board(
+        api=_FakeApi(),  # type: ignore[arg-type]
+        savant=_FakeSavant(),  # type: ignore[arg-type]
+        slate_date=SLATE_DATE,
+        as_of=AS_OF,
+        config=CONFIG,
+        fetch_day_events=fetch_day,
+        temperature_for=lambda venue, at: Decimal("78"),
+        park_factors=_park_factors(),
+        fetch_pitcher_season_events=fetch_season,  # type: ignore[arg-type]
+    )
+
+
+def test_starter_cards_carry_season_side_splits_off_the_season_record() -> None:
+    """D-143 (PO): the starter card's season side rows read his full-season
+    pitch record per batting side — no board publishes a per-side season
+    split. The recent rows are untouched (an empty window record here)."""
+    season_events = (
+        _window_event(
+            batter_id=901,
+            pitcher_id=PITCHER_ID,
+            batter_side="L",
+            event="home_run",
+            launch_speed=Decimal("110"),
+            launch_angle=Decimal("28"),
+        ),
+        _window_event(
+            batter_id=902,
+            pitcher_id=PITCHER_ID,
+            batter_side="L",
+            event="field_out",
+            launch_speed=Decimal("90"),
+            launch_angle=Decimal("12"),
+        ),
+        _window_event(
+            batter_id=903,
+            pitcher_id=PITCHER_ID,
+            batter_side="R",
+            event="strikeout",
+            launch_speed=None,
+            launch_angle=None,
+        ),
+    )
+    board = _build_with_pitcher_season_events(season_events)
+    assert not isinstance(board, FetchFailure)
+    card = board.games[0].home_pitcher
+    assert card is not None
+    left = card.season_vs_left
+    assert left is not None
+    assert left.plate_appearances == 2
+    assert left.batted_balls == 2
+    assert left.home_runs == 1
+    assert left.hard_hit_share == Decimal("0.5")
+    right = card.season_vs_right
+    assert right is not None
+    assert right.plate_appearances == 1
+    assert right.batted_balls == 0
+    assert right.home_runs == 0
+    # The recent rows read the (here empty) window record — never the season one.
+    assert card.recent_overall is None
+    assert card.recent_vs_left is None
+
+
+def test_a_season_record_failure_names_itself_and_marks_no_split() -> None:
+    """D-143 (PO): a failed season-record fetch is a diagnostic, never a
+    fabricated split — the card's season side rows stay None and the
+    surface names the absence."""
+    board = _build_with_pitcher_season_events(FetchFailure("savant 503"))
+    assert not isinstance(board, FetchFailure)
+    card = board.games[0].home_pitcher
+    assert card is not None
+    assert card.season_vs_left is None
+    assert card.season_vs_right is None
+    assert any(
+        f"pitcher season pitch record ({PITCHER_ID})" in diagnostic
+        for diagnostic in board.diagnostics
+    )
+
+
+def test_without_a_wired_fetcher_the_season_side_rows_stay_absent() -> None:
+    """D-143 (PO): backtest boards wire no season-record fetcher — a fetch
+    per probable per backtest day would bury the range — so the season
+    side rows name their absence there."""
+    board = _build(_FakeApi(), _FakeSavant(), events=())
+    assert not isinstance(board, FetchFailure)
+    card = board.games[0].home_pitcher
+    assert card is not None
+    assert card.season_vs_left is None
+    assert card.season_vs_right is None
+
+
 def test_happy_path_grades_every_lineup_batter() -> None:
     savant = _FakeSavant(
         batter_arsenal=(_arsenal_row(BATTER_ID, "FF", "0.5", "0.400", "0.15", "0.15"),),
