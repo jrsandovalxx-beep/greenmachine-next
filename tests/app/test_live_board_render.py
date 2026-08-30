@@ -1761,9 +1761,10 @@ def test_backtest_excludes_a_day_the_source_has_not_indexed(
 
 def test_breakup_batter_half_carries_contact_shape_with_the_pitch_type_floor() -> None:
     """D-109 + D-129: the batter half's contact-shape reads (LA, barrel
-    rate, EV, hard-hit, air and both pull reads) carry the ratified 10-BBE
-    pitch-type floor — below it the value keeps its exact sample with an
-    INSUFFICIENT marker; an empty denominator dashes, never invents."""
+    rate, EV, hard-hit and both pull reads — D-144 removed the air share)
+    carry the ratified 10-BBE pitch-type floor — below it the value keeps
+    its exact sample with an INSUFFICIENT marker; an empty denominator
+    dashes, never invents."""
     import streamlit_app
 
     markup = streamlit_app._arsenal_breakup_html(
@@ -1783,10 +1784,10 @@ def test_breakup_batter_half_carries_contact_shape_with_the_pitch_type_floor() -
     )
     assert ">EV</th>" in markup
     assert ">LA</th>" in markup
-    assert ">Air%</th>" in markup
+    assert ">Air%</th>" not in markup  # D-144 (PO): the Air% column left the popup
     assert "91.2 · n=7 · INSUFFICIENT" in markup
     assert "23.4° · n=7 · INSUFFICIENT" in markup
-    assert "50.0% · n=7 · INSUFFICIENT" in markup
+    assert "50.0% · n=7 · INSUFFICIENT" not in markup  # the removed Air% column (D-144)
     assert "40.0% · n=7 · INSUFFICIENT" in markup
     assert "12.0% · n=7 · INSUFFICIENT" in markup
     assert "45.0% · n=7 · INSUFFICIENT" in markup
@@ -1807,7 +1808,6 @@ def test_breakup_batter_half_carries_contact_shape_with_the_pitch_type_floor() -
     )
     assert ">91.2</td>" in markup_full
     assert ">23.4°</td>" in markup_full
-    assert ">50.0%</td>" in markup_full
     assert "INSUFFICIENT" not in markup_full
     # No classified contact at all: dashes, never an invented zero.
     markup_empty = streamlit_app._arsenal_breakup_html(
@@ -2476,13 +2476,13 @@ def test_card_tags_resolve_the_wind_against_the_dominant_air_field() -> None:
 
 
 def test_card_tags_carry_the_spray_alignment_reads() -> None:
-    """v2.2 (D-120): the pull-air match at a pull share ≥ 40% with the
-    same-side HR factor ≥ 110, and the oppo-air match at an oppo share
-    strictly over 20% against the OPPOSITE-side factor (the Walker
-    exception — an oppo-power bat reads as the other hand for the park).
-    The "+ wind" rider joins when the forecast resolves out to the
-    matching field at ≥ 8 mph. An insufficient spray record or a neutral
-    factor keeps the tags silent."""
+    """v2.2 (D-120): the oppo-air match at an oppo share strictly over 20%
+    against the OPPOSITE-side factor (the Walker exception — an oppo-power
+    bat reads as the other hand for the park). The "+ wind" rider joins
+    when the forecast resolves out to the matching field at ≥ 8 mph. An
+    insufficient spray record or a neutral factor keeps the tag silent.
+    D-144 (PO): the pull-air match is retired — the first assertions pin
+    its absence so it cannot quietly come back."""
     from types import SimpleNamespace
 
     import streamlit_app
@@ -2545,20 +2545,14 @@ def test_card_tags_carry_the_spray_alignment_reads() -> None:
             wind_direction="SSW",
         )
 
-    # The pull match: his side's factor at the boost line, pull share
-    # over 40 — the tag quotes the floored form sample.
+    # D-144 (PO): the pull-air match is retired — a pull share over 40
+    # against a boosting same-side factor no longer tags, rider or not.
     _, boosters, _ = streamlit_app._card_tags(batter(), None, game=game("112", "100"))
-    assert "pull-air match: 45% pull air (10 air balls L7), LHB factor 112" in boosters
-    # The wind rider: FROM 210 blows straight out to his pull field at 30°.
+    assert "pull-air" not in boosters
     _, boosters, _ = streamlit_app._card_tags(
         batter(), None, game=game("112", "100", wind_from="210", speed="9")
     )
-    assert "LHB factor 112, wind 9 mph out to right" in boosters
-    # A neutral park or a pull share under the line stays silent.
-    tags = streamlit_app._card_tags(batter(), None, game=game("100", "100"))
-    assert "pull-air" not in tags[1]
-    tags = streamlit_app._card_tags(batter(form=spray("39", "18")), None, game=game("112", "100"))
-    assert "pull-air" not in tags[1]
+    assert "pull-air" not in boosters
     # The oppo match reads the OTHER side's factor — a right-hander with
     # oppo power reads as a left-hander for the park.
     _, boosters, _ = streamlit_app._card_tags(

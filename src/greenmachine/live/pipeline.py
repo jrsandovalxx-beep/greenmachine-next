@@ -38,6 +38,8 @@ from greenmachine.live.form import (
     AIR_BALL_TYPES,
     BARREL_CLASSIFICATION,
     HARD_HIT_THRESHOLD_MPH,
+    HIT_BASES,
+    NON_AT_BAT_EVENTS,
     FormSection,
     aggregate_form,
     is_measurable_air,
@@ -760,10 +762,9 @@ _PITCH_NAMES: dict[str, str] = {
     "PO": "Pitch Out",
 }
 
-# Plate-appearance endings that do not consume an at-bat; per-pitch AVG and
-# SLG divide by at-bats, so these leave the denominator.
-_NON_AT_BAT_EVENTS = frozenset({"walk", "hit_by_pitch", "sac_fly", "sac_bunt", "catcher_interf"})
-_HIT_BASES = {"single": 1, "double": 2, "triple": 3, "home_run": 4}
+# D-144 (PO): the PA-ending event semantics (NON_AT_BAT_EVENTS, HIT_BASES)
+# live in form.py — the lower layer — so the form section's AB/H counts and
+# the grid's AVG/SLG denominators share one definition.
 _SWING_DESCRIPTIONS = frozenset(
     {
         "swinging_strike",
@@ -806,9 +807,9 @@ class _PlateOutcomes:
 
 def _plate_outcomes(events: Sequence[PitchEvent]) -> _PlateOutcomes:
     ending = [event for event in events if event.event]
-    at_bats = sum(1 for event in ending if event.event not in _NON_AT_BAT_EVENTS)
-    hits = sum(1 for event in ending if event.event in _HIT_BASES)
-    bases = sum(_HIT_BASES.get(event.event, 0) for event in ending)
+    at_bats = sum(1 for event in ending if event.event not in NON_AT_BAT_EVENTS)
+    hits = sum(1 for event in ending if event.event in HIT_BASES)
+    bases = sum(HIT_BASES.get(event.event, 0) for event in ending)
     average = Decimal(hits) / Decimal(at_bats) if at_bats else None
     slugging = Decimal(bases) / Decimal(at_bats) if at_bats else None
     woba_ending = [

@@ -42,21 +42,32 @@ def _form(**overrides: FormValue) -> FormSection:
             "pulled_barrels",
             FormValue(value=Decimal(2), sample=41, window_days=7, sufficient=True),
         ),
+        at_bats=overrides.get(
+            "at_bats", FormValue(value=Decimal(26), sample=30, window_days=7, sufficient=True)
+        ),
+        hits=overrides.get(
+            "hits", FormValue(value=Decimal(9), sample=30, window_days=7, sufficient=True)
+        ),
+        pull_pct=overrides.get(
+            "pull_pct", FormValue(value=Decimal("41.2"), sample=24, window_days=7, sufficient=True)
+        ),
     )
 
 
-def test_columns_are_the_d129_set_in_order() -> None:
-    """D-129 (PO): SwSp% and Hard% left the table, and the Form Score
-    closes it — D-132's actual graded subtotal, the D-124 dash dead."""
+def test_columns_are_the_d144_set_in_order() -> None:
+    """D-144 (PO): the AB/H volume counts open the table, Pull % sits right
+    before Pull Air %, the AtkAng and Pulled BRL columns are gone, and the
+    Form Score closes it — D-132's actual graded subtotal."""
     texts, _styles = streamlit_app._form_section_frames(_form())
     assert list(texts.columns) == [
+        "AB",
+        "H",
         "Barrel%",
         "EV",
-        "AtkAng",
         "IdealAtkAng%",
+        "Pull %",
         "Pull Air %",
         "Oppo Air %",
-        "Pulled BRL",
         "Form Score",
     ]
     assert len(texts) == 1
@@ -74,36 +85,31 @@ def test_form_score_shows_the_actual_graded_subtotal() -> None:
     assert styles.at[0, "Form Score"] == streamlit_app._REASON_CSS
 
 
-def test_pulled_barrels_is_a_raw_count_with_its_bbe_sample() -> None:
-    """v2.2 (D-116): the count with its window BBE, never a rate and no
-    INSUFFICIENT marker (0 is a real observation); the L14 fallback names
-    the window; no measurable air ball at either reach reads the absence.
-    D-129: the count grades against the one-pulled-barrel week — 1/2/3+
-    land the three greens, 0 stays neutral, never red."""
-    texts, styles = streamlit_app._form_section_frames(_form())
-    assert texts.at[0, "Pulled BRL"] == "2 (41 BBE)"
-    assert styles.at[0, "Pulled BRL"] == streamlit_app._BAND_G2_CSS
+def test_the_volume_counts_open_the_table_without_bands() -> None:
+    """D-144 (PO): AB and H are plain integers with the L14 fallback named
+    — a count carries no sample floor, no INSUFFICIENT marker and no band
+    (volume is context, not quality); no plate appearance at either reach
+    names the absence."""
     texts, styles = streamlit_app._form_section_frames(
         _form(
-            pulled_barrels=FormValue(value=Decimal(1), sample=63, window_days=14, sufficient=True)
+            at_bats=FormValue(value=Decimal(26), sample=30, window_days=7, sufficient=True),
+            hits=FormValue(value=Decimal(9), sample=30, window_days=7, sufficient=True),
         )
     )
-    assert texts.at[0, "Pulled BRL"] == "1 (63 BBE) · L14"
-    assert styles.at[0, "Pulled BRL"] == streamlit_app._BAND_G1_CSS
+    assert texts.at[0, "AB"] == "26"
+    assert texts.at[0, "H"] == "9"
+    assert "AB" not in styles.columns
+    assert "H" not in styles.columns
     texts, styles = streamlit_app._form_section_frames(
-        _form(pulled_barrels=FormValue(value=Decimal(3), sample=50, window_days=7, sufficient=True))
+        _form(
+            at_bats=FormValue(value=Decimal(0), sample=2, window_days=14, sufficient=True),
+        )
     )
-    assert styles.at[0, "Pulled BRL"] == streamlit_app._BAND_G3_CSS
-    texts, styles = streamlit_app._form_section_frames(
-        _form(pulled_barrels=FormValue(value=Decimal(0), sample=40, window_days=7, sufficient=True))
-    )
-    assert texts.at[0, "Pulled BRL"] == "0 (40 BBE)"
-    assert "Pulled BRL" not in styles.columns  # 0 is neutral, not cold (D-116)
-    texts, styles = streamlit_app._form_section_frames(
-        _form(pulled_barrels=FormValue(value=None, sample=0, window_days=7, sufficient=False))
-    )
-    assert texts.at[0, "Pulled BRL"] == "not enough data available"
-    assert styles.at[0, "Pulled BRL"] == streamlit_app._REASON_CSS
+    assert texts.at[0, "AB"] == "0 · L14"  # 0 is a real observation of a played window
+    texts, styles = streamlit_app._form_section_frames(_form(at_bats=None, hits=None))
+    assert texts.at[0, "AB"] == "not enough data available"
+    assert styles.at[0, "AB"] == streamlit_app._REASON_CSS
+    assert texts.at[0, "H"] == "not enough data available"
 
 
 def test_present_and_sufficient_cell_is_the_plain_value_with_its_band() -> None:
@@ -117,16 +123,21 @@ def test_present_and_sufficient_cell_is_the_plain_value_with_its_band() -> None:
     assert texts.at[0, "Barrel%"] == "18.2"
     assert styles.at[0, "Barrel%"] == streamlit_app._BAND_G3_CSS
     assert "L14" not in texts.at[0, "Barrel%"]
-    # A mid-scale value lands the neutral middle — no fill.
+    # D-144 (PO): Pull % greens open at the PO's 40 line — 41.2 lands the
+    # first green, 46.0 the strong one; a league-average 36.5 stays neutral.
     texts, styles = streamlit_app._form_section_frames(
-        _form(
-            attack_angle_degrees=FormValue(
-                value=Decimal("10.0"), sample=30, window_days=7, sufficient=True
-            )
-        )
+        _form(pull_pct=FormValue(value=Decimal("41.2"), sample=24, window_days=7, sufficient=True))
     )
-    assert texts.at[0, "AtkAng"] == "10.0"
-    assert "AtkAng" not in styles.columns
+    assert texts.at[0, "Pull %"] == "41.2"
+    assert styles.at[0, "Pull %"] == streamlit_app._BAND_G1_CSS
+    texts, styles = streamlit_app._form_section_frames(
+        _form(pull_pct=FormValue(value=Decimal("46.0"), sample=24, window_days=7, sufficient=True))
+    )
+    assert styles.at[0, "Pull %"] == streamlit_app._BAND_G2_CSS
+    texts, styles = streamlit_app._form_section_frames(
+        _form(pull_pct=FormValue(value=Decimal("36.5"), sample=24, window_days=7, sufficient=True))
+    )
+    assert "Pull %" not in styles.columns  # the neutral middle — no fill
 
 
 def test_l14_fallback_cell_names_the_window_and_keeps_its_band() -> None:
@@ -173,16 +184,17 @@ def test_form_band_edges_print_on_their_surface() -> None:
     assert "elite ≥ 13" in streamlit_app._FORM_HELP["Barrel%"]
     assert "elite ≥ 91" in streamlit_app._FORM_HELP["EV"]
     assert "elite ≥ 60" in streamlit_app._FORM_HELP["IdealAtkAng%"]
+    assert "elite ≥ 48" in streamlit_app._FORM_HELP["Pull %"]
     assert "No cell colors" in streamlit_app._FORM_HELP["Oppo Air %"]
-    assert "1 / 2 / 3+" in streamlit_app._FORM_HELP["Pulled BRL"]
     for column in (
+        "AB",
+        "H",
         "Barrel%",
         "EV",
-        "AtkAng",
         "IdealAtkAng%",
+        "Pull %",
         "Pull Air %",
         "Oppo Air %",
-        "Pulled BRL",
         "Form Score",
     ):
         assert column in streamlit_app._FORM_HELP

@@ -282,3 +282,80 @@ def test_tracking_metrics_are_swing_weighted_across_sides() -> None:
     assert section.bat_speed_mph.value == Decimal("72.5")
     assert section.ideal_attack_angle_pct.value == Decimal("60")
     assert section.bat_speed_mph.window_days == 7
+
+
+def test_the_volume_counts_and_all_contact_pull_share_aggregate() -> None:
+    """D-144 (PO): PA, AB (less walks/HBP/sacrifices/interference) and hits
+    count the window's PA-ending events; Pull % reads pulled measurable
+    CONTACTS over all measurable contacts — a pulled ground ball counts
+    here where the air shares ignore it, and an unmeasurable contact
+    leaves both counts."""
+    pulled_fly = _event(
+        launch_speed_angle=4,
+        bb_type="fly_ball",
+        hc_x="160",
+        hc_y="160",
+        batter_side="R",
+        event="home_run",
+    )
+    pulled_ground = _event(
+        launch_speed_angle=2,
+        bb_type="ground_ball",
+        hc_x="160",
+        hc_y="160",
+        batter_side="R",
+        event="field_out",
+    )
+    oppo_fly = _event(
+        launch_speed_angle=4,
+        bb_type="fly_ball",
+        hc_x="90",
+        hc_y="160",
+        batter_side="R",
+        event="single",
+    )
+    unmeasurable = _event(launch_speed_angle=4, bb_type="fly_ball", event="field_out")
+    metrics = aggregate_form(
+        (
+            pulled_fly,
+            pulled_ground,
+            oppo_fly,
+            unmeasurable,
+            _event(event="walk"),
+            _event(event="sac_fly"),
+            _event(event="strikeout"),
+        )
+    )
+    assert metrics.plate_appearances == 7
+    assert metrics.at_bats == 5  # the walk and the sac fly consume none
+    assert metrics.hits == 2
+    assert metrics.measurable_contacts == 3
+    assert metrics.pulled_contacts == 2  # the pulled ground ball counts (D-144)
+    assert metrics.pull_pct == Decimal(200) / Decimal(3)
+    assert metrics.pull_air_balls == 1  # the air read keeps its own scope
+
+
+def test_the_counts_resolve_l7_then_l14_then_a_named_absence() -> None:
+    """D-144 (PO): a window with plate appearances resolves its counts (0
+    hits in a played window is a real observation); no PA at either reach
+    is a named absence, never a zero."""
+    played = aggregate_form(
+        (_event(event="walk"), _event(event="strikeout"), _event(event="single"))
+    )
+    empty = aggregate_form(())
+    section = resolve_form_section(empty, played, (), ())
+    assert section.at_bats is not None
+    assert section.at_bats.value == Decimal(2)
+    assert section.at_bats.window_days == 14  # the L7 window held no PA
+    assert section.hits is not None
+    assert section.hits.value == Decimal(1)
+    section = resolve_form_section(played, empty, (), ())
+    assert section.hits is not None
+    assert section.hits.value == Decimal(1)
+    assert section.hits.window_days == 7
+    section = resolve_form_section(empty, empty, (), ())
+    assert section.at_bats is None
+    assert section.hits is None
+    # _pick's convention: a value-less FormValue, not None — the surface
+    # reads value is None as the named absence.
+    assert section.pull_pct is not None and section.pull_pct.value is None

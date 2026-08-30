@@ -3686,3 +3686,35 @@ now read 3 months (D-142's sweep caught the digit-free spellings only).
 Full gate green (3450 passed, 1 skipped — four new tests: splits land on
 the card, fetch failure names itself, backtest absence, season-scope row
 text), consistency check clean, all four showcase runners clean.
+
+
+## D-144 - The form table gains volume counts and an all-contact pull read; the pulled-air tag leaves
+
+2026-08-30 (PO change doc P1, five items landed together since they all
+touch the popup's form table and tag set):
+
+- The Recent form table opens with plain AB and H counts (PA-ending
+  events less walks/HBP/sacrifices/interference; singles through homers),
+  L7 with the L14 fallback named — a count carries no sample floor, and
+  0 in a played window is a real observation. The PA-ending event sets
+  moved from the pipeline into form.py so the counts and the grid's
+  AVG/SLG denominators share one definition.
+- New Pull % column right before Pull Air %: pulled share of measurable
+  CONTACTS (the air reads' measurability — coordinates and a known
+  batting side — widened past the air-ball filter, so a pulled grounder
+  counts here). Green opens at the PO's 40 line (strong 44, elite 48),
+  reds below 36/32/28 around the ~36-37% league-average pull share.
+- The AtkAng column and the Pulled BRL count left the form table (the
+  underlying reads still grade and the EV log still highlights pulled
+  barrels — display only).
+- The batter half of the popup's breakup table lost its Air% column.
+- The pull-air match tag (D-120's spray-alignment booster) is removed
+  completely. The oppo-air match stays. Untouched: the wind reads'
+  internal pull/oppo field logic (not a tag) and the actual-over-expected
+  advisory's pull-air sub-reason (a different tag's explanatory clause,
+  D-125) — if the PO wants that clause out too, it is one line.
+
+Full gate green (3452 passed, 1 skipped — new tests pin the column set
+and order, the count semantics, the Pull % band anchors, the air-guard
+partition, and the retired tag's absence), consistency check clean, all
+four showcase runners clean.
