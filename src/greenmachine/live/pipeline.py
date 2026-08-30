@@ -565,10 +565,11 @@ def _pitcher_season_reads(
 
 
 def _pitcher_recent_line(events: tuple[PitchEvent, ...]) -> PitcherRecentLine | None:
-    """One recent-form scope of the starter's record off the kept events —
+    """One event-record scope of the starter's record off the kept events —
     the last three months (D-142, PO; two months before under D-128,
-    L30 before that under D-111). None
-    when the scope has no events at all — the surface names the absence.
+    L30 before that under D-111), or the full season per batting side off
+    his season pitch record (D-143, PO). None when the scope has no events
+    at all — the surface names the absence.
     wOBA sums the per-event values over the per-event denominators, the
     same convention the expected-wOBA read uses."""
     if not events:
@@ -652,6 +653,15 @@ class PitcherCard:
     recent_overall: PitcherRecentLine | None = None
     recent_vs_left: PitcherRecentLine | None = None
     recent_vs_right: PitcherRecentLine | None = None
+    # D-143 (PO): the season-scope per-side splits off his full-season
+    # pitch record — the starter card's default side rows now that the
+    # toggle flips all three rows. The boards publish no per-side season
+    # split, so these are computed from the kept events exactly like the
+    # recent lines — HR/9 and xISO stay named absences (no innings and no
+    # per-event expected SLG in a pitch record). None names the absence
+    # (no fetch wired, fetch failure, or no record).
+    season_vs_left: PitcherRecentLine | None = None
+    season_vs_right: PitcherRecentLine | None = None
     # SP-3 (D-123): the primary pitch's season-to-window drift facts, and
     # the raw workload facts off the pitching game log. Each None names
     # its absence — no arsenal board rows, or no start in the lookback.
@@ -1453,6 +1463,7 @@ def _pitcher_card(
     window_events: tuple[PitchEvent, ...],
     log_entries: tuple[PitchingLogEntry, ...] = (),
     slate_date: date | None = None,
+    season_events: tuple[PitchEvent, ...] = (),
 ) -> PitcherCard:
     season = season_pitching.get(probable_id)
     current_rows = pitcher_arsenal.get(probable_id, ())
@@ -1495,6 +1506,12 @@ def _pitcher_card(
         ),
         recent_vs_right=_pitcher_recent_line(
             tuple(event for event in window_events if event.batter_side == "R")
+        ),
+        season_vs_left=_pitcher_recent_line(
+            tuple(event for event in season_events if event.batter_side == "L")
+        ),
+        season_vs_right=_pitcher_recent_line(
+            tuple(event for event in season_events if event.batter_side == "R")
         ),
         stuff_drift=_stuff_drift(season_rows, window_events),
         workload=(_starter_workload(log_entries, slate_date) if slate_date is not None else None),
@@ -1543,6 +1560,8 @@ def build_board(
     park_factors: dict[int, dict[Handedness, ParkFactor]],
     wind_for: Callable[[ParkVenue, datetime], tuple[Decimal, str] | None] = lambda venue, at: None,
     humidity_for: Callable[[ParkVenue, datetime], Decimal | None] = lambda venue, at: None,
+    fetch_pitcher_season_events: Callable[[int], tuple[PitchEvent, ...] | FetchFailure]
+    | None = None,
 ) -> SlateBoard | FetchFailure:
     """Assemble and grade the full slate. Only a slate-level failure is fatal."""
     diagnostics: list[str] = []
@@ -1666,6 +1685,23 @@ def build_board(
                 diagnostics.append(f"pitching game logs: {fetched_pitching_logs.reason}")
                 continue
             pitching_logs.update(fetched_pitching_logs)
+
+    # D-143 (PO): each probable's full-season pitch record — the season
+    # scope behind the starter cards' per-side rows, now that the card's
+    # toggle flips all three rows. One query per probable (the caller
+    # caches per slate day); None when the build wires no fetcher
+    # (backtest boards skip it — a fetch per probable per backtest day
+    # would bury the range), a failure names itself in diagnostics.
+    season_events_by_pitcher: dict[int, tuple[PitchEvent, ...]] = {}
+    if fetch_pitcher_season_events is not None:
+        for pid in probable_ids:
+            fetched_season_events = fetch_pitcher_season_events(pid)
+            if isinstance(fetched_season_events, FetchFailure):
+                diagnostics.append(
+                    f"pitcher season pitch record ({pid}): {fetched_season_events.reason}"
+                )
+                continue
+            season_events_by_pitcher[pid] = fetched_season_events
 
     statcast_result = savant.fetch_statcast_batters(year=year)
     statcast: dict[int, StatcastBatterRow]
@@ -1911,6 +1947,7 @@ def build_board(
                     ),
                     pitching_logs.get(probable.player_id, ()),
                     slate_date,
+                    season_events_by_pitcher.get(probable.player_id, ()),
                 )
                 probable_by_side[side_key] = (probable.player_id, probable.full_name)
 

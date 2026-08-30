@@ -3653,3 +3653,36 @@ Two things checked along the way:
 
 Full gate green (3446 passed, 1 skipped), consistency check clean, all
 four showcase runners clean.
+
+
+## D-143 - The starter-card toggle flips all three rows; season side rows read his full-season pitch record
+
+2026-08-30 (PO change doc P0: "SP table in batter detail popup: default
+splits = season, toggle shows recent form for all three rows — right now
+it doesn't work properly"). The card's toggle flipped only the overall
+row; the side rows were pinned to the recent record in both modes, so
+"season" showed a season overall over two recent side rows. Now the
+toggle drives all three rows on every starter card (Matchups tab and
+batter detail popup — same component): recent = the three-month record
+(3M / vs L (3M) / vs R (3M)); season = the boards' overall row plus
+"vs L (season)" / "vs R (season)".
+
+The boards publish no per-side season split (the arsenal CSV's hand
+parameter is inert — verified live 2026-08-25), so the season side rows
+are computed from his full-season pitch record, one Savant query per
+probable fetched at board build and cached per slate day — the same
+D-129 endpoint the dialog's breakup uses, now sharing one cache entry
+(the dialog's read returns the raw FetchFailure to the caller so the
+board build can name the diagnostic). The pitch record publishes no
+innings and no per-event expected SLG, so on the season side rows HR/9
+and xISO name their absences exactly as the recent rows do — they live
+on the season-boards overall row — and the HR count shows instead. The
+50-BF / 30-BBE floor (D-134) applies to the season side rows the same
+as the recent ones. Backtest boards wire no season-record fetcher (one
+fetch per probable per backtest day would bury a range), so their season
+side rows name the absence. Three missed "last 2 months" toggle labels
+now read 3 months (D-142's sweep caught the digit-free spellings only).
+
+Full gate green (3450 passed, 1 skipped — four new tests: splits land on
+the card, fetch failure names itself, backtest absence, season-scope row
+text), consistency check clean, all four showcase runners clean.

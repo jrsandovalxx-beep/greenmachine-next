@@ -1086,6 +1086,23 @@ def test_sp_recent_row_names_the_three_month_absences() -> None:
     assert styles["xwOBA"] == streamlit_app._REASON_CSS
 
 
+def test_sp_recent_row_names_the_season_scope_absence() -> None:
+    """D-143 (PO): the starter card's season side rows read his full-season
+    pitch record; with no record they name that scope's absence, never the
+    recent window's."""
+    import streamlit_app
+
+    row, styles = streamlit_app._sp_recent_row(
+        "vs L (season)", None, vulnerability_floor=True, empty_text="no season record"
+    )
+    assert row["Scope"] == "vs L (season) — no season record"
+    assert all(style == streamlit_app._REASON_CSS for style in styles.values())
+    row, _ = streamlit_app._sp_recent_row("vs R (season)", _sp_line(), vulnerability_floor=True)
+    assert row["Scope"].startswith("vs R (season) — 41 BF · 33 BBE")
+    assert row["HR"] == "3"
+    assert row["HR/9"] == "—"  # a pitch record publishes no innings
+
+
 def test_sp_recent_row_at_the_floor_carries_no_advisory() -> None:
     """D-111 + D-134: exactly 50 BF and 30 BBE meets the floor — the amber
     is for below the line, never at it. The researched bands still grade."""

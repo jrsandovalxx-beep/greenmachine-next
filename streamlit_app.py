@@ -724,11 +724,14 @@ def _day_events(day_iso: str, year: int, anchor: str) -> object:
 @st.cache_data(ttl=DAY_EVENTS_TTL_SECONDS, show_spinner=False)
 def _season_pitch_events(
     player_id: int, role: str, slate_iso: str
-) -> tuple[PitchEvent, ...] | None:
+) -> tuple[PitchEvent, ...] | FetchFailure:
     """One player's regular-season pitch record through the slate day
-    (D-129): the batter detail dialog's lazy per-side season split — one
-    Savant query per player, cached per slate day. None names the fetch
-    failure so the breakup names its absence instead of inventing a split."""
+    (D-129): the batter detail dialog's lazy per-side season split and,
+    with ``role="pitcher"``, the starter cards' season-scope side rows
+    (D-143) — one Savant query per player, cached per slate day and shared
+    by both reads. The FetchFailure reaches the caller so the breakup names
+    its absence and the board build names its diagnostic instead of
+    inventing a split."""
     _, savant = live_mlb_adapters()
     year = int(slate_iso[:4])
     result = savant.fetch_player_pitch_events(
@@ -738,8 +741,6 @@ def _season_pitch_events(
         start=f"{year}-03-01",
         end=slate_iso,
     )
-    if isinstance(result, FetchFailure):
-        return None
     return result
 
 
@@ -821,6 +822,12 @@ def live_board(slate_iso: str, batter_window_days: int) -> SlateBoard | FetchFai
     def fetch_day(day: date) -> object:
         return _day_events(day.isoformat(), year, anchor)
 
+    def fetch_pitcher_season_events(pid: int) -> object:
+        # D-143 (PO): one probable's full-season pitch record — the starter
+        # cards' season-scope side rows. Cached per slate day and shared
+        # with the dialog's breakup read.
+        return _season_pitch_events(pid, "pitcher", slate_iso)
+
     weather_diagnostics: list[str] = []
     board = build_board(
         api=_DayAnchoredMlbApi(api, anchor),  # type: ignore[arg-type]
@@ -834,6 +841,7 @@ def live_board(slate_iso: str, batter_window_days: int) -> SlateBoard | FetchFai
         park_factors=park_factor_table(),
         wind_for=_wind_lookup(weather_diagnostics),  # type: ignore[arg-type]
         humidity_for=_humidity_lookup(weather_diagnostics),  # type: ignore[arg-type]
+        fetch_pitcher_season_events=fetch_pitcher_season_events,  # type: ignore[arg-type]
     )
     LIVE_WEATHER_DIAGNOSTICS[slate_iso] = weather_diagnostics
     return board
@@ -2446,14 +2454,18 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
             st.caption("No game on today's slate board — no opposing starter to read.")
         else:
             sp_recent = st.toggle(
-                "Starter metrics: recent form (last 2 months) — season is the default",
+                "Starter metrics: recent form (last 3 months) — season is the default",
                 value=False,
                 key=f"sp_recent_popup_{card.player_id}",
                 help=(
-                    "D-111, rewindowed to three months by D-142 (PO). The "
-                    "overall row flips from the season boards to the "
-                    "starter's last three months of kept pitch events. The "
-                    "side rows always read that three-month window."
+                    "D-111, rewindowed to three months by D-142 (PO); D-143 "
+                    "(PO): the toggle flips all three rows. Season: the "
+                    "overall row reads the season boards; the side rows read "
+                    "his full-season pitch record per batting side. Recent: "
+                    "all three rows read the last three months of kept pitch "
+                    "events. A pitch record publishes no innings and no "
+                    "per-event expected SLG, so HR/9 and xISO live on the "
+                    "season overall row only — the HR count shows instead."
                 ),
             )
             opposing_team = game.away_team if card.team == game.home_team else game.home_team
@@ -2605,7 +2617,7 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
         slate_iso = game.scheduled_start_utc.date().isoformat()
         pitcher_events = _season_pitch_events(pitcher.player_id, "pitcher", slate_iso)
         batter_events = _season_pitch_events(card.player_id, "batter", slate_iso)
-        if pitcher_events is None or batter_events is None:
+        if isinstance(pitcher_events, FetchFailure) or isinstance(batter_events, FetchFailure):
             st.caption(
                 "The season pitch record could not be retrieved for one of "
                 "these players — the breakup stays off rather than invent "
@@ -3025,7 +3037,7 @@ def _render_arms(board: SlateBoard) -> None:
         "throw (pitch types at or above the qualifying usage share)."
     )
     recent_view = st.toggle(
-        "Recent form — the metric columns read the last 2 months of kept "
+        "Recent form — the metric columns read the last 3 months of kept "
         "events; season is the default",
         value=False,
         key="arms_recent_view",
@@ -3589,18 +3601,21 @@ def _sp_recent_row(
     line: PitcherRecentLine | None,
     *,
     vulnerability_floor: bool = False,
+    empty_text: str = "no recent record",
 ) -> tuple[dict[str, str], dict[str, str]]:
-    """One recent-form row of a starter header card (D-111) — the toggle's
-    overall row, or an always-recent side row — over the last three months
-    of kept events (D-142, PO; two months under D-128, L30 before). The event scope publishes no
-    innings and no per-event expected SLG, so HR/9 and xISO name their
-    absences and the HR count shows instead. ``vulnerability_floor`` is
-    the side rows' ratified 50-BF / 30-BBE line (D-134); the overall row
-    carries the general 15-BBE contact floor. Below a floor the values
-    stay visible under the amber advisory, never hidden (D-068)."""
+    """One event-scope row of a starter header card (D-111) — the toggle's
+    overall row, or a side row — over the last three months of kept events
+    (D-142, PO), or the full season off his season pitch record (D-143, PO;
+    ``empty_text`` names the absence for that scope). The event scope
+    publishes no innings and no per-event expected SLG, so HR/9 and xISO
+    name their absences and the HR count shows instead.
+    ``vulnerability_floor`` is the side rows' ratified 50-BF / 30-BBE line
+    (D-134); the overall row carries the general 15-BBE contact floor.
+    Below a floor the values stay visible under the amber advisory, never
+    hidden (D-068)."""
     dash = {column: "—" for column in _SP_CARD_COLUMNS[1:]}
     if line is None:
-        return {"Scope": f"{label} — no recent record", **dash}, {
+        return {"Scope": f"{label} — {empty_text}", **dash}, {
             column: _REASON_CSS for column in dash
         }
     full_label = f"{label} — {line.plate_appearances} BF · {line.batted_balls} BBE"
@@ -3643,8 +3658,10 @@ def _sp_recent_row(
 
 def _sp_card(card: PitcherCard | None, team: str, *, recent: bool, key_suffix: str = "") -> None:
     """One starter header card (D-111): name, team, and hand over the scope
-    rows. An unannounced starter names the absence. D-128 (PO): the
-    recent-form read is the last three months (D-142, PO; L30 before D-128). D-129 (PO): the
+    rows. An unannounced starter names the absence. D-142 (PO): the
+    recent-form read is the last three months (L30 before D-128). D-143
+    (PO): the toggle flips all three rows — the season side rows read his
+    full-season pitch record. D-129 (PO): the
     batter detail popup reuses this card beside the stadium — ``key_suffix``
     keeps its widget key distinct from the tab copy behind the dialog."""
     if card is None:
@@ -3653,14 +3670,35 @@ def _sp_card(card: PitcherCard | None, team: str, *, recent: bool, key_suffix: s
         return
     throws = f" · throws {card.throws}" if card.throws else ""
     st.markdown(f"**{card.full_name}** — {team}{throws}")
+    # D-143 (PO): the toggle drives ALL THREE rows — season (default) or
+    # the three-month recent record. The season side rows come off his
+    # full-season pitch record (no board publishes a per-side season
+    # split), so they carry the event scope's named absences: HR/9 and
+    # xISO stay on the season-boards overall row, the HR count shows.
     overall = (
         _sp_recent_row("3M", card.recent_overall) if recent else _sp_season_row(card.season_reads)
     )
-    rows = [
-        overall,
-        _sp_recent_row("vs L (3M)", card.recent_vs_left, vulnerability_floor=True),
-        _sp_recent_row("vs R (3M)", card.recent_vs_right, vulnerability_floor=True),
-    ]
+    if recent:
+        side_rows = [
+            _sp_recent_row("vs L (3M)", card.recent_vs_left, vulnerability_floor=True),
+            _sp_recent_row("vs R (3M)", card.recent_vs_right, vulnerability_floor=True),
+        ]
+    else:
+        side_rows = [
+            _sp_recent_row(
+                "vs L (season)",
+                card.season_vs_left,
+                vulnerability_floor=True,
+                empty_text="no season record",
+            ),
+            _sp_recent_row(
+                "vs R (season)",
+                card.season_vs_right,
+                vulnerability_floor=True,
+                empty_text="no season record",
+            ),
+        ]
+    rows = [overall, *side_rows]
     sp_frame = pd.DataFrame([row for row, _ in rows])
     st.dataframe(
         styled_text_frame(
@@ -3833,14 +3871,18 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
         )
         with st.expander(f"{game.away_team} at {game.home_team} — {game.venue_name} · {pitchers}"):
             sp_recent = st.toggle(
-                "Starter metrics: recent form (last 2 months) — season is the default",
+                "Starter metrics: recent form (last 3 months) — season is the default",
                 value=False,
                 key=f"sp_recent_{game.game_pk}",
                 help=(
-                    "D-111, rewindowed to three months by D-142 (PO). The "
-                    "overall row flips from the season boards to the "
-                    "starter's last three months of kept pitch events. The "
-                    "side rows always read that three-month window."
+                    "D-111, rewindowed to three months by D-142 (PO); D-143 "
+                    "(PO): the toggle flips all three rows. Season: the "
+                    "overall row reads the season boards; the side rows read "
+                    "his full-season pitch record per batting side. Recent: "
+                    "all three rows read the last three months of kept pitch "
+                    "events. A pitch record publishes no innings and no "
+                    "per-event expected SLG, so HR/9 and xISO live on the "
+                    "season overall row only — the HR count shows instead."
                 ),
             )
             away_column, field_column, home_column = st.columns([5, 4, 5])
@@ -3854,8 +3896,9 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
                 "Starter cards (D-111): the overall row reads the season "
                 "boards (expected-statistics and Statcast boards against, "
                 "statsapi season line) or, on the toggle, the last three "
-                "months of kept events (D-142, PO); the side rows always "
-                "read that three-month window. Green marks only the digest's "
+                "months of kept events (D-142, PO); the side rows flip with "
+                "it — season side splits read his full-season pitch record "
+                "(D-143, PO). Green marks only the digest's "
                 "pitcher-vulnerability read — HR/9 ≥ 1.5 (v2.2). The "
                 "event scope publishes no innings and no per-event "
                 "expected SLG, so HR/9 and xISO stay season reads and the "
