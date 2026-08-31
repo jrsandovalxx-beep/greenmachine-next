@@ -3759,3 +3759,27 @@ Full gate green (3453 passed, 1 skipped — new tests pin the all-pitches
 default, the toggle's two scopes, the K% basis on both lines, the HTML
 rows' header hovers, and the no-raw-None cell guard), consistency check
 clean, all four showcase runners clean.
+
+
+## D-146 - The shortlist sorts, highest first; the extra-look tag leaves
+
+2026-08-31 (PO change doc P2, all three sluggers items):
+
+- The Sluggers tab loads highest grades at the top now — S before A, the
+  total score breaking ties — and a Sort by radio orders the shortlist on
+  Grade (the default), Park factor (the batter-side HR factor, an
+  uncovered park last) or Form Score (the graded form subtotal off the
+  same category read the cell prints — one derivation, so the sort and
+  the cell can never disagree; a missing one sorts last). Highest first
+  on every choice, the grade and the name breaking ties so a refresh
+  never shuffles equals. A radio, not a selectbox — the no-selectbox
+  board rule (D-015/D-017's chooser ban) stands; this is a row-order
+  pick, not a ranking control, and the shell test's radio whitelist now
+  names it.
+- The leadoff "extra look at the starter (4-5 PA tier)" tag is removed
+  completely — the top-5 slot booster ("bats Nth") stays; the v2.2 slot
+  scoring itself was never the tag and is untouched.
+
+Full gate green (3454 passed, 1 skipped — a new test pins the default
+order, both alternate sorts, the absent-value tails and the tag's
+removal), consistency check clean, all four showcase runners clean.
