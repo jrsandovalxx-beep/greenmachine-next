@@ -3918,3 +3918,24 @@ Full gate green (3457 passed, 1 skipped — a new AppTest drives a
 synthetic build failure through the real entry path and asserts the
 named surface, the printed traceback, and zero uncaught exceptions),
 consistency check clean, all four showcase runners clean.
+
+
+## D-151 - Deploy repair, second round: a real specification change, and the failure surface names the module's origin
+
+2026-08-31: the deploy after D-149 still served the pre-D-143 installed
+package — the traceback (now visible via D-150) reads
+"build_board() got an unexpected keyword argument
+'fetch_pitcher_season_events'", a D-143 parameter, while the checkout's
+streamlit_app.py is current. The comment-only cache-bust did not rebuild
+the host's environment, so its cache evidently keys on the dependency
+specifications and ignores comments. This round moves the tzdata floor
+for real (a specification change must invalidate any sane cache key) —
+pyproject and the deployment-contract test move with it, deliberately,
+since the contract pins the requirements file line-for-line. The D-150
+failure surface also prints the resolved pipeline module file and
+build_board's actual parameter list, so if the host still serves a
+stale install the next load names exactly where it resolves from. No
+application behaviour changed.
+
+Gate: full suite green after the three-file dependency move; no logic
+changed.

@@ -4472,6 +4472,19 @@ def render_live_board() -> None:
         blot.empty()
         st.error("The slate board build failed unexpectedly (D-150).")
         st.code(traceback.format_exc())
+        # D-150 diagnostics: WHERE the installed package resolves from and
+        # what signature it actually carries — the host served a stale
+        # installed copy of the package while the checkout was current.
+        import inspect
+
+        import greenmachine.live.pipeline as _pipeline
+
+        st.code(
+            "pipeline module file: "
+            f"{_pipeline.__file__}\n"
+            "build_board parameters: "
+            f"{sorted(inspect.signature(_pipeline.build_board).parameters)}"
+        )
         return
     blot.empty()
     if isinstance(board, FetchFailure):

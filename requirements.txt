@@ -19,9 +19,16 @@
 # commit built cleanly off-host on Python 3.12 AND on a fresh 3.14
 # environment (the host's interpreter family): the same stale-environment
 # failure mode as D-137, so the host rebuilds from scratch again.
+# D-151 (2026-08-31): the comment bump did NOT rebuild the environment —
+# the deploy after D-149 still served the pre-D-143 installed package
+# (build_board without fetch_pitcher_season_events) while the checkout was
+# current, so the host's environment cache evidently keys on the dependency
+# specifications and ignores comments. The tzdata floor now moves for real
+# (a specification change must invalidate any sane cache key); pyproject
+# and the deployment-contract test move with it, deliberately.
 -e .
 streamlit>=1.37,<2
 pandas>=2.1,<4
 PyYAML>=6,<7
 pydantic>=2,<3
-tzdata>=2024.1
+tzdata>=2025.1

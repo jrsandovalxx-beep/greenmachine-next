@@ -25,7 +25,9 @@ dependencies = [
     # IANA time-zone data for venue-local scheduled times (GM-020). zoneinfo
     # falls back to the OS database, which Windows does not ship; tzdata is
     # pure, versioned zone data — a deterministic input, not behavior.
-    "tzdata>=2024.1",
+    # Floor moved to 2025.1 by D-151 (2026-08-31): a real specification
+    # change was needed to invalidate the host's cached environment.
+    "tzdata>=2025.1",
 ]
 
 [project.optional-dependencies]
