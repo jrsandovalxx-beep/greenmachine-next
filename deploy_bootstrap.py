@@ -38,7 +38,9 @@ the host, in the sandbox, and under the test suites.
 
 from __future__ import annotations
 
+import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -75,8 +77,34 @@ if sys.pycache_prefix is None or "gm_pycache_" not in sys.pycache_prefix:
 PYCACHE_PREFIX = Path(sys.pycache_prefix)
 SWEPT_COUNT, LEFTOVER_CACHES = sweep_bytecode_caches(Path(__file__).parent)
 
-# D-157/D-158: staleness marker for the entrypoint's eviction guard — see
-# the matching constant in greenmachine/__init__.py. A pre-loaded module
-# without it is by definition stale and gets evicted — at most once per
-# process (D-158) — before the real imports run.
-DEPLOY_EPOCH = 159
+
+def _deploy_epoch() -> str:
+    """The deploy epoch is the checkout's own commit sha (D-162) — the
+    same read the entrypoint and the package marker make, so the three
+    can never drift: git first, then GM_COMMIT, else "unknown"."""
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).resolve().parent,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        completed = None
+    if completed is not None and completed.returncode == 0 and completed.stdout.strip():
+        return completed.stdout.strip()
+    env_value = os.environ.get("GM_COMMIT", "").strip()
+    return env_value or "unknown"
+
+
+# D-157/D-158/D-162: staleness marker for the entrypoint's eviction guard
+# — see the matching marker in greenmachine/__init__.py. A pre-loaded
+# module whose marker misses the entrypoint's read is by definition stale
+# and gets evicted — at most once per epoch (D-159) — before the real
+# imports run. Since D-162 the marker is the commit sha itself, read at
+# import time: a module loaded from old code carries the old sha, and no
+# one can forget to bump it — the D-160/D-161 deploy forgot the literal
+# 159 bump, and the PicklingError returned within the hour.
+DEPLOY_EPOCH = _deploy_epoch()

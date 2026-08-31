@@ -153,24 +153,28 @@ def test_the_deploy_bootstrap_sweeps_bytecode_before_the_package_imports(
     assert (
         'getattr(sys.modules[root], "DEPLOY_EPOCH", None) != _EXPECTED_DEPLOY_EPOCH' in entrypoint
     )
-    # D-158/D-159: the eviction runs at most once per DEPLOY EPOCH — the
-    # host's process outlives deploys (D-159 caught one process serving
-    # two commits), so a process-wide flag would disable the eviction
-    # exactly when the next deploy needs it, while a every-rerun check
-    # (D-157) evicted a half-initialized package mid-import (the
-    # PicklingError). The epoch flag and the lock live on sys; a real
-    # eviction also clears both st caches (cached objects hold the old
-    # module set's classes).
-    assert "_EXPECTED_DEPLOY_EPOCH = 159" in entrypoint
+    # D-158/D-159/D-162: the eviction runs at most once per DEPLOY
+    # EPOCH — the host's process outlives deploys (D-159 caught one
+    # process serving two commits), so a process-wide flag would disable
+    # the eviction exactly when the next deploy needs it, while an
+    # every-rerun check (D-157) evicted a half-initialized package
+    # mid-import (the PicklingError). The epoch flag and the lock live on
+    # sys; a real eviction also clears both st caches (cached objects
+    # hold the old module set's classes).
+    # D-162: the epoch is the checkout's commit sha, read at runtime —
+    # no hand-bumped literal to forget (D-160/D-161 forgot, and the
+    # PicklingError returned).
+    assert "_EXPECTED_DEPLOY_EPOCH = _deploy_epoch()" in entrypoint
+    assert '["git", "rev-parse", "HEAD"]' in entrypoint
     assert "_gm_eviction_epoch" in entrypoint
     assert "threading.Lock()" in entrypoint
     assert '"_initialized"' in entrypoint
     assert "_gm_cache_clear_pending" in entrypoint
     assert "st.cache_resource.clear()" in entrypoint
     bootstrap_text = (REPO_ROOT / "deploy_bootstrap.py").read_text(encoding="utf-8")
-    assert "DEPLOY_EPOCH = 159" in bootstrap_text
+    assert "DEPLOY_EPOCH = _deploy_epoch()" in bootstrap_text
     package_text = (REPO_ROOT / "src" / "greenmachine" / "__init__.py").read_text(encoding="utf-8")
-    assert "DEPLOY_EPOCH = 159" in package_text
+    assert "DEPLOY_EPOCH = _deploy_epoch()" in package_text
 
 
 def test_the_entrypoint_evicts_a_preloaded_stale_bootstrap(tmp_path: Path) -> None:
@@ -216,9 +220,15 @@ def test_the_entrypoint_evicts_a_preloaded_stale_bootstrap(tmp_path: Path) -> No
     # entrypoint get its first line — redirect, evict the stale pre-load,
     # import for real.
     payload = (
-        "import importlib, sys, tempfile, threading\n"
+        "import importlib, subprocess, sys, tempfile, threading\n"
+        "from pathlib import Path\n"
         "import deploy_bootstrap as stale\n"
-        "assert getattr(stale, 'DEPLOY_EPOCH', None) != 159, 'stale serve expected'\n"
+        # D-162: the epoch is the checkout's commit sha — the payload reads
+        # it the same way the marker does, so the two always agree.
+        "EXPECTED = subprocess.run(['git', 'rev-parse', 'HEAD'],"
+        " cwd=Path(stale.__file__).resolve().parent, capture_output=True,"
+        " text=True).stdout.strip() or 'unknown'\n"
+        "assert getattr(stale, 'DEPLOY_EPOCH', None) != EXPECTED, 'stale serve expected'\n"
         "sys.pycache_prefix = tempfile.mkdtemp(prefix='gm_pycache_')\n"
         # The entrypoint's D-159 guard, mirrored line for line: at most once
         # per deploy epoch, under a lock on sys, judging only fully
@@ -242,16 +252,16 @@ def test_the_entrypoint_evicts_a_preloaded_stale_bootstrap(tmp_path: Path) -> No
         "                        if getattr(getattr(m, '__spec__', None), '_initialized', True):\n"
         "                            sys.modules.pop(n, None)\n"
         "                    sys._gm_cache_clear_pending = True\n"
-        "entrypoint_guard(159)\n"
+        "entrypoint_guard(EXPECTED)\n"
         "import deploy_bootstrap\n"
-        "assert deploy_bootstrap.DEPLOY_EPOCH == 159, 'still stale after eviction'\n"
+        "assert deploy_bootstrap.DEPLOY_EPOCH == EXPECTED, 'still stale after eviction'\n"
         "assert hasattr(deploy_bootstrap, 'SWEPT_COUNT'), 'still stale after eviction'\n"
         "assert 'gm_pycache_' in (sys.pycache_prefix or '')\n"
         "assert sys._gm_cache_clear_pending is True, 'eviction must schedule a cache clear'\n"
         # Phase 2: within one epoch the guard never fires again — the bound
         # module object stays the process's one copy.
         "first = sys.modules['deploy_bootstrap']\n"
-        "entrypoint_guard(159)\n"
+        "entrypoint_guard(EXPECTED)\n"
         "assert sys.modules['deploy_bootstrap'] is first, 'fresh module re-evicted'\n"
         # Phase 3: a half-initialized markerless root is an import in
         # flight — the pop loop spares it even when another root's stale
@@ -262,20 +272,20 @@ def test_the_entrypoint_evicts_a_preloaded_stale_bootstrap(tmp_path: Path) -> No
         "fake.__spec__ = importlib.machinery.ModuleSpec('greenmachine', None)\n"
         "fake.__spec__._initialized = False\n"
         "sys.modules['greenmachine'] = fake\n"
-        "entrypoint_guard(160)\n"
+        "entrypoint_guard(EXPECTED + '-next')\n"
         "assert sys.modules.get('greenmachine') is fake, 'in-flight import evicted'\n"
         "assert 'deploy_bootstrap' not in sys.modules, 'old-epoch bootstrap survived'\n"
         "import deploy_bootstrap as second\n"
-        "assert second.DEPLOY_EPOCH == 159 and second is not first\n"
+        "assert second.DEPLOY_EPOCH == EXPECTED and second is not first\n"
         # Phase 4: a fully initialized root from an OLD epoch IS evicted on
         # the epoch bump — the host's process outlives deploys (D-159).
         "fake.__spec__._initialized = True\n"
-        "sys._gm_eviction_epoch = 159\n"
-        "entrypoint_guard(160)\n"
+        "sys._gm_eviction_epoch = EXPECTED\n"
+        "entrypoint_guard(EXPECTED + '-next')\n"
         "assert 'greenmachine' not in sys.modules, 'old-epoch module survived the bump'\n"
         "assert 'deploy_bootstrap' not in sys.modules, 'old-epoch bootstrap survived bump'\n"
         "import deploy_bootstrap as third\n"
-        "assert third.DEPLOY_EPOCH == 159 and third is not second\n"
+        "assert third.DEPLOY_EPOCH == EXPECTED and third is not second\n"
         "print('FRESH')\n"
     )
     ran = run_guarded_python(
