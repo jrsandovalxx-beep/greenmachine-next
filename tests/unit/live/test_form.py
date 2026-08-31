@@ -324,10 +324,14 @@ def test_the_volume_counts_and_all_contact_pull_share_aggregate() -> None:
             _event(event="walk"),
             _event(event="sac_fly"),
             _event(event="strikeout"),
+            # D-148 (PO audit): an intentional walk consumes no at-bat,
+            # and a truncated PA is no plate appearance at all.
+            _event(event="intent_walk"),
+            _event(event="truncated_pa"),
         )
     )
-    assert metrics.plate_appearances == 7
-    assert metrics.at_bats == 5  # the walk and the sac fly consume none
+    assert metrics.plate_appearances == 8  # the truncated PA never happened
+    assert metrics.at_bats == 5  # the walks and the sac fly consume none
     assert metrics.hits == 2
     assert metrics.measurable_contacts == 3
     assert metrics.pulled_contacts == 2  # the pulled ground ball counts (D-144)

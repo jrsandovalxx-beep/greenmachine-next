@@ -40,6 +40,8 @@ from greenmachine.live.form import (
     HARD_HIT_THRESHOLD_MPH,
     HIT_BASES,
     NON_AT_BAT_EVENTS,
+    NON_PLATE_APPEARANCE_EVENTS,
+    STRIKEOUT_EVENTS,
     FormSection,
     aggregate_form,
     is_measurable_air,
@@ -828,7 +830,9 @@ class _PlateOutcomes:
 
 
 def _plate_outcomes(events: Sequence[PitchEvent]) -> _PlateOutcomes:
-    ending = [event for event in events if event.event]
+    ending = [
+        event for event in events if event.event and event.event not in NON_PLATE_APPEARANCE_EVENTS
+    ]
     at_bats = sum(1 for event in ending if event.event not in NON_AT_BAT_EVENTS)
     hits = sum(1 for event in ending if event.event in HIT_BASES)
     bases = sum(HIT_BASES.get(event.event, 0) for event in ending)
@@ -858,7 +862,7 @@ def _plate_outcomes(events: Sequence[PitchEvent]) -> _PlateOutcomes:
         (event.woba_denom for event in actual_woba_ending if event.woba_denom is not None),
         Decimal(0),
     )
-    strikeouts = sum(1 for event in ending if event.event == "strikeout")
+    strikeouts = sum(1 for event in ending if event.event in STRIKEOUT_EVENTS)
     return _PlateOutcomes(
         plate_appearances=len(ending),
         at_bats=at_bats,

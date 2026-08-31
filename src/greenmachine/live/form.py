@@ -52,8 +52,33 @@ _FIELD_AVERAGE_BAT_SPEED = "avg_bat_speed"
 # Plate-appearance event semantics (D-144): which PA-ending events are not
 # at-bats, and each hit's total bases. One definition — the form section's
 # AB/H counts and the grid's AVG/SLG denominators can never drift apart.
-NON_AT_BAT_EVENTS = frozenset({"walk", "hit_by_pitch", "sac_fly", "sac_bunt", "catcher_interf"})
+# D-148 (PO audit): intent_walk joined the family after the live cross-check
+# against the official game logs found intentional walks charged as at-bats
+# (81 of them across four 2025 seasons) — an intentional walk is a walk. The
+# sacrifice double-plays ride along unobserved in ~17k scanned pitches but
+# unambiguous: a sacrifice is never an at-bat, with or without the runner.
+NON_AT_BAT_EVENTS = frozenset(
+    {
+        "walk",
+        "intent_walk",
+        "hit_by_pitch",
+        "sac_fly",
+        "sac_bunt",
+        "sac_fly_double_play",
+        "sac_bunt_double_play",
+        "catcher_interf",
+    }
+)
 HIT_BASES = {"single": 1, "double": 2, "triple": 3, "home_run": 4}
+# D-148: a truncated PA (the inning or game ended on the bases with the
+# plate appearance unresolved) is no plate appearance at all on the
+# official line — verified live: the event-derived PA count ran exactly the
+# truncated count above the statsapi season line. It leaves the PA
+# denominator entirely rather than riding the non-AB set.
+NON_PLATE_APPEARANCE_EVENTS = frozenset({"truncated_pa"})
+# D-148: a strikeout with a runner doubled off is still a strikeout on the
+# official line (four across four 2025 seasons) — the K reads count it.
+STRIKEOUT_EVENTS = frozenset({"strikeout", "strikeout_double_play"})
 
 
 @dataclass(frozen=True)
@@ -210,7 +235,9 @@ def aggregate_form(events: tuple[PitchEvent, ...]) -> FormMetrics:
     # D-144 (PO): the window's volume counts — PA-ending events, at-bats
     # (PA-ending less walks, hit by pitches, sacrifices, interference) and
     # hits — and the all-contact pull read over the measurable contacts.
-    ending = [event for event in events if event.event]
+    ending = [
+        event for event in events if event.event and event.event not in NON_PLATE_APPEARANCE_EVENTS
+    ]
     measurable = [event for event in bbe if is_measurable_contact(event)]
     pulled = sum(1 for event in measurable if is_pull(event))
     ev_avg: Decimal | None = None

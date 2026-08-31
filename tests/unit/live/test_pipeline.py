@@ -461,6 +461,35 @@ def test_the_pitcher_contact_reads_exclude_tracked_fouls() -> None:
     assert pitch_line.hard_hit_share == Decimal("1")
 
 
+def test_the_plate_outcome_counts_follow_the_official_scoring() -> None:
+    """D-148 (PO audit): the scoped PA/AB/K counts follow the official
+    scoring rules — verified live 2026-08-31 against the statsapi game
+    logs over a four-week window (Ohtani, Witt Jr, Raleigh: exact match
+    once corrected). An intentional walk is a walk — never an at-bat;
+    a truncated PA (the inning ended on the bases mid-appearance) is no
+    plate appearance at all; a strikeout with a runner doubled off still
+    counts as a strikeout. The old vocabulary charged intent walks as
+    at-bats (81 across four 2025 seasons), let truncated PAs swell the
+    PA denominator, and missed the double-play strikeouts."""
+    from greenmachine.live.pipeline import _plate_outcomes
+
+    outcomes = _plate_outcomes(
+        (
+            _window_event(event="single"),
+            _window_event(event="intent_walk"),
+            _window_event(event="truncated_pa"),
+            _window_event(event="strikeout_double_play"),
+            _window_event(event="walk"),
+            _window_event(event="sac_fly"),
+            _window_event(event="strikeout"),
+        )
+    )
+    assert outcomes.plate_appearances == 6  # the truncated PA never happened
+    assert outcomes.at_bats == 3  # the single and both strikeouts
+    assert outcomes.hits == 1
+    assert outcomes.strikeout_share == Decimal(2) / Decimal(6)
+
+
 def test_a_season_record_failure_names_itself_and_marks_no_split() -> None:
     """D-143 (PO): a failed season-record fetch is a diagnostic, never a
     fabricated split — the card's season side rows stay None and the
