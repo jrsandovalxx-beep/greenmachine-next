@@ -98,6 +98,38 @@ def test_no_secret_shaped_deployment_file_exists() -> None:
         assert found == [], f"secret-shaped file(s) present: {found}"
 
 
+def test_the_deploy_bootstrap_sweeps_bytecode_before_the_package_imports(
+    tmp_path: Path,
+) -> None:
+    """D-153: the 2026-08-31 host crash was stale bytecode inside the
+    checkout outliving the source it was compiled from (the module's
+    ``__file__`` named the current file while serving pre-D-143 code).
+    The bootstrap sweeps every ``__pycache__`` under src/ on import and
+    stops writing new ones — and it must import ahead of every
+    ``greenmachine`` import in the entrypoint."""
+    import deploy_bootstrap
+
+    src = tmp_path / "src" / "pkg"
+    nested = src / "live" / "__pycache__"
+    nested.mkdir(parents=True)
+    (nested / "pipeline.cpython-314.pyc").write_bytes(b"stale")
+    source = src / "live" / "pipeline.py"
+    source.write_text("# current", encoding="utf-8")
+    removed = deploy_bootstrap.sweep_bytecode_caches(tmp_path)
+    assert removed == 1
+    assert not nested.exists()
+    assert source.is_file()  # sources are never touched
+
+    import sys
+
+    assert sys.dont_write_bytecode
+
+    entrypoint = (REPO_ROOT / "streamlit_app.py").read_text(encoding="utf-8")
+    bootstrap_at = entrypoint.index("import deploy_bootstrap")
+    first_package_at = entrypoint.index("from greenmachine")
+    assert bootstrap_at < first_package_at
+
+
 def test_deployment_documentation_names_the_entrypoint_and_requirements() -> None:
     documentation = (REPO_ROOT / "docs" / "STREAMLIT_PROTOTYPE.md").read_text(encoding="utf-8")
     assert "entrypoint | `streamlit_app.py`" in documentation

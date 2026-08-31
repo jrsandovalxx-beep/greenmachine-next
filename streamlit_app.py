@@ -58,6 +58,11 @@ from pathlib import Path
 from typing import Any, NamedTuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+# D-153: the deploy bootstrap sweeps stale bytecode from the checkout's
+# src tree before any greenmachine import can load it — it must stay
+# ahead of every greenmachine import below (isort keeps it here: the
+# import block's earliest plain module).
+import deploy_bootstrap as _deploy_bootstrap  # noqa: F401
 import pandas as pd
 import streamlit as st
 
