@@ -618,7 +618,7 @@ def build_batter_observations(
             form_value=(
                 form_value
                 if form_value is not None
-                else FormValue(value=None, sample=0, window_days=7, sufficient=False)
+                else FormValue(value=None, sample=0, window_games=7, sufficient=False)
             ),
             unit=unit,
             empty_reason=empty_reason,

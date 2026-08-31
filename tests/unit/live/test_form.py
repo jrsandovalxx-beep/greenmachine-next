@@ -134,7 +134,7 @@ def test_oppo_air_resolves_with_the_same_window_rules_as_pull() -> None:
     )
     section = resolve_form_section(recent, extended, (), ())
     assert section.oppo_air_pct is not None
-    assert section.oppo_air_pct.window_days == 14
+    assert section.oppo_air_pct.window_games == 14
     assert section.oppo_air_pct.value == Decimal("100")
     assert section.oppo_air_pct.sufficient
 
@@ -153,7 +153,7 @@ def test_the_l7_air_floor_is_five_air_balls() -> None:
     )
     section = resolve_form_section(five_air, aggregate_form(()), (), ())
     assert section.pull_air_pct is not None
-    assert section.pull_air_pct.window_days == 7
+    assert section.pull_air_pct.window_games == 7
     assert section.pull_air_pct.sample == 5
     assert section.pull_air_pct.sufficient
     four_air = aggregate_form(
@@ -174,7 +174,7 @@ def test_the_l7_air_floor_is_five_air_balls() -> None:
     )
     section = resolve_form_section(aggregate_form(()), twelve_air_l14, (), ())
     assert section.pull_air_pct is not None
-    assert section.pull_air_pct.window_days == 14
+    assert section.pull_air_pct.window_games == 14
     assert section.pull_air_pct.sample == 12
     assert not section.pull_air_pct.sufficient
 
@@ -215,12 +215,12 @@ def test_pulled_barrels_resolves_l7_then_l14_then_a_named_absence() -> None:
     section = resolve_form_section(week, aggregate_form(()), (), ())
     assert section.pulled_barrels is not None
     assert section.pulled_barrels.value == Decimal(1)
-    assert section.pulled_barrels.window_days == 7
+    assert section.pulled_barrels.window_games == 7
     assert section.pulled_barrels.sample == 2
     # An empty L7 falls back to the L14 count and names the window.
     section = resolve_form_section(aggregate_form(()), week, (), ())
     assert section.pulled_barrels is not None
-    assert section.pulled_barrels.window_days == 14
+    assert section.pulled_barrels.window_games == 14
     assert section.pulled_barrels.value == Decimal(1)
     # Zero pulled barrels over a real week shows as 0, not an absence.
     no_pull = aggregate_form(
@@ -249,7 +249,7 @@ def test_each_metric_prefers_the_short_window_independently() -> None:
         tuple(_event(launch_speed_angle=1, launch_speed="80") for _ in range(MIN_BBE_FORM))
     )
     section = resolve_form_section(recent, extended, (), ())
-    assert section.barrel_pct.window_days == 7
+    assert section.barrel_pct.window_games == 7
     assert section.barrel_pct.value == Decimal("100")
     assert section.barrel_pct.sufficient
 
@@ -260,7 +260,7 @@ def test_a_metric_with_an_empty_short_window_falls_back_to_the_long_one() -> Non
         tuple(_event(launch_speed_angle=6, launch_speed="100") for _ in range(MIN_BBE_FORM))
     )
     section = resolve_form_section(recent, extended, (), ())
-    assert section.barrel_pct.window_days == 14
+    assert section.barrel_pct.window_games == 14
     assert section.barrel_pct.sufficient
 
 
@@ -281,7 +281,7 @@ def test_tracking_metrics_are_swing_weighted_across_sides() -> None:
     # (70*300 + 80*100) / 400 = 72.5 mph; ideal share (0.5*300+0.9*100)/400 = 0.6
     assert section.bat_speed_mph.value == Decimal("72.5")
     assert section.ideal_attack_angle_pct.value == Decimal("60")
-    assert section.bat_speed_mph.window_days == 7
+    assert section.bat_speed_mph.window_games == 7
 
 
 def test_the_volume_counts_and_all_contact_pull_share_aggregate() -> None:
@@ -350,13 +350,13 @@ def test_the_counts_resolve_l7_then_l14_then_a_named_absence() -> None:
     section = resolve_form_section(empty, played, (), ())
     assert section.at_bats is not None
     assert section.at_bats.value == Decimal(2)
-    assert section.at_bats.window_days == 14  # the L7 window held no PA
+    assert section.at_bats.window_games == 14  # the L7 window held no PA
     assert section.hits is not None
     assert section.hits.value == Decimal(1)
     section = resolve_form_section(played, empty, (), ())
     assert section.hits is not None
     assert section.hits.value == Decimal(1)
-    assert section.hits.window_days == 7
+    assert section.hits.window_games == 7
     section = resolve_form_section(empty, empty, (), ())
     assert section.at_bats is None
     assert section.hits is None
