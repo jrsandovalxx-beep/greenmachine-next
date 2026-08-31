@@ -3883,3 +3883,16 @@ the official scoring rules on the shared aggregation, and the form
 table's volume-count test now carries an intentional walk and a
 truncated PA), consistency check clean, all four showcase runners
 clean.
+
+
+## D-149 - Deploy repair: force the host's environment rebuild (the D-137 cache-bust, second use)
+
+2026-08-31: after D-148 merged, the deployed app served a TypeError
+crash page from inside the board build. The identical commit built the
+same slate cleanly off-host — on Python 3.12 and on a freshly resolved
+Python 3.14 environment (the host's interpreter family) — so this is
+the D-137 failure mode again: Streamlit Community Cloud's cached
+install environment drifting from the checked-out code. The fix is the
+D-137 mechanism: the cache-bust comment in requirements.txt changes,
+which forces the host to rebuild its environment from scratch on the
+next deploy. No application code changed.
