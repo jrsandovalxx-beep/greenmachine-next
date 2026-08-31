@@ -3987,3 +3987,34 @@ is diagnosable on first load.
 Full gate green (3458 passed, 1 skipped — the deployment contract gains
 the sweep test and the import-ordering pin), consistency check clean,
 all four showcase runners clean.
+
+
+## D-154 - The sweep could not delete the host's caches, so the bytecode root moves to a fresh temp dir
+
+2026-08-31: D-153 shipped and the app stayed down — its own failure
+surface reported why: the sweep found the checkout's __pycache__ trees
+but could not delete them (root-owned, not app-writable), so the stale
+bytecode kept serving. Deleting was always the weaker half of the
+guard; the decisive half is where Python looks.
+
+The bootstrap now sets sys.pycache_prefix to a fresh temp directory
+(tempfile.mkdtemp) BEFORE any greenmachine import. From that line on,
+every bytecode read AND write resolves under the temp root via
+importlib's cache_from_source — the checkout's poisoned caches become
+invisible to the interpreter without needing write access to them, and
+fresh caches regrow safely in /tmp for the process's life. The sweep
+still runs (defense in depth, and it now reports what it could not
+remove instead of pretending), and dont_write_bytecode is dropped —
+with the prefix redirect, bytecode caching is an asset again, not a
+risk.
+
+The D-150 failure surface gains the last forensic: it prints the
+pycache prefix, the sweep counts, and — if a stale entry is ever
+served again — that entry's own 16-byte header (hash-based vs
+timestamp, checked vs unchecked invalidation), its owner-writability,
+and its mtime. Any future recurrence names its own mechanism on the
+crash page.
+
+Full gate green (3458 passed, 1 skipped — the contract test now pins
+the prefix redirect and the sweep's leftover reporting), consistency
+check clean, all four showcase runners clean.

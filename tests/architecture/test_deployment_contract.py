@@ -115,14 +115,21 @@ def test_the_deploy_bootstrap_sweeps_bytecode_before_the_package_imports(
     (nested / "pipeline.cpython-314.pyc").write_bytes(b"stale")
     source = src / "live" / "pipeline.py"
     source.write_text("# current", encoding="utf-8")
-    removed = deploy_bootstrap.sweep_bytecode_caches(tmp_path)
+    removed, leftover = deploy_bootstrap.sweep_bytecode_caches(tmp_path)
     assert removed == 1
+    assert leftover == ()
     assert not nested.exists()
     assert source.is_file()  # sources are never touched
 
+    # D-154: the decisive guard — bytecode-cache lookups redirect to a
+    # writable temp prefix, so a cache entry beside the source can never
+    # be consulted again even when the tree is not app-writable.
+    import importlib.util
     import sys
 
-    assert sys.dont_write_bytecode
+    assert sys.pycache_prefix == str(deploy_bootstrap.PYCACHE_PREFIX)
+    redirected = importlib.util.cache_from_source(str(source))
+    assert redirected.startswith(sys.pycache_prefix)
 
     entrypoint = (REPO_ROOT / "streamlit_app.py").read_text(encoding="utf-8")
     bootstrap_at = entrypoint.index("import deploy_bootstrap")
