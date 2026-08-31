@@ -31,7 +31,10 @@ APPROVED_REQUIREMENTS = (
     "pandas>=2.1,<4",
     "PyYAML>=6,<7",
     "pydantic>=2,<3",
-    "tzdata>=2024.1",
+    # D-151 (2026-08-31): the floor moved deliberately — a real spec change
+    # was the only lever that invalidates the host's cached environment
+    # (comment-only bumps are ignored by it).
+    "tzdata>=2025.1",
 )
 
 _DEV_ONLY_MARKERS = ("pytest", "hypothesis", "ruff", "mypy", "pre-commit", "types-")
