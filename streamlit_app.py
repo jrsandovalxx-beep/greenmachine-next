@@ -4475,15 +4475,35 @@ def render_live_board() -> None:
         # D-150 diagnostics: WHERE the installed package resolves from and
         # what signature it actually carries — the host served a stale
         # installed copy of the package while the checkout was current.
+        import hashlib
         import inspect
+        from pathlib import Path as _Path
 
         import greenmachine.live.pipeline as _pipeline
 
+        module_path = _Path(_pipeline.__file__ or "")
+        repo_root = module_path.parents[3] if len(module_path.parents) > 3 else module_path
+
+        def _git(*args: str) -> str:
+            ran = subprocess.run(
+                ["git", "-C", str(repo_root), *args], capture_output=True, text=True
+            )
+            return (ran.stdout or ran.stderr or "").strip()
+
+        committed = subprocess.run(
+            ["git", "-C", str(repo_root), "show", "HEAD:src/greenmachine/live/pipeline.py"],
+            capture_output=True,
+        ).stdout
         st.code(
-            "pipeline module file: "
-            f"{_pipeline.__file__}\n"
+            f"pipeline module file: {module_path}\n"
             "build_board parameters: "
-            f"{sorted(inspect.signature(_pipeline.build_board).parameters)}"
+            f"{sorted(inspect.signature(_pipeline.build_board).parameters)}\n"
+            f"working-file sha256: {hashlib.sha256(module_path.read_bytes()).hexdigest()[:16]}\n"
+            f"HEAD blob sha256:    {hashlib.sha256(committed).hexdigest()[:16]}\n"
+            f"git HEAD: {_git('rev-parse', '--short', 'HEAD')}\n"
+            f"git status: {_git('status', '--porcelain')[:600] or 'clean'}\n"
+            "git log pipeline.py: "
+            + _git("log", "--oneline", "-3", "--", "src/greenmachine/live/pipeline.py")
         )
         return
     blot.empty()
