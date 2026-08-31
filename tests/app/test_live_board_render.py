@@ -2626,6 +2626,102 @@ def test_card_tags_resolve_the_wind_against_the_dominant_air_field() -> None:
     assert "wind" not in tags[1] and "wind" not in tags[2]
 
 
+def test_card_tags_center_out_wind_assists_every_batter() -> None:
+    """D-161 (PO): a wind plainly out to center is a buff for EVERYBODY —
+    at ≥ 8 mph resolved along the axis every batter reads the assist
+    (strong ≥ 12), spray record or not, and the away-corner kill never
+    fires on it. The Suzuki case: 2026-08-31 at Wrigley, an SW 10 mph
+    wind 8° off the axis read "out to center" in the weather column
+    while his tag said "wind kill: out to right"."""
+    from types import SimpleNamespace
+
+    import streamlit_app
+
+    from greenmachine.inputs.contract import VenueType
+    from greenmachine.live.form import FormValue
+
+    def spray(pull: str, oppo: str, *, sufficient: bool = True) -> SimpleNamespace:
+        return SimpleNamespace(
+            pull_air_pct=FormValue(
+                value=Decimal(pull), sample=10, window_days=7, sufficient=sufficient
+            ),
+            oppo_air_pct=FormValue(
+                value=Decimal(oppo), sample=10, window_days=7, sufficient=sufficient
+            ),
+        )
+
+    base = dict(
+        result=SimpleNamespace(present_observations=[], missing_observations=[]),
+        order_position=None,
+        lineup_is_estimate=False,
+        season_k_share=None,
+        season=None,
+        season_gaps=None,
+        squared_up_share=None,
+        squared_up_swings=0,
+        squared_up_bat_speed=None,
+        statcast=None,
+        sprint_speed_fps=None,
+        batting_side="L",
+        mix_line=None,
+        form=spray("45", "20"),  # pull 45 / center 35 / oppo 20 — pull-dominant
+    )
+
+    def batter(**over: object) -> SimpleNamespace:
+        return SimpleNamespace(**{**base, **over})
+
+    def game(
+        wind_from: str | None,
+        speed: str | None,
+        compass: str | None = "S",
+        temp: str = "72",
+        axis: str | None = "0",
+        venue: VenueType = VenueType.OPEN_AIR,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            venue_type=venue,
+            temperature_fahrenheit=Decimal(temp),
+            home_run_factor_left=None,
+            home_run_factor_right=None,
+            park_orientation_degrees=Decimal(axis) if axis is not None else None,
+            wind_from_degrees=Decimal(wind_from) if wind_from is not None else None,
+            wind_speed_mph=Decimal(speed) if speed is not None else None,
+            wind_direction=compass,
+        )
+
+    # Straight out to center (axis 0, wind FROM 180): every batter reads
+    # the same assist — pull-dominant lefty, pull-dominant righty,
+    # center-dominant, no spray record at all, record under the floors.
+    for card in (
+        batter(),
+        batter(batting_side="R"),
+        batter(form=spray("30", "30")),
+        batter(form=None),
+        batter(form=spray("45", "20", sufficient=False)),
+    ):
+        _, boosters, vetoes = streamlit_app._card_tags(card, None, game=game("180", "10"))
+        assert "wind assist: 10 mph out to center (S 10 mph)" in boosters
+        assert not any("wind kill" in veto for veto in vetoes)
+    # Strong at ≥ 12 resolved.
+    _, boosters, _ = streamlit_app._card_tags(batter(), None, game=game("180", "13"))
+    assert "wind assist: strong 13 mph out to center (S 13 mph)" in boosters
+    # The Suzuki bug: inside the center sector but off dead center (FROM
+    # 195 — 15° off the axis) resolves 9.7 mph out to center AND 9.7 mph
+    # toward the right-hander's oppo corner. The center-out assist reads
+    # and the away-corner kill stays OFF.
+    _, boosters, vetoes = streamlit_app._card_tags(
+        batter(batting_side="R"), None, game=game("195", "10", compass="SSW")
+    )
+    assert "wind assist: 10 mph out to center (SSW 10 mph)" in boosters
+    assert not any("wind kill" in veto for veto in vetoes)
+    # Under the assist line the center-out read is silent — no wind tags.
+    tags = streamlit_app._card_tags(batter(), None, game=game("180", "6"))
+    assert "wind" not in tags[1] and "wind" not in tags[2]
+    # A center-out reading needs the axis: an unmeasured axis stays silent.
+    tags = streamlit_app._card_tags(batter(), None, game=game("180", "13", axis=None))
+    assert "wind" not in tags[1] and "wind" not in tags[2]
+
+
 def test_card_tags_carry_the_spray_alignment_reads() -> None:
     """v2.2 (D-120): the oppo-air match at an oppo share strictly over 20%
     against the OPPOSITE-side factor (the Walker exception — an oppo-power

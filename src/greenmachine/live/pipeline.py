@@ -47,7 +47,6 @@ from greenmachine.live.form import (
     is_measurable_air,
     is_oppo_air,
     is_pull_air,
-    is_straight_air,
     resolve_form_section,
 )
 from greenmachine.live.grading import (
@@ -328,14 +327,13 @@ class BatterGridLine:
     # it is computed separately and injected, None when the event record
     # itself failed (never an invented zero).
     robbed_hr_count: int | None
+    # D-160 (PO): the three air-direction columns read Savant's season
+    # published pull/straight/oppo shares of ALL batted balls, raw, on
+    # every view — window rows carry the same season board as the season
+    # row, so the grid never contradicts the season card. None when the
+    # board has no row for him — the surface names the absence.
     pull_air_share: Decimal | None
-    # SP-1 (D-109): the pull mirror over the identical measurable-air
-    # denominator — None on the season view, which publishes no spray read.
     oppo_air_share: Decimal | None = None
-    # D-128 (PO): the third air profile — straight-away air balls over the
-    # identical measurable-air denominator, so the three shares sum to one.
-    # None on the season view like its siblings; a fit read, deliberately
-    # uncolored on the grid like oppo.
     straight_air_share: Decimal | None = None
     expected_woba: Decimal | None = None
     whiff_share: Decimal | None = None
@@ -1110,14 +1108,21 @@ def _robbed_hr_count(events: Sequence[PitchEvent], cutoff: str) -> int:
 
 
 def _batter_grid_line(
-    events: Sequence[PitchEvent], *, robbed_count: int | None
+    events: Sequence[PitchEvent],
+    *,
+    robbed_count: int | None,
+    batted_ball: BattedBallRow | None = None,
 ) -> BatterGridLine | None:
     """The batter's grid line over one stated scope of pitch events — his
     L30 record against the starter's qualifying mix pitches (D-079). Every
     rate reads exactly these events; a scope with no events returns None so
     the surface states 'no data available' (D-081). The robbed-HR count is
-    the one column off a different basis — the batter's whole last-7-days
-    event record, not this scope — so it arrives computed (PO 2026-08-24)."""
+    one column off a different basis — the batter's whole last-7-days
+    event record, not this scope — so it arrives computed (PO 2026-08-24).
+    D-160 (PO): the three air-direction columns are off a different basis
+    too — Savant's season published pull/straight/oppo shares of ALL
+    batted balls, read raw off the season board on every view, so a
+    window row's spray profile never drifts from the season card."""
     if not events:
         return None
     outcomes = _plate_outcomes(events)
@@ -1132,17 +1137,6 @@ def _batter_grid_line(
         for event in batted
         if event.launch_speed is not None and event.launch_speed >= HARD_HIT_THRESHOLD_MPH
     )
-    # Pull Air % mirrors the form section: pulled air balls over measurable
-    # air balls — a ball without coordinates or a known side leaves both
-    # counts (D-090 keeps it a separate metric from the distance column).
-    measurable_air = [event for event in batted if is_measurable_air(event)]
-    pulls = sum(1 for event in measurable_air if is_pull_air(event))
-    oppos = sum(1 for event in measurable_air if is_oppo_air(event))
-    # D-128 (PO): the straight-away bucket over the same denominator. Pull
-    # and oppo keep the ratified signed convention, so they partition the
-    # set and straight (a fifteen-degree band) overlaps a near-center
-    # ball's signed side — one denominator, not a partition.
-    straights = sum(1 for event in measurable_air if is_straight_air(event))
     return BatterGridLine(
         pitches=len(events),
         plate_appearances=outcomes.plate_appearances,
@@ -1162,31 +1156,17 @@ def _batter_grid_line(
         slugging=outcomes.slugging,
         iso=outcomes.iso,
         robbed_hr_count=robbed_count,
-        pull_air_share=(Decimal(pulls) / Decimal(len(measurable_air)) if measurable_air else None),
-        oppo_air_share=(Decimal(oppos) / Decimal(len(measurable_air)) if measurable_air else None),
-        straight_air_share=(
-            Decimal(straights) / Decimal(len(measurable_air)) if measurable_air else None
-        ),
+        # D-160 (PO): the season board's published shares, raw — the
+        # window view publishes the same spray profile as the season
+        # view; None without a row names the absence, never an invented
+        # split.
+        pull_air_share=batted_ball.pull_air_share_of_bbe if batted_ball else None,
+        oppo_air_share=batted_ball.oppo_air_share_of_bbe if batted_ball else None,
+        straight_air_share=batted_ball.straight_air_share_of_bbe if batted_ball else None,
         expected_woba=outcomes.expected_woba,
         whiff_share=outcomes.whiff_share,
         strikeout_share=outcomes.strikeout_share,
     )
-
-
-def _per_air_share(row: BattedBallRow | None, direction: str) -> Decimal | None:
-    """One air-direction bucket as a share of the batter's air balls
-    (D-128, PO): the batted-ball board's rates are shares of ALL batted
-    balls (the three sum to its air share), so each rebases on the air
-    share here — pipeline-side, §GMF-008. None without a row or an air
-    ball: the surface names the absence, never an invented split."""
-    if row is None or not row.air_share:
-        return None
-    rate = {
-        "pull": row.pull_air_share_of_bbe,
-        "straight": row.straight_air_share_of_bbe,
-        "oppo": row.oppo_air_share_of_bbe,
-    }[direction]
-    return rate / row.air_share
 
 
 def _season_grid_line(
@@ -1202,11 +1182,10 @@ def _season_grid_line(
     statcast board for EV/barrels/hard-hit, the arsenal board for
     PA-weighted xwOBA and pitch-weighted Swing-Str, and — D-128 (PO) —
     the batted-ball profile board for the three air-direction reads:
-    Savant's own published pull/straight/oppo buckets, rebased here to
-    shares of his air balls (the board's rates are shares of ALL batted
-    balls and sum to its air share) so the column speaks one denominator
-    on both views. A missing row or an empty air share names the absence,
-    never an invented split. D-128 (PO): the robbed-HR count shows on
+    Savant's own published pull/straight/oppo buckets as shares of ALL
+    batted balls, read raw (D-160, PO — the window rows carry the same
+    board, so both views speak the season card's numbers). A missing
+    row names the absence, never an invented split. D-128 (PO): the robbed-HR count shows on
     the season view too — it arrives computed, always on its own last-7-
     days basis, which the surface names. The D-110 regression gaps ride
     along when the expected-stats board covers him."""
@@ -1245,9 +1224,13 @@ def _season_grid_line(
         slugging=slugging,
         iso=(slugging - average if average is not None and slugging is not None else None),
         robbed_hr_count=robbed_count,
-        pull_air_share=_per_air_share(batted_ball, "pull"),
-        oppo_air_share=_per_air_share(batted_ball, "oppo"),
-        straight_air_share=_per_air_share(batted_ball, "straight"),
+        # D-160 (PO): the season board's published shares of ALL batted
+        # balls, raw — the PO's card numbers (Merrill 2026-08-31: 19.2 /
+        # 21.5 / 22.5). No rebasing onto the air share: the board's
+        # denominator is the column's denominator.
+        pull_air_share=batted_ball.pull_air_share_of_bbe if batted_ball else None,
+        oppo_air_share=batted_ball.oppo_air_share_of_bbe if batted_ball else None,
+        straight_air_share=batted_ball.straight_air_share_of_bbe if batted_ball else None,
         expected_woba=(woba_total / Decimal(woba_pa)) if woba_pa else None,
         whiff_share=(whiff_total / Decimal(whiff_pitches)) if whiff_pitches else None,
         # D-145 (PO): the season K% reads the statsapi counting line — the
@@ -2162,7 +2145,11 @@ def build_board(
                             else {}
                         ),
                         mix_line=(
-                            _batter_grid_line(mix_scope_events, robbed_count=robbed_count)
+                            _batter_grid_line(
+                                mix_scope_events,
+                                robbed_count=robbed_count,
+                                batted_ball=batted_ball.get(player_id),
+                            )
                             if pitcher_entity is not None
                             else None
                         ),
@@ -2170,7 +2157,11 @@ def build_board(
                         # scope, every pitch type. The matchup tables default
                         # to it; the threshold toggle reads mix_line.
                         mix_line_all=(
-                            _batter_grid_line(matchup_scope_events, robbed_count=robbed_count)
+                            _batter_grid_line(
+                                matchup_scope_events,
+                                robbed_count=robbed_count,
+                                batted_ball=batted_ball.get(player_id),
+                            )
                             if pitcher_entity is not None
                             else None
                         ),
