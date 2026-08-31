@@ -14,6 +14,11 @@
 # deploy the app served an ImportError crash page while the identical code
 # imported cleanly everywhere else, so this comment changes the file and
 # forces the host to rebuild its environment from scratch on the next deploy.
+# D-149 (2026-08-31): bumped again — after D-148's deploy the app served a
+# TypeError crash page from inside the board build while the identical
+# commit built cleanly off-host on Python 3.12 AND on a fresh 3.14
+# environment (the host's interpreter family): the same stale-environment
+# failure mode as D-137, so the host rebuilds from scratch again.
 -e .
 streamlit>=1.37,<2
 pandas>=2.1,<4
