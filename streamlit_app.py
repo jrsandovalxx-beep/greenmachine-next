@@ -62,7 +62,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 # src tree before any greenmachine import can load it — it must stay
 # ahead of every greenmachine import below (isort keeps it here: the
 # import block's earliest plain module).
-import deploy_bootstrap as _deploy_bootstrap  # noqa: F401
+import deploy_bootstrap as _deploy_bootstrap
 import pandas as pd
 import streamlit as st
 
@@ -4499,6 +4499,28 @@ def render_live_board() -> None:
             ["git", "-C", str(repo_root), "show", "HEAD:src/greenmachine/live/pipeline.py"],
             capture_output=True,
         ).stdout
+        # D-154: the bytecode layer's own state — the redirect prefix, what
+        # the sweep removed vs could not, and the stale cache entry's own
+        # header (its invalidation mode and what it was compiled from).
+        import sys as _sys
+
+        cache_tag = _sys.implementation.cache_tag
+        pyc = module_path.parent / "__pycache__" / f"{module_path.stem}.{cache_tag}.pyc"
+        pyc_line = "no bytecode file beside the source"
+        if pyc.is_file():
+            header = pyc.read_bytes()[:16]
+            flags = int.from_bytes(header[4:8], "little")
+            mode = (
+                f"hash-based ({'checked' if flags & 0b10 else 'UNCHECKED'})"
+                if flags & 0b1
+                else "timestamp"
+            )
+            stat = pyc.stat()
+            pyc_line = (
+                f"bytecode beside source: {pyc.name} — {mode}, "
+                f"header {header.hex()}, owner-writable={bool(stat.st_mode & 0o200)}, "
+                f"mtime={datetime.fromtimestamp(stat.st_mtime, UTC):%Y-%m-%d %H:%M}"
+            )
         st.code(
             f"pipeline module file: {module_path}\n"
             "build_board parameters: "
@@ -4509,6 +4531,10 @@ def render_live_board() -> None:
             f"git status: {_git('status', '--porcelain')[:600] or 'clean'}\n"
             "git log pipeline.py: "
             + _git("log", "--oneline", "-3", "--", "src/greenmachine/live/pipeline.py")
+            + f"\npycache prefix: {_sys.pycache_prefix}\n"
+            f"bootstrap sweep: removed {_deploy_bootstrap.SWEPT_COUNT}, "
+            f"leftover {_deploy_bootstrap.LEFTOVER_CACHES}\n"
+            f"{pyc_line}"
         )
         return
     blot.empty()
