@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import base64
 import html
+import importlib
 import os
 import subprocess
 import sys
@@ -72,6 +73,34 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 # exactly when it matters. Only a prefix this process created is trusted.
 if sys.pycache_prefix is None or "gm_pycache_" not in sys.pycache_prefix:
     sys.pycache_prefix = tempfile.mkdtemp(prefix="gm_pycache_")
+
+# D-157: the host can import our modules BEFORE this file's first line
+# runs — D-156's forensics caught deploy_bootstrap loaded from bytecode
+# whose cache path was computed while the prefix was still None, i.e.
+# before the redirect above existed. No line here can run earlier than
+# that pre-import, so the guard works the other direction: record what
+# was pre-loaded, and evict any of it that is stale (no DEPLOY_EPOCH
+# marker) so the imports below re-execute from source under our cache
+# root. Fresh pre-loads are left alone — evicting them on every rerun
+# would rebuild the package per interaction and break isinstance checks
+# against cached objects.
+_PRELOADED_OURS = tuple(
+    name
+    for name in sys.modules
+    if name == "deploy_bootstrap" or name == "greenmachine" or name.startswith("greenmachine.")
+)
+# The marker check reads the two ROOTS only: importing any submodule
+# imports its parent first, so a stale pre-load always shows at the root.
+# (Submodules carry no marker of their own — checking them would evict
+# fresh packages on every rerun.)
+if any(
+    getattr(sys.modules[root], "DEPLOY_EPOCH", None) != 157
+    for root in ("deploy_bootstrap", "greenmachine")
+    if root in sys.modules
+):
+    importlib.invalidate_caches()
+    for _preloaded in _PRELOADED_OURS:
+        del sys.modules[_preloaded]
 
 # D-153/D-155: the deploy bootstrap sweeps stale bytecode from the
 # checkout's src tree before any greenmachine import can load it — it
@@ -4553,8 +4582,30 @@ def render_live_board() -> None:
         # stale serve names its own layer on the crash page.
         _probe("pycache prefix (effective)", lambda: _sys.pycache_prefix)
         _probe("PYTHONPYCACHEPREFIX (env)", lambda: os.environ.get("PYTHONPYCACHEPREFIX"))
+        _probe("pre-loaded before entrypoint ran", lambda: _PRELOADED_OURS or "none")
         _probe("bootstrap module file", lambda: getattr(_deploy_bootstrap, "__file__", "?"))
         _probe("bootstrap module cached", lambda: getattr(_deploy_bootstrap, "__cached__", "?"))
+        _probe("pipeline module cached", lambda: getattr(_pipeline, "__cached__", "?"))
+        _probe(
+            "cache_from_source (computed now)",
+            lambda: importlib.util.cache_from_source(str(module_path)),
+        )
+
+        def _startup_actors() -> str:
+            import site
+
+            pieces = [
+                f"sitecustomize={getattr(_sys.modules.get('sitecustomize'), '__file__', None)}",
+                f"usercustomize={getattr(_sys.modules.get('usercustomize'), '__file__', None)}",
+            ]
+            for base in site.getsitepackages():
+                for pth in sorted(_Path(base).glob("*.pth")):
+                    text = pth.read_text(encoding="utf-8", errors="replace").strip()
+                    pieces.append(f"{pth.name}: {text[:150]!r}")
+            return " | ".join(pieces)
+
+        _probe("startup actors (.pth/customize)", _startup_actors)
+        _probe("sys.path", lambda: " | ".join(_sys.path))
         _probe(
             "bootstrap sweep",
             lambda: (

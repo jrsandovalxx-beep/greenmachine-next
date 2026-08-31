@@ -4089,3 +4089,40 @@ Two fixes, both permanent:
 Full gate green (3459 passed, 1 skipped — the contract suite gains the
 incident-mechanism repro and pins the unconditional form), consistency
 check clean, all four showcase runners clean.
+
+
+## D-157 - The host imports our modules before the entrypoint runs: pre-loaded stale modules are evicted at the top of __main__
+
+2026-08-31: D-156's crash-proof forensics deployed and finally printed
+the whole board — and it was decisive. The effective pycache prefix was
+OURS (the entrypoint redirect ran), PYTHONPYCACHEPREFIX was unset (the
+D-156 env theory died), yet deploy_bootstrap's __cached__ named the
+BESIDE-SOURCE bytecode — a cache path that cache_from_source only
+produces while the prefix is still None. The module was therefore
+imported BEFORE streamlit_app.py's first line executed: some startup
+actor in the host image imports app modules ahead of the script, and it
+served the checkout's root-owned, build-time bytecode for both
+deploy_bootstrap and the greenmachine package.
+
+No entrypoint line can run before that pre-import, so the guard works
+the other direction: the entrypoint records which of our modules are
+already loaded, checks a new DEPLOY_EPOCH staleness marker (present in
+greenmachine/__init__.py and deploy_bootstrap.py — any module without
+it was necessarily served from old code), and evicts stale pre-loads
+from sys.modules so every real import re-executes from source under
+our redirected cache root. The marker check reads the two package
+ROOTS only — importing a submodule imports its parent first, and
+checking submodules would evict fresh packages on every rerun (learned
+via 71 test failures: monkeypatched modules were evicted under
+AppTest). The forensics gain the probes that identify the pre-importer
+if a failure surface ever shows again: pre-loaded module list, pipeline
+__cached__, cache_from_source computed live, .pth contents,
+site/usercustomize, sys.path.
+
+The guarded-child contract test replays the full incident: stale
+deploy_bootstrap pre-imported from a planted unchecked hash-based pyc,
+then the entrypoint sequence — redirect, marker-checked eviction, real
+import — binds the fresh module.
+
+Full gate green (3459 passed, 1 skipped), consistency check clean, all
+four showcase runners clean.

@@ -144,18 +144,29 @@ def test_the_deploy_bootstrap_sweeps_bytecode_before_the_package_imports(
     # PYTHONPYCACHEPREFIX already set, and a guard that fires only on
     # None keeps serving the host's precompiled stale entries.
     assert 'or "gm_pycache_" not in sys.pycache_prefix' in entrypoint
+    # D-157: modules the host imported before the entrypoint ran (served
+    # stale from pre-redirect bytecode) must be evicted between the
+    # redirect and the bootstrap import, so every real import re-executes
+    # from source. The eviction is marker-guarded: fresh pre-loads stay.
+    eviction_at = entrypoint.index("_PRELOADED_OURS")
+    assert redirect_at < eviction_at < bootstrap_at
+    assert 'getattr(sys.modules[root], "DEPLOY_EPOCH", None) != 157' in entrypoint
+    bootstrap_text = (REPO_ROOT / "deploy_bootstrap.py").read_text(encoding="utf-8")
+    assert "DEPLOY_EPOCH = 157" in bootstrap_text
+    package_text = (REPO_ROOT / "src" / "greenmachine" / "__init__.py").read_text(encoding="utf-8")
+    assert "DEPLOY_EPOCH = 157" in package_text
 
 
-def test_the_bootstrap_replaces_a_host_prefix_full_of_stale_bytecode(tmp_path: Path) -> None:
-    """D-156: the host precompiles bytecode under PYTHONPYCACHEPREFIX —
-    unchecked hash-based entries that serve stale code from current
-    sources. Reproduced end to end: a fake host prefix carrying a stale
-    deploy_bootstrap entry (no SWEPT_COUNT), the env var set, then the
-    entrypoint's own sequence — the unconditional redirect first (it
-    lives in __main__, never bytecode-cached, because no module can
-    protect its own cache), then the import. The stale entry must be
-    invisible and the fresh module loaded. This is the 2026-08-31
-    incident mechanism and its fix."""
+def test_the_entrypoint_evicts_a_preloaded_stale_bootstrap(tmp_path: Path) -> None:
+    """D-157: the deploy host imports app modules BEFORE the entrypoint
+    runs — D-156's forensics caught deploy_bootstrap served from bytecode
+    whose cache path was computed while the pycache prefix was still
+    None. Reproduced end to end: a stale deploy_bootstrap is pre-imported
+    (the host's position), then the entrypoint's own sequence runs —
+    unconditional redirect, marker-checked eviction, real import — and
+    the fresh module must be the one bound. A module cannot protect its
+    own cache (D-155), and no entrypoint line can run before the
+    pre-import; eviction is the guard that remains."""
     import os
     import py_compile
     import sys
@@ -170,21 +181,35 @@ def test_the_bootstrap_replaces_a_host_prefix_full_of_stale_bytecode(tmp_path: P
     mirrored = host_prefix / Path(str(repo_file.with_suffix(""))).relative_to("/")
     mirrored.parent.mkdir(parents=True)
     stale_source = tmp_path / "stale_bootstrap.py"
-    stale_source.write_text("# stale pre-D-154 module: no SWEPT_COUNT\n", encoding="utf-8")
+    stale_source.write_text("# stale pre-D-154 module: no markers\n", encoding="utf-8")
     py_compile.compile(
         str(stale_source),
         cfile=str(mirrored.parent / f"{mirrored.name}.{tag}.pyc"),
         doraise=True,
         invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
     )
+    # The host's exact sequence: the stale module is imported FIRST (some
+    # startup actor, prefix still the host's), and only then does the
+    # entrypoint get its first line — redirect, evict the stale pre-load,
+    # import for real.
+    payload = (
+        "import importlib, sys, tempfile\n"
+        "import deploy_bootstrap as stale\n"
+        "assert getattr(stale, 'DEPLOY_EPOCH', None) != 157, 'stale serve expected'\n"
+        "sys.pycache_prefix = tempfile.mkdtemp(prefix='gm_pycache_')\n"
+        "preloaded = [n for n in list(sys.modules) if n == 'deploy_bootstrap']\n"
+        "assert any(getattr(sys.modules[n], 'DEPLOY_EPOCH', None) != 157 for n in preloaded)\n"
+        "importlib.invalidate_caches()\n"
+        "for n in preloaded: del sys.modules[n]\n"
+        "import deploy_bootstrap\n"
+        "assert deploy_bootstrap.DEPLOY_EPOCH == 157, 'still stale after eviction'\n"
+        "assert hasattr(deploy_bootstrap, 'SWEPT_COUNT'), 'still stale after eviction'\n"
+        "assert 'gm_pycache_' in (sys.pycache_prefix or '')\n"
+        "print('FRESH')\n"
+    )
     ran = run_guarded_python(
         "-c",
-        "import sys, tempfile; "
-        "sys.pycache_prefix = tempfile.mkdtemp(prefix='gm_pycache_'); "
-        "import deploy_bootstrap; "
-        "assert 'gm_pycache_' in (sys.pycache_prefix or ''), sys.pycache_prefix; "
-        "assert hasattr(deploy_bootstrap, 'SWEPT_COUNT'), 'stale module served'; "
-        "print('FRESH')",
+        payload,
         env={
             **os.environ,
             "PYTHONPYCACHEPREFIX": str(host_prefix),

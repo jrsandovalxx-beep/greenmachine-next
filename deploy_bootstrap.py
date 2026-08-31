@@ -74,3 +74,9 @@ if sys.pycache_prefix is None or "gm_pycache_" not in sys.pycache_prefix:
     sys.pycache_prefix = tempfile.mkdtemp(prefix="gm_pycache_")
 PYCACHE_PREFIX = Path(sys.pycache_prefix)
 SWEPT_COUNT, LEFTOVER_CACHES = sweep_bytecode_caches(Path(__file__).parent)
+
+# D-157: staleness marker for the entrypoint's eviction guard — see the
+# matching constant in greenmachine/__init__.py. A pre-loaded module
+# without it is by definition stale and gets evicted before the real
+# imports run.
+DEPLOY_EPOCH = 157
