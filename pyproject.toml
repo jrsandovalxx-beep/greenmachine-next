@@ -83,6 +83,13 @@ select = [
     "W",   # pycodestyle warnings
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# D-155: the entrypoint sets sys.pycache_prefix between its stdlib imports
+# and every later import — the redirect must precede the imports to protect
+# them, so "module level import not at top of file" cannot hold for this
+# one file. Everywhere else E402 still applies.
+"streamlit_app.py" = ["E402"]
+
 [tool.ruff.format]
 docstring-code-format = true
 

@@ -48,6 +48,8 @@ import base64
 import html
 import os
 import subprocess
+import sys
+import tempfile
 import traceback
 from collections.abc import Callable, Iterable
 from datetime import UTC, date, datetime, timedelta, timezone
@@ -58,10 +60,21 @@ from pathlib import Path
 from typing import Any, NamedTuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-# D-153: the deploy bootstrap sweeps stale bytecode from the checkout's
-# src tree before any greenmachine import can load it — it must stay
-# ahead of every greenmachine import below (isort keeps it here: the
-# import block's earliest plain module).
+# D-155: __main__ is the one file the host can never serve stale —
+# Streamlit re-executes it on every run and never caches its bytecode,
+# which is why app-file edits always deployed while package edits went
+# stale. The bytecode-root redirect must live HERE: D-154 kept it inside
+# deploy_bootstrap, and the host's root __pycache__ served the bootstrap
+# itself from D-153 bytecode (a module cannot protect its own cache),
+# taking every guard below down with it.
+if sys.pycache_prefix is None:
+    sys.pycache_prefix = tempfile.mkdtemp(prefix="gm_pycache_")
+
+# D-153/D-155: the deploy bootstrap sweeps stale bytecode from the
+# checkout's src tree before any greenmachine import can load it — it
+# must stay ahead of every greenmachine import below (isort keeps it
+# here: the import block's earliest plain module). The redirect above
+# guarantees this import itself loads fresh from source.
 import deploy_bootstrap as _deploy_bootstrap
 import pandas as pd
 import streamlit as st

@@ -132,9 +132,14 @@ def test_the_deploy_bootstrap_sweeps_bytecode_before_the_package_imports(
     assert redirected.startswith(sys.pycache_prefix)
 
     entrypoint = (REPO_ROOT / "streamlit_app.py").read_text(encoding="utf-8")
+    # D-155: the redirect must live in the entrypoint itself, ahead of the
+    # bootstrap import — the host's root __pycache__ served the bootstrap
+    # stale (D-153 bytecode under a current D-154 source), and a module
+    # cannot protect its own cache. __main__ is never bytecode-cached.
+    redirect_at = entrypoint.index('sys.pycache_prefix = tempfile.mkdtemp(prefix="gm_pycache_")')
     bootstrap_at = entrypoint.index("import deploy_bootstrap")
     first_package_at = entrypoint.index("from greenmachine")
-    assert bootstrap_at < first_package_at
+    assert redirect_at < bootstrap_at < first_package_at
 
 
 def test_deployment_documentation_names_the_entrypoint_and_requirements() -> None:

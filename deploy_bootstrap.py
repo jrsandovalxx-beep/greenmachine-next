@@ -20,6 +20,15 @@ entries become invisible whether or not they can be deleted, and normal
 bytecode caching keeps working inside the prefix. The sweep stays as
 hygiene for trees the app CAN write.
 
+D-155 moved the redirect itself into the entrypoint: D-154 kept it here,
+and the host's root ``__pycache__`` served THIS module from D-153
+bytecode — a module cannot protect its own cache. ``__main__``
+(streamlit_app.py) is never bytecode-cached, so the redirect there is
+the one line of the guard the host must execute fresh. This module now
+adopts the entrypoint's prefix when it exists and sets one only for its
+other importers (tests, runners, scripts); it keeps the sweep and the
+forensics constants the failure surface prints.
+
 Imported ahead of every greenmachine import in streamlit_app.py; the
 module's own location anchors the repo root, so it works identically on
 the host, in the sandbox, and under the test suites.
@@ -54,7 +63,9 @@ def sweep_bytecode_caches(root: Path) -> tuple[int, tuple[str, ...]]:
 
 
 # The prefix redirect comes first: from this line on, no import ever reads
-# bytecode from beside a source file again.
-PYCACHE_PREFIX = Path(tempfile.mkdtemp(prefix="gm_pycache_"))
-sys.pycache_prefix = str(PYCACHE_PREFIX)
+# bytecode from beside a source file again. The entrypoint already set the
+# prefix (D-155) — adopt it; only other importers need one created here.
+if sys.pycache_prefix is None:
+    sys.pycache_prefix = tempfile.mkdtemp(prefix="gm_pycache_")
+PYCACHE_PREFIX = Path(sys.pycache_prefix)
 SWEPT_COUNT, LEFTOVER_CACHES = sweep_bytecode_caches(Path(__file__).parent)

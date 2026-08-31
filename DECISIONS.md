@@ -4018,3 +4018,37 @@ crash page.
 Full gate green (3458 passed, 1 skipped — the contract test now pins
 the prefix redirect and the sweep's leftover reporting), consistency
 check clean, all four showcase runners clean.
+
+
+## D-155 - A module cannot protect its own cache: the bytecode-root redirect moves into the entrypoint itself
+
+2026-08-31: D-154 deployed and the app stayed down — and its own
+failure surface told the final chapter. The surface crashed with an
+AttributeError on _deploy_bootstrap.SWEPT_COUNT, an attribute that
+exists only in D-154's bootstrap: the host had served deploy_bootstrap
+ITSELF from stale bytecode (D-153's version, cached in the checkout's
+ROOT __pycache__ — beside streamlit_app.py, outside the sweep's src/
+reach). The prefix redirect lived inside the very module being served
+stale, so it never ran, and every guard behind it fell with it. A
+module cannot protect its own cache.
+
+There is exactly one file the host always compiles fresh: __main__.
+Streamlit re-executes streamlit_app.py on every run and never caches
+its bytecode — which is why every app-file edit deployed instantly all
+along while package edits could go stale. The redirect therefore moves
+into streamlit_app.py, ahead of the deploy_bootstrap import: three
+lines of stdlib (sys, tempfile, a guarded mkdtemp) that the host must
+execute fresh on every run. The bootstrap import itself then loads
+from source — its stale bytecode now invisible — and the bootstrap
+keeps its job: the sweep, the leftover reporting, and the forensics
+constants. It adopts the entrypoint's prefix when one exists and sets
+one only for its other importers (tests, runners, scripts).
+
+Ruff gains one scoped exception: per-file-ignores E402 for
+streamlit_app.py alone — the redirect must precede the imports it
+protects, so "imports at top" cannot hold there. The contract test now
+pins the full ordering: redirect < bootstrap import < first
+greenmachine import.
+
+Full gate green (3458 passed, 1 skipped), consistency check clean, all
+four showcase runners clean.
