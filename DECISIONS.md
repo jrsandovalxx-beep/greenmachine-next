@@ -3783,3 +3783,51 @@ clean, all four showcase runners clean.
 Full gate green (3454 passed, 1 skipped — a new test pins the default
 order, both alternate sorts, the absent-value tails and the tag's
 removal), consistency check clean, all four showcase runners clean.
+
+
+## D-147 - Pitcher and per-pitch contact reads drop tracked foul balls: the wrong launch angles, found and fixed
+
+2026-08-31 (PO change doc P0 item 4, the data-accuracy audit's core
+finding — "Launch angles for pitches were wrong"; the PO confirmed
+mid-audit that players' statcast angle numbers for the pitch read
+wrong):
+
+- Root cause: Savant's pitch feed tracks exit velocity and launch angle
+  on FOUL balls but never classifies them — a tracked foul carries
+  launch_speed and launch_angle with launch_speed_angle None and no
+  batted-ball type. Fouls skew steep (the unclassified tracked contact
+  on the 2026 season averages ~24-27 degrees), so any average that
+  includes them reads several degrees high.
+- Two pipeline derivations built their contact base on "has a measured
+  speed" instead of "is a classified batted ball", so tracked fouls
+  entered every pitcher and per-pitch contact read: _pitcher_recent_line
+  (the SP card's recent rows, the D-143 season side rows, the Arms
+  recent columns) counted BBE on launch_speed and averaged the angle
+  over every event with a measured angle; _pitch_lines (the popup
+  breakup's per-pitch EV/LA/barrel/hard-hit rows) did the same. On live
+  2026 data Skubal's foul-inclusive average read 17.5 degrees against
+  10.5 classified and 11.7 on Savant's own board.
+- The fix is one convention everywhere: the contact base is the events
+  with a launch_speed_angle classification. Both functions now build
+  BBE, barrels, hard-hit, mean exit velocity and mean launch angle off
+  that single classified set — the same convention _batter_grid_line
+  and the form aggregation already used (they were never wrong), and
+  the same convention Savant's published boards use.
+- Verified live against the source of truth (D-128) before the fix
+  landed: on the closed 2025 season the classified convention
+  reproduces Savant's published season boards within rounding (Ohtani
+  14.95 vs 15, Judge 19.06 vs 19, Skubal 12.33 vs 12.7, Skenes 12.30
+  vs 12.2; BBE within one batted ball), while the foul-inclusive base
+  reads 4-7 degrees high. The batter-side season numbers on the
+  matchup tables were checked at the same time: they are board-sourced
+  and accurate.
+- One test fixture needed repair, which confirmed the classification
+  is the right discriminator: a strikeout event had inherited a barrel
+  classification from its base event and only became a "batted ball"
+  under the corrected base — the fixture now carries no classification,
+  as a real strikeout does.
+
+Full gate green (3455 passed, 1 skipped — a new regression test pins
+that a tracked foul with a measured 60-degree angle and no
+classification never enters the pitcher or per-pitch contact reads),
+consistency check clean, all four showcase runners clean.

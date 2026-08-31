@@ -389,6 +389,9 @@ def test_starter_cards_carry_season_side_splits_off_the_season_record() -> None:
             event="strikeout",
             launch_speed=None,
             launch_angle=None,
+            # D-147 (PO audit): the contact base is the source's batted-ball
+            # classification now — a strikeout carries no classification.
+            launch_speed_angle=None,
         ),
     )
     board = _build_with_pitcher_season_events(season_events)
@@ -409,6 +412,53 @@ def test_starter_cards_carry_season_side_splits_off_the_season_record() -> None:
     # The recent rows read the (here empty) window record — never the season one.
     assert card.recent_overall is None
     assert card.recent_vs_left is None
+
+
+def test_the_pitcher_contact_reads_exclude_tracked_fouls() -> None:
+    """D-147 (PO audit): a tracked FOUL ball carries an exit velocity and a
+    launch angle but no batted-ball classification — and it never enters
+    the pitcher lines' contact reads. The old measured-speed base counted
+    fouls: BBE swelled, the barrel/hard-hit denominators diluted, and the
+    average launch angle read several degrees high (foul pop-ups sit at
+    60°+). Verified live 2026-08-31: the classified convention reproduces
+    Savant's published season boards within rounding; the foul-inclusive
+    one does not."""
+    contact = _window_event(
+        batter_id=555,
+        pitcher_id=PITCHER_ID,
+        event="field_out",
+        launch_speed=Decimal("100"),
+        launch_angle=Decimal("15"),
+        launch_speed_angle=2,
+        bb_type="ground_ball",
+    )
+    tracked_foul = _window_event(
+        batter_id=555,
+        pitcher_id=PITCHER_ID,
+        event="",
+        description="foul",
+        launch_speed=Decimal("65"),
+        launch_angle=Decimal("60"),
+        launch_speed_angle=None,
+        bb_type=None,
+    )
+    board = _build(_FakeApi(), _FakeSavant(), events=(contact, tracked_foul))
+    assert not isinstance(board, FetchFailure)
+    starter = board.games[0].home_pitcher
+    assert starter is not None and starter.recent_overall is not None
+    line = starter.recent_overall
+    assert line.batted_balls == 1  # the foul never counted
+    assert line.avg_launch_angle == Decimal("15")
+    assert line.hard_hit_share == Decimal("1")
+    assert line.barrel_share == Decimal("0")
+    # The per-pitch lines (the popup breakup) hold the same convention.
+    from greenmachine.live.pipeline import _pitch_lines
+
+    pitch_line = _pitch_lines((contact, tracked_foul))[0]
+    assert pitch_line.batted_balls == 1
+    assert pitch_line.mean_launch_angle == Decimal("15")
+    assert pitch_line.mean_launch_speed == Decimal("100")
+    assert pitch_line.hard_hit_share == Decimal("1")
 
 
 def test_a_season_record_failure_names_itself_and_marks_no_split() -> None:

@@ -589,14 +589,24 @@ def _pitcher_recent_line(events: tuple[PitchEvent, ...]) -> PitcherRecentLine | 
     if not events:
         return None
     outcomes = _plate_outcomes(events)
-    batted = [event for event in events if event.launch_speed is not None]
+    # D-147 (PO audit): the contact base is the source's batted-ball
+    # classification (launch_speed_angle non-null) — the convention the
+    # form section and the batter grid line already used, and the one that
+    # reproduces Savant's published season boards (verified live
+    # 2026-08-31: classified means match the board within rounding on the
+    # closed 2025 season). The old measured-speed base counted tracked
+    # FOUL balls as batted balls: they swelled the barrel/hard-hit
+    # denominators, and their steep pop-up angles dragged the average
+    # launch angle several degrees high (a starter reading ~17.5° whose
+    # true figure is ~11.5°).
+    batted = [event for event in events if event.launch_speed_angle is not None]
     barrels = sum(1 for event in batted if event.launch_speed_angle == BARREL_CLASSIFICATION)
     hard_hits = sum(
         1
         for event in batted
         if event.launch_speed is not None and event.launch_speed >= HARD_HIT_THRESHOLD_MPH
     )
-    angles = [event.launch_angle for event in events if event.launch_angle is not None]
+    angles = [event.launch_angle for event in batted if event.launch_angle is not None]
     woba_total = Decimal(0)
     woba_denominator = Decimal(0)
     for event in events:
@@ -883,27 +893,32 @@ def _pitch_lines(events: Sequence[PitchEvent]) -> tuple[PitchLine, ...]:
     total = len(events)
     for pitch_type, group in by_pitch.items():
         outcomes = _plate_outcomes(group)
-        batted = [event for event in group if event.launch_speed is not None]
+        # D-147 (PO audit): one classified contact base — the source's
+        # batted-ball classification (launch_speed_angle non-null), the
+        # form section's convention, verified against Savant's published
+        # boards live 2026-08-31. The old measured-speed base counted
+        # tracked foul balls: they swelled the barrel/hard-hit
+        # denominators, diluted the per-pitch EV, and their steep pop-up
+        # angles dragged the per-pitch LA several degrees high.
+        batted = [event for event in group if event.launch_speed_angle is not None]
         barrels = sum(1 for event in batted if event.launch_speed_angle == BARREL_CLASSIFICATION)
         hard_hits = sum(
             1
             for event in batted
             if event.launch_speed is not None and event.launch_speed >= HARD_HIT_THRESHOLD_MPH
         )
-        # Contact shape (D-109): EV over the pitches with a measured speed,
-        # air-ball share over classified contact — the same BBE definition
-        # the form section uses.
-        bbe = [event for event in group if event.launch_speed_angle is not None]
-        air_balls = sum(1 for event in bbe if event.bb_type in AIR_BALL_TYPES)
+        # Contact shape (D-109): EV and air-ball share over classified
+        # contact — the same BBE definition the form section uses.
+        air_balls = sum(1 for event in batted if event.bb_type in AIR_BALL_TYPES)
         mean_speed: Decimal | None = None
         if batted:
             mean_speed = sum(
                 (event.launch_speed for event in batted if event.launch_speed is not None),
                 Decimal(0),
             ) / Decimal(len(batted))
-        # Per-pitch LA (D-124): over the pitches with a measured angle, the
-        # same measured-event base EV reads.
-        angles = [event.launch_angle for event in group if event.launch_angle is not None]
+        # Per-pitch LA (D-124, rebased D-147): over the classified batted
+        # balls with a measured angle — tracked fouls never enter.
+        angles = [event.launch_angle for event in batted if event.launch_angle is not None]
         mean_angle: Decimal | None = None
         if angles:
             mean_angle = sum(angles, Decimal(0)) / Decimal(len(angles))
@@ -940,9 +955,9 @@ def _pitch_lines(events: Sequence[PitchEvent]) -> tuple[PitchLine, ...]:
                 whiff_share=outcomes.whiff_share,
                 woba=outcomes.woba,
                 strikeout_share=outcomes.strikeout_share,
-                batted_balls=len(bbe),
+                batted_balls=len(batted),
                 mean_launch_speed=mean_speed,
-                air_ball_share=Decimal(air_balls) / Decimal(len(bbe)) if bbe else None,
+                air_ball_share=Decimal(air_balls) / Decimal(len(batted)) if batted else None,
                 mean_launch_angle=mean_angle,
                 at_bats=outcomes.at_bats,
                 hits=outcomes.hits,
