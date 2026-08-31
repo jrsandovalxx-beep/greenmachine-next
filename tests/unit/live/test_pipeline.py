@@ -1182,7 +1182,41 @@ def test_mix_line_counts_only_the_qualifying_mix_pitches() -> None:
     assert line.pitches == 4
     assert line.at_bats == 4
     assert line.hits == 4  # the four SL events are outside the qualifying mix
+    # D-145 (PO): the unfiltered twin counts every pitch type — the matchup
+    # tables' default scope now.
+    all_line = away.mix_line_all
+    assert all_line is not None
+    assert all_line.pitches == 8
+    assert all_line.at_bats == 8
+    assert all_line.hits == 8  # the sliders count here
     assert board.games[0].home_batters[0].mix_line is None
+    assert board.games[0].home_batters[0].mix_line_all is None
+
+
+def test_the_grid_lines_carry_the_scoped_strikeout_share() -> None:
+    """D-145 (PO): K % — strikeouts per plate appearance over the scope —
+    rides both matchup grid lines (it replaced Swing-Str % there). The
+    window lines count the scope's own events; the season line reads the
+    statsapi counting line."""
+    pitcher_events = tuple(
+        _window_event(batter_id=555, pitcher_id=PITCHER_ID, pitch_type="FF") for _ in range(20)
+    )
+    batter_events = (
+        _window_event(pitch_type="FF", event="strikeout", pitcher_id=999),
+        _window_event(pitch_type="FF", event="strikeout", pitcher_id=999),
+        _window_event(pitch_type="FF", event="single", pitcher_id=999),
+        _window_event(pitch_type="SL", event="field_out", pitcher_id=999),
+    )
+    board = _build(_FakeApi(), _FakeSavant(), events=pitcher_events + batter_events)
+    assert not isinstance(board, FetchFailure)
+    away = board.games[0].away_batters[0]
+    # The qualifying mix is all fastballs (the record is 100% FF), so the
+    # slider out leaves only the qualifying line's scope.
+    assert away.mix_line is not None and away.mix_line.strikeout_share == Decimal(2) / Decimal(3)
+    assert away.mix_line_all is not None and away.mix_line_all.strikeout_share == Decimal("0.5")
+    # The season scope reads the statsapi counting line: 130 K / 500 PA.
+    assert away.season_line is not None
+    assert away.season_line.strikeout_share == Decimal("0.26")
 
 
 def test_the_mix_reads_the_season_board_first() -> None:

@@ -18,6 +18,8 @@ cell pattern the deployed slate produced.
 from __future__ import annotations
 
 import dataclasses
+import html
+import re
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -325,6 +327,11 @@ def test_missing_cells_name_their_reason(_staged_app: SlateBoard) -> None:
     for element in at.dataframe:
         display = _display_values(element).astype(str)
         assert not display.isin(["None", "nan"]).any().any()
+    # D-145 (PO): the matchup grids are HTML rows now — the same guard
+    # holds there: no raw None/nan cell ever reaches the markup.
+    grid_markup = "\n".join(element.value for element in at.markdown)
+    assert ">None</td>" not in grid_markup
+    assert ">nan</td>" not in grid_markup
     # The shortlist batters' note bubbles name the absences in words.
     markup = "\n".join(element.value for element in at.tabs[0].markdown).lower()
     assert "missing:" in markup
@@ -891,6 +898,7 @@ def _grid_line(**overrides: object) -> object:
         "oppo_air_share": Decimal("0.25"),
         "expected_woba": Decimal("0.45"),
         "whiff_share": Decimal("0.12"),
+        "strikeout_share": Decimal("0.12"),
     }
     base.update(overrides)
     return BatterGridLine(**base)  # type: ignore[arg-type]
@@ -923,7 +931,7 @@ def test_grid_line_cells_render_rates_and_named_absences() -> None:
         "Straight Air %",
         "Oppo Air % ★",
         "xwOBA",
-        "Swing-Str %",
+        "K %",
     }
     assert set(styles) == set(texts)
 
@@ -950,7 +958,7 @@ def test_grid_line_cells_render_rates_and_named_absences() -> None:
         "ISO": streamlit_app._BAND_G3_CSS,  # .600 ≥ .240
         "Pull Air % ★": streamlit_app._BAND_G2_CSS,  # 40% ≥ 38%
         "xwOBA": streamlit_app._BAND_G3_CSS,  # .450 ≥ .370
-        "Swing-Str %": streamlit_app._BAND_G3_CSS,  # 12% ≤ 18%
+        "K %": streamlit_app._BAND_G3_CSS,  # D-145 (PO): 12% ≤ 15%
     }
     assert "Straight Air %" not in styles
     assert "Oppo Air % ★" not in styles
@@ -1271,10 +1279,12 @@ def test_band_css_walks_all_six_bands_in_both_directions() -> None:
     assert streamlit_app._band_css(spec, 86.0) == streamlit_app._BAND_R2_CSS
     assert streamlit_app._band_css(spec, 84.0) == streamlit_app._BAND_R3_CSS
 
-    low = streamlit_app._GRID_BANDS["Swing-Str %"]  # 18/21/24 over 27/30/33
-    assert streamlit_app._band_css(low, 0.17) == streamlit_app._BAND_G3_CSS
-    assert streamlit_app._band_css(low, 0.255) is None
-    assert streamlit_app._band_css(low, 0.34) == streamlit_app._BAND_R3_CSS
+    # D-145 (PO): the grid's lower-is-better metric is K % now — 15/18.5/22
+    # over 26/28/30, anchored to the ratified v2.2 K reads.
+    low = streamlit_app._GRID_BANDS["K %"]
+    assert streamlit_app._band_css(low, 0.14) == streamlit_app._BAND_G3_CSS
+    assert streamlit_app._band_css(low, 0.24) is None
+    assert streamlit_app._band_css(low, 0.31) == streamlit_app._BAND_R3_CSS
     # The extremes ARE the console's highlight/veto pair — one language.
     assert streamlit_app._BAND_G3_CSS == streamlit_app._HIGHLIGHT
     assert streamlit_app._BAND_R3_CSS == streamlit_app._VETO_CSS
@@ -1359,7 +1369,8 @@ def test_band_edges_print_on_their_surfaces() -> None:
     assert "very poor < 85.5" in streamlit_app._GRID_SCALE_TEXT
     assert "HR/9 — elite ≥ 1.5" in streamlit_app._PITCHER_SCALE_TEXT
     assert "Hard-Hit % — elite ≥ 46%" in streamlit_app._PITCHER_SCALE_TEXT
-    assert "elite ≤ 18%" in streamlit_app._GRID_SCALE_TEXT  # the low-direction wording
+    # D-145 (PO): the grid's low-direction metric is K % now — elite ≤ 15%.
+    assert "elite ≤ 15%" in streamlit_app._GRID_SCALE_TEXT  # the low-direction wording
     assert "elite ≥ 91" in streamlit_app._MATCHUPS_HELP["EV"]
     assert "elite ≥ 1.5" in streamlit_app._ARMS_HELP["HR/9"]
     assert "elite ≥ 46%" in streamlit_app._SP_HELP["Hard-Hit %"]
@@ -1401,6 +1412,9 @@ def _board_with_grid_lines() -> SlateBoard:
 
     board = _graded_board()
     l30 = _grid_line()
+    # D-145 (PO): the unfiltered all-pitches twin — a distinct at-bat count
+    # so the threshold toggle's two positions are distinguishable.
+    all_pitches = _grid_line(at_bats=8, hits=3)
     season = _grid_line(
         pitches=900,
         plate_appearances=500,
@@ -1417,7 +1431,13 @@ def _board_with_grid_lines() -> SlateBoard:
 
     def attach(cards: tuple[_BatterCard, ...]) -> tuple[_BatterCard, ...]:
         return tuple(
-            _dc.replace(card, mix_line=l30, season_line=season, mix_label="season")
+            _dc.replace(
+                card,
+                mix_line=l30,
+                mix_line_all=all_pitches,
+                season_line=season,
+                mix_label="season",
+            )
             for card in cards
         )
 
@@ -1430,6 +1450,18 @@ def _board_with_grid_lines() -> SlateBoard:
     return _dc.replace(board, games=(regraded, *board.games[1:]))
 
 
+def _grid_tables(markup: str) -> tuple[list[list[str]], list[list[str]]]:
+    """The matchup grid's gm-grid tables split into (header cell lists, row
+    cell lists) — D-145 (PO) renders each row as its own one-line table with
+    the More button at its end, so the grids are markup, not dataframes."""
+    headers: list[list[str]] = []
+    rows: list[list[str]] = []
+    for block in re.findall(r'<table class="gm-grid">(.*?)</table>', markup, re.S):
+        cells = [html.unescape(cell) for cell in re.findall(r"<t[hd][^>]*>(.*?)</t[hd]>", block)]
+        (headers if "<th" in block else rows).append(cells)
+    return headers, rows
+
+
 def test_matchups_grid_has_the_d079_columns_and_a_named_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1437,7 +1469,10 @@ def test_matchups_grid_has_the_d079_columns_and_a_named_window(
     caption names the mix scope actually used (D-025/D-128). D-128 (PO):
     the season sources are the default view — robbed HR and all three air
     profiles show on it — and the recent-window radio swaps the metric
-    scope while the grade stays the L30 one."""
+    scope while the grade stays the L30 one. D-145 (PO): each row is its
+    own table with the More button at its end, K % replaced Swing-Str %,
+    and a pitch-filter toggle gates the qualifying-mix scope (default: all
+    pitch types)."""
     import streamlit as st
 
     import greenmachine.live.pipeline as pipeline
@@ -1449,19 +1484,16 @@ def test_matchups_grid_has_the_d079_columns_and_a_named_window(
     at.run()
     assert not at.exception, [str(e.value) for e in at.exception]
 
-    def grid_frames() -> list[pd.DataFrame]:
-        frames = []
-        for element in at.dataframe:
-            frame = _display_values(element).astype(str)
-            if "Robbed HR" in frame.columns:
-                frames.append(frame)
-        return frames
+    def grid_markup() -> str:
+        return "\n".join(element.value for element in at.markdown)
 
-    grids = grid_frames()
-    assert grids, "the matchups grids rendered"
+    headers, rows = _grid_tables(grid_markup())
+    assert headers and rows, "the matchups grids rendered"
+    header = headers[0]
     # D-096/D-097/D-098: no BIP, no Form column; Robbed HR is a count.
     # D-128 (PO): the default view is the season scope — EV starred, the
     # three air profiles and the robbed count all carry season-view values.
+    # D-145 (PO): K % replaced Swing-Str %.
     expected = {
         "AB",
         "H",
@@ -1479,54 +1511,76 @@ def test_matchups_grid_has_the_d079_columns_and_a_named_window(
         "Straight Air %",
         "Oppo Air %",
         "xwOBA",
-        "Swing-Str %",
+        "K %",
         "Grade",
     }
-    assert expected <= set(grids[0].columns)
-    assert "BIP" not in grids[0].columns
-    assert "Form (EV)" not in grids[0].columns
-    assert set(grids[0]["AB"]) == {"440"}  # the season scope is the default
-    assert set(grids[0]["Robbed HR"]) == {"2"}  # shows on the season view (D-128)
-    assert set(grids[0]["Pull Air %"]) == {"36.0%"}
-    assert set(grids[0]["Straight Air %"]) == {"34.0%"}
-    assert set(grids[0]["Oppo Air %"]) == {"28.0%"}
-    assert set(grids[0]["LA"]) == {"12.8°"}
-    season_grades = grids[0]["Grade"].tolist()
+    assert expected <= set(header)
+    assert "BIP" not in header
+    assert "Form (EV)" not in header
+    assert "Swing-Str %" not in header
+
+    def column_values(name: str) -> list[str]:
+        index = headers[0].index(name)
+        return [row[index] for row in rows]
+
+    assert set(column_values("AB")) == {"440"}  # the season scope is the default
+    assert set(column_values("Robbed HR")) == {"2"}  # shows on the season view (D-128)
+    assert set(column_values("Pull Air %")) == {"36.0%"}
+    assert set(column_values("Straight Air %")) == {"34.0%"}
+    assert set(column_values("Oppo Air %")) == {"28.0%"}
+    assert set(column_values("LA")) == {"12.8°"}
+    assert set(column_values("K %")) == {"12.0%"}
+    season_grades = column_values("Grade")
     captions = " ".join(element.value for element in at.caption)
     assert "season" in captions  # the mix scope actually used
     assert "14%" in captions
-    # D-128 (PO): a More button per batter under each grid — row selection
-    # is gone.
+    # D-145 (PO): a More button at the end of each row — the Sluggers
+    # layout; the rows of five under each grid are gone.
     more = [button for button in at.button if button.key.startswith("more_")]
     assert more, "the per-batter More buttons rendered"
+    assert {button.label for button in more} == {"More"}
 
     modes = [radio for radio in at.radio if radio.key == "matchups_view_mode"]
     assert modes, "the batter-window selector rendered"
     modes[0].set_value("Recent window")
     at.run()
     assert not at.exception, [str(e.value) for e in at.exception]
-    grids = grid_frames()
-    assert set(grids[0]["AB"]) == {"5"}  # the recent scope
-    assert set(grids[0]["Robbed HR"]) == {"1"}
+    headers, rows = _grid_tables(grid_markup())
+    # D-145 (PO): the default recent scope is every pitch type — the
+    # fixture's unfiltered line (8 AB), not the qualifying-mix line (5).
+    assert set(column_values("AB")) == {"8"}
+    assert set(column_values("Robbed HR")) == {"1"}
     # D-124: the recent view stars the two signed spray shares (ratified
     # v2.2 lines); Straight Air % stays unstarred between them.
-    assert "Pull Air % ★" in grids[0].columns
-    assert "Straight Air %" in grids[0].columns
-    assert "Oppo Air % ★" in grids[0].columns
-    assert set(grids[0]["Pull Air % ★"]) == {"40.0%"}
+    assert "Pull Air % ★" in headers[0]
+    assert "Straight Air %" in headers[0]
+    assert "Oppo Air % ★" in headers[0]
+    assert set(column_values("Pull Air % ★")) == {"40.0%"}
     captions = " ".join(element.value for element in at.caption)
     assert "last 28 days" in captions  # the default four weeks
-    assert grids[0]["Grade"].tolist() == season_grades  # the fixture's one grade
+    assert "every pitch type" in captions
+    assert column_values("Grade") == season_grades  # the fixture's one grade
+
+    # D-145 (PO): the threshold toggle gates the qualifying-mix scope on.
+    threshold = [toggle for toggle in at.toggle if toggle.key == "matchups_pitch_threshold"]
+    assert threshold, "the pitch-usage threshold toggle rendered"
+    threshold[0].set_value(True)
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    headers, rows = _grid_tables(grid_markup())
+    assert set(column_values("AB")) == {"5"}  # the qualifying-mix scope
+    captions = " ".join(element.value for element in at.caption)
+    assert "qualifying pitches" in captions
 
 
 def test_grid_headers_carry_their_hover_definitions(monkeypatch: pytest.MonkeyPatch) -> None:
-    """D-124: every batter-grid header carries its one-line definition as
-    column help — starred under the view's own rename, absent columns
-    dropped. D-128 (PO): the season view is the default — it stars EV and
-    adds LA; the recent window stars the two signed spray shares. D-127:
-    the Arms, starter-card and Conditions tables carry their own hover
-    definitions now, so the batter-grid assertions scope to the grids
-    whose frame has a Batter column."""
+    """D-124: every batter-grid header carries its one-line definition on
+    hover — starred under the view's own rename, absent columns dropped.
+    D-145 (PO): the matchup grids are HTML rows now, so the definitions
+    ride title attributes. D-128 (PO): the season view is the default — it
+    stars EV and adds LA; the recent window stars the two signed spray
+    shares. D-127: the Arms, starter-card and Conditions tables carry
+    their own hover definitions (still st.column_config help)."""
     import json
 
     import streamlit as st
@@ -1540,6 +1594,15 @@ def test_grid_headers_carry_their_hover_definitions(monkeypatch: pytest.MonkeyPa
     at.run()
     assert not at.exception, [str(e.value) for e in at.exception]
 
+    def grid_helps() -> dict[str, str]:
+        """The matchup grids' header hover definitions: column → title."""
+        markup = "\n".join(element.value for element in at.markdown)
+        out: dict[str, str] = {}
+        for block in re.findall(r'<table class="gm-grid">(.*?)</table>', markup, re.S):
+            for title, name in re.findall(r'<th title="([^"]*)">([^<]*)</th>', block):
+                out[html.unescape(name)] = html.unescape(title)
+        return out
+
     def helps(marker: str) -> set[str]:
         names: set[str] = set()
         for element in at.dataframe:
@@ -1550,8 +1613,12 @@ def test_grid_headers_carry_their_hover_definitions(monkeypatch: pytest.MonkeyPa
                     names.add(name)
         return names
 
-    season = helps("Batter")
-    assert {"LA", "EV ★"} <= season
+    season = grid_helps()
+    assert {"LA", "EV ★"} <= set(season)
+    assert all(season[name] for name in ("LA", "EV ★"))  # the hover text itself
+    # D-145 (PO): K % replaced Swing-Str % — its hover names the basis.
+    assert "Strikeouts per plate appearance" in season["K %"]
+    assert "Swing-Str %" not in season
     # D-128: the season view's air profiles carry their hovers unstarred.
     assert "Straight Air %" in season
     assert "Pull Air % ★" not in season
@@ -1567,7 +1634,7 @@ def test_grid_headers_carry_their_hover_definitions(monkeypatch: pytest.MonkeyPa
     modes[0].set_value("Recent window")
     at.run()
     assert not at.exception, [str(e.value) for e in at.exception]
-    recent = helps("Batter")
+    recent = grid_helps()
     assert "Pull Air % ★" in recent
     assert "Straight Air %" in recent
     assert "Oppo Air % ★" in recent

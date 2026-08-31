@@ -3718,3 +3718,44 @@ Full gate green (3452 passed, 1 skipped — new tests pin the column set
 and order, the count semantics, the Pull % band anchors, the air-guard
 partition, and the retired tag's absence), consistency check clean, all
 four showcase runners clean.
+
+
+## D-145 - Matchup rows end with their More button; K% replaces Swing-Str%; the pitch filter defaults to all pitches
+
+2026-08-31 (PO change doc P1, the four matchup-table items landed together
+since they all touch the same grid):
+
+- The More button moved to the end of each batter's row — the Sluggers
+  layout. The 22-column st.dataframe could not carry in-row buttons (the
+  D-128 comment said so), so the grid left the dataframe: each batter row
+  is now its own one-line HTML table in a two-column Streamlit row with
+  the button beside it, vertically centered, exactly like the shortlist.
+  The D-127 band fills ride as inline cell styles, the D-124 header
+  definitions ride title attributes, and the stars still mark ratified
+  v2.2 firing lines. The rows of five buttons under each grid are gone.
+- K % replaced Swing-Str % on the matchup tables: strikeouts per plate
+  appearance over the scope. The window lines count the scope's own
+  events (the plate-outcomes block already computed the share for the
+  popup breakup); the season line reads the statsapi counting line — the
+  same figure the high-K tags use. The band: league K% ≈ 22.2% (2025),
+  anchored to the ratified v2.2 K reads — the 22% unlock anchor is the
+  above-average edge, the 28% binary read the poor edge, the 30% high-K
+  caution the very-poor edge (elite ≤ 15%, strong ≤ 18.5%, below-average
+  ≥ 26%).
+- Scope clarified on the surface (the PO's question): the starter's mix
+  is his whole-season arsenal against ALL hands off the arsenal board,
+  with the named recent-record fallback; the batter's columns read his
+  window events against the starter's hand of pitching. Both captions
+  now say exactly that, and the per-lineup scope line names the hand.
+- New pitch-filter toggle on the main matchup tables (recent-window view
+  only — the season view reads the season boards, never the pitch
+  filter). Off, the PO's stated default: every pitch type the batter saw
+  enters the denominators — "all hands with all their pitches" — via a
+  new unfiltered twin line (mix_line_all) computed beside the qualifying
+  one. On: the D-079 qualifying mix only (≥14% of the mix's usage). The
+  grading matchup read keeps the qualifying scope — grading is untouched.
+
+Full gate green (3453 passed, 1 skipped — new tests pin the all-pitches
+default, the toggle's two scopes, the K% basis on both lines, the HTML
+rows' header hovers, and the no-raw-None cell guard), consistency check
+clean, all four showcase runners clean.
