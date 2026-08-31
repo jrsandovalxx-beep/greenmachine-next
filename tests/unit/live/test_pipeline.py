@@ -230,6 +230,7 @@ class _FakeSavant:
         pitcher_statcast: dict[int, StatcastPitcherRow] | FetchFailure | None = None,
         statcast: dict[int, StatcastBatterRow] | FetchFailure | None = None,
         batted_ball: dict[int, BattedBallRow] | FetchFailure | None = None,
+        tracking_by_day: dict[str, tuple[BatTrackingRow, ...]] | None = None,
     ) -> None:
         self._batter_arsenal = batter_arsenal
         self._pitcher_arsenal = pitcher_arsenal
@@ -240,6 +241,7 @@ class _FakeSavant:
         self._pitcher_statcast = pitcher_statcast
         self._statcast = statcast
         self._batted_ball = batted_ball
+        self._tracking_by_day = tracking_by_day
 
     def fetch_batted_ball(
         self, *, year: int, minimum: int = 0
@@ -263,6 +265,8 @@ class _FakeSavant:
     def fetch_bat_tracking(
         self, *, year: int, minimum: int = 0, start: str = "", end: str = ""
     ) -> tuple[BatTrackingRow, ...]:
+        if self._tracking_by_day is not None:
+            return self._tracking_by_day.get(start, ())
         return (_tracking_row(BATTER_ID),)
 
     def fetch_expected_stats(self, *, year: int) -> dict[int, ExpectedStatsRow] | FetchFailure:
@@ -2078,32 +2082,122 @@ def test_humidity_reaches_an_open_air_game_card_only() -> None:
     assert roofed.games[0].relative_humidity_percent is None
 
 
-def test_the_mix_reach_never_stretches_the_form_fallback_window() -> None:
-    """D-103: when a starter's empty L30 forces the L45 mix reach, the form
-    section's L14 fallback must still read exactly 14 days — before the fix,
-    the rebound ``reach_start`` leaked 45 days into a window labelled L14."""
-    old_barrel = _window_event(
-        game_date="2026-07-31", pitcher_id=999
-    )  # 20 days out: past L14; from another pitcher so the starter's L30 stays empty
-    stale_starter_pitch = _window_event(
-        game_date="2026-07-15", batter_id=909
-    )  # the starter has nothing in L30, so the mix reach fires
-    board = _build(_FakeApi(), _FakeSavant(), events=(old_barrel, stale_starter_pitch))
-    assert not isinstance(board, FetchFailure)
-    form = board.games[0].away_batters[0].form
-    assert form is not None
-    assert form.barrel_pct.value is None
-    assert form.barrel_pct.sample == 0
-
-    # Anti-vacuity: the same barrel ten days out IS inside the honest L14.
-    in_reach = _window_event(game_date="2026-08-10", pitcher_id=999)
-    board = _build(_FakeApi(), _FakeSavant(), events=(in_reach, stale_starter_pitch))
+def test_the_form_fallback_never_reads_past_the_fourteenth_played_game() -> None:
+    """D-103/D-163 (PO): the form fallback is exactly his last 14 played
+    games — the starter's mix reach can never stretch a window labelled
+    L14 (the D-103 leak shape), because the window is a set of played
+    dates now, not a calendar cutoff anything can rebound."""
+    # Sixteen played dates: the newest seven carry walks only (no batted
+    # balls, so the fallback fires), dates 8-14 each carry one barreled
+    # ball, and the two oldest each carry one more — a stretched window
+    # would count nine barreled balls, the honest one exactly seven.
+    recent_walks = tuple(
+        _window_event(
+            game_date=f"2026-08-{day:02d}",
+            event="walk",
+            launch_speed=None,
+            launch_angle=None,
+            launch_speed_angle=None,
+            hit_distance=None,
+            description="walk",
+            pitcher_id=999,
+        )
+        for day in range(14, 21)
+    )
+    older_barrels = tuple(
+        _window_event(game_date=f"2026-08-{day:02d}", pitcher_id=999) for day in range(7, 14)
+    )
+    oldest_barrels = (
+        _window_event(game_date="2026-08-06", pitcher_id=999),
+        _window_event(game_date="2026-08-05", pitcher_id=999),
+    )
+    board = _build(
+        _FakeApi(),
+        _FakeSavant(),
+        events=recent_walks + older_barrels + oldest_barrels,
+    )
     assert not isinstance(board, FetchFailure)
     form = board.games[0].away_batters[0].form
     assert form is not None
     assert form.barrel_pct.value == Decimal("100")
-    assert form.barrel_pct.window_days == 14
-    assert form.barrel_pct.sample == 1
+    assert form.barrel_pct.window_games == 14
+    assert form.barrel_pct.sample == 7  # played dates 8-14 of 16 — never the 15th
+
+
+def test_the_form_windows_anchor_to_played_games_not_the_calendar() -> None:
+    """D-163 (PO): the window is his last 7 PLAYED games — off-days never
+    slide it. The Merrill regression: his Aug 23 game fell out of the
+    trailing-calendar window by Aug 31 while every form source the PO
+    checks (his last 7 games) still counted it."""
+    # Nine calendar days, seven played games — 8/12 and 8/16 are off-days,
+    # and 8/11 is ten calendar days out (the old window's cutoff was 8/13).
+    played = (
+        "2026-08-11",
+        "2026-08-13",
+        "2026-08-14",
+        "2026-08-15",
+        "2026-08-17",
+        "2026-08-18",
+        "2026-08-19",
+    )
+    events = tuple(_window_event(game_date=day, pitcher_id=999) for day in played)
+    board = _build(_FakeApi(), _FakeSavant(), events=events)
+    assert not isinstance(board, FetchFailure)
+    form = board.games[0].away_batters[0].form
+    assert form is not None
+    assert form.barrel_pct.value == Decimal("100")
+    assert form.barrel_pct.sample == 7  # every played game, 8/11 included
+    assert form.barrel_pct.window_games == 7
+
+
+def test_the_form_tracking_read_combines_only_the_window_days() -> None:
+    """D-163 (PO): the bat-tracking read is the swing-weighted combination
+    of the league day boards for exactly his played window dates — Savant
+    aggregates over the fetched range, so the board is fetched per needed
+    day and combined here; a day he didn't play never enters."""
+    played = ("2026-08-18", "2026-08-19", "2026-08-20")
+    events = tuple(_window_event(game_date=day, pitcher_id=999) for day in played)
+    tracking_by_day = {
+        "2026-08-18": (
+            BatTrackingRow(
+                player_id=BATTER_ID,
+                side="L",
+                avg_bat_speed=Decimal("70"),
+                attack_angle=Decimal("10"),
+                ideal_attack_angle_share=Decimal("0.50"),
+                competitive_swings=100,
+            ),
+        ),
+        "2026-08-19": (
+            BatTrackingRow(
+                player_id=BATTER_ID,
+                side="L",
+                avg_bat_speed=Decimal("74"),
+                attack_angle=Decimal("12"),
+                ideal_attack_angle_share=Decimal("0.70"),
+                competitive_swings=300,
+            ),
+        ),
+        # A day he didn't play: never fetched, never counted.
+        "2026-08-10": (
+            BatTrackingRow(
+                player_id=BATTER_ID,
+                side="L",
+                avg_bat_speed=Decimal("99"),
+                attack_angle=Decimal("30"),
+                ideal_attack_angle_share=Decimal("0.99"),
+                competitive_swings=900,
+            ),
+        ),
+    }
+    board = _build(_FakeApi(), _FakeSavant(tracking_by_day=tracking_by_day), events=events)
+    assert not isinstance(board, FetchFailure)
+    form = board.games[0].away_batters[0].form
+    assert form is not None
+    # (0.50*100 + 0.70*300) / 400 = 0.65 -> 65.00%; the 8/10 row stays out.
+    assert form.ideal_attack_angle_pct.value == Decimal("65.00")
+    assert form.ideal_attack_angle_pct.sample == 400
+    assert form.ideal_attack_angle_pct.window_games == 7
 
 
 def test_money_tag_marks_a_homer_on_the_slate_day() -> None:

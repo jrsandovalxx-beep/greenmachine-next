@@ -1616,7 +1616,7 @@ def _card_tag_lists(
         ):
             aoe_reasons.append(
                 f"pull-air {float(pull_air.value):.0f}% "
-                f"({pull_air.sample} air balls L{pull_air.window_days})"
+                f"({pull_air.sample} air balls L{pull_air.window_games})"
             )
         home_factor = _home_park_hr_factor(card.team, card.batting_side)
         if home_factor is not None and home_factor.factor >= _PARK_BOOST_LINE:
@@ -1774,7 +1774,7 @@ def _card_tag_lists(
                 and oppo_v.sufficient
                 and oppo_v.value is not None
             ):
-                sample_text = f"{pull_v.sample} air balls L{pull_v.window_days}"
+                sample_text = f"{pull_v.sample} air balls L{pull_v.window_games}"
                 # D-144 (PO): the pull-air match tag is retired — removed
                 # completely at the PO's direction. The oppo-air match (an
                 # oppo-power read against the opposite-side factor) stays.
@@ -2184,7 +2184,7 @@ def _form_section_frames(
             styles[count_column] = _REASON_CSS
         else:
             texts[count_column] = str(int(count_metric.value)) + (
-                " · L14" if count_metric.window_days == 14 else ""
+                " · L14" if count_metric.window_games == 14 else ""
             )
     fields: tuple[tuple[str, FormValue | None], ...] = (
         ("Barrel%", form.barrel_pct),
@@ -2203,7 +2203,7 @@ def _form_section_frames(
         if not metric.sufficient:
             texts[column] = f"{value_text} · n={metric.sample} · INSUFFICIENT"
             styles[column] = _INSUFFICIENT_CSS
-        elif metric.window_days == 14:
+        elif metric.window_games == 14:
             texts[column] = f"{value_text} · L14"
         else:
             texts[column] = value_text
@@ -2670,8 +2670,10 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
             column_config=_column_help(texts.columns, _FORM_HELP),
         )
         st.caption(
-            "Each metric is the last 7 days [L7]; a metric whose L7 window is "
-            "empty falls back to its L14 window, marked '· L14'. A metric below "
+            "Each metric reads his last 7 games played [L7] — off-days "
+            "never slide the window (D-163, PO); a metric whose L7 window is "
+            "empty falls back to his last 14 games [L14], marked '· L14'. A "
+            "metric below "
             "its sample floor keeps its value with its exact sample and an "
             "INSUFFICIENT marker; one with no observations at either reach reads "
             "'not enough data available' (D-068). AB and H are the window's "

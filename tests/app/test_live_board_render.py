@@ -2388,7 +2388,7 @@ def test_card_tags_carry_the_d125_bands_and_why_riders() -> None:
     # park join the sprint reason; all three print when all three fire.
     form = SimpleNamespace(
         pull_air_pct=SimpleNamespace(
-            sufficient=True, value=Decimal("44.2"), sample=19, window_days=14
+            sufficient=True, value=Decimal("44.2"), sample=19, window_games=14
         )
     )
     advisories, _, _ = streamlit_app._card_tags(
@@ -2407,7 +2407,7 @@ def test_card_tags_carry_the_d125_bands_and_why_riders() -> None:
     assert "park-neutral and direction-blind" in advisories
     # An insufficient spray record drops only its own reason.
     thin_form = SimpleNamespace(
-        pull_air_pct=SimpleNamespace(sufficient=False, value=None, sample=4, window_days=14)
+        pull_air_pct=SimpleNamespace(sufficient=False, value=None, sample=4, window_games=14)
     )
     advisories, _, _ = streamlit_app._card_tags(
         batter(season_gaps=gaps("-0.045"), sprint_speed_fps=Decimal("28.4"), form=thin_form),
@@ -2526,10 +2526,10 @@ def test_card_tags_resolve_the_wind_against_the_dominant_air_field() -> None:
     def spray(pull: str, oppo: str, *, sufficient: bool = True) -> SimpleNamespace:
         return SimpleNamespace(
             pull_air_pct=FormValue(
-                value=Decimal(pull), sample=10, window_days=7, sufficient=sufficient
+                value=Decimal(pull), sample=10, window_games=7, sufficient=sufficient
             ),
             oppo_air_pct=FormValue(
-                value=Decimal(oppo), sample=10, window_days=7, sufficient=sufficient
+                value=Decimal(oppo), sample=10, window_games=7, sufficient=sufficient
             ),
         )
 
@@ -2643,10 +2643,10 @@ def test_card_tags_center_out_wind_assists_every_batter() -> None:
     def spray(pull: str, oppo: str, *, sufficient: bool = True) -> SimpleNamespace:
         return SimpleNamespace(
             pull_air_pct=FormValue(
-                value=Decimal(pull), sample=10, window_days=7, sufficient=sufficient
+                value=Decimal(pull), sample=10, window_games=7, sufficient=sufficient
             ),
             oppo_air_pct=FormValue(
-                value=Decimal(oppo), sample=10, window_days=7, sufficient=sufficient
+                value=Decimal(oppo), sample=10, window_games=7, sufficient=sufficient
             ),
         )
 
@@ -2740,10 +2740,10 @@ def test_card_tags_carry_the_spray_alignment_reads() -> None:
     def spray(pull: str, oppo: str, *, sufficient: bool = True) -> SimpleNamespace:
         return SimpleNamespace(
             pull_air_pct=FormValue(
-                value=Decimal(pull), sample=10, window_days=7, sufficient=sufficient
+                value=Decimal(pull), sample=10, window_games=7, sufficient=sufficient
             ),
             oppo_air_pct=FormValue(
-                value=Decimal(oppo), sample=10, window_days=7, sufficient=sufficient
+                value=Decimal(oppo), sample=10, window_games=7, sufficient=sufficient
             ),
         )
 

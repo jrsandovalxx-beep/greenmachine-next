@@ -44,20 +44,20 @@ PITCHER_ID = 201
 # 25-swing floor with its exact sample and marker; the rest ordinary
 # sufficient L7 values.
 SHOWCASE_FORM = FormSection(
-    barrel_pct=FormValue(value=Decimal("18.2"), sample=22, window_days=7, sufficient=True),
-    exit_velocity=FormValue(value=Decimal("91.4"), sample=22, window_days=7, sufficient=True),
-    hard_hit_pct=FormValue(value=Decimal("49.5"), sample=22, window_days=7, sufficient=True),
-    sweet_spot_pct=FormValue(value=Decimal("36.4"), sample=22, window_days=7, sufficient=True),
-    pull_air_pct=FormValue(value=Decimal("41.7"), sample=18, window_days=14, sufficient=True),
+    barrel_pct=FormValue(value=Decimal("18.2"), sample=22, window_games=7, sufficient=True),
+    exit_velocity=FormValue(value=Decimal("91.4"), sample=22, window_games=7, sufficient=True),
+    hard_hit_pct=FormValue(value=Decimal("49.5"), sample=22, window_games=7, sufficient=True),
+    sweet_spot_pct=FormValue(value=Decimal("36.4"), sample=22, window_games=7, sufficient=True),
+    pull_air_pct=FormValue(value=Decimal("41.7"), sample=18, window_games=14, sufficient=True),
     attack_angle_degrees=FormValue(
-        value=Decimal("13.1"), sample=40, window_days=7, sufficient=True
+        value=Decimal("13.1"), sample=40, window_games=7, sufficient=True
     ),
     ideal_attack_angle_pct=FormValue(
-        value=Decimal("58.0"), sample=9, window_days=14, sufficient=False
+        value=Decimal("58.0"), sample=9, window_games=14, sufficient=False
     ),
-    bat_speed_mph=FormValue(value=Decimal("74.2"), sample=40, window_days=7, sufficient=True),
+    bat_speed_mph=FormValue(value=Decimal("74.2"), sample=40, window_games=7, sufficient=True),
     # D-116: the pulled-barrels raw count with its BBE sample.
-    pulled_barrels=FormValue(value=Decimal(2), sample=22, window_days=7, sufficient=True),
+    pulled_barrels=FormValue(value=Decimal(2), sample=22, window_games=7, sufficient=True),
 )
 
 

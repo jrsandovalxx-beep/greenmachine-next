@@ -27,7 +27,7 @@ _TIMEOUT = 60
 def _form(**overrides: FormValue) -> FormSection:
     """A FormSection that is present, L7, and sufficient on every metric,
     with per-metric overrides — the deviations are what each test reads."""
-    sufficient = FormValue(value=Decimal("10"), sample=20, window_days=7, sufficient=True)
+    sufficient = FormValue(value=Decimal("10"), sample=20, window_games=7, sufficient=True)
     return FormSection(
         barrel_pct=overrides.get("barrel_pct", sufficient),
         exit_velocity=overrides.get("exit_velocity", sufficient),
@@ -40,16 +40,16 @@ def _form(**overrides: FormValue) -> FormSection:
         oppo_air_pct=overrides.get("oppo_air_pct", sufficient),
         pulled_barrels=overrides.get(
             "pulled_barrels",
-            FormValue(value=Decimal(2), sample=41, window_days=7, sufficient=True),
+            FormValue(value=Decimal(2), sample=41, window_games=7, sufficient=True),
         ),
         at_bats=overrides.get(
-            "at_bats", FormValue(value=Decimal(26), sample=30, window_days=7, sufficient=True)
+            "at_bats", FormValue(value=Decimal(26), sample=30, window_games=7, sufficient=True)
         ),
         hits=overrides.get(
-            "hits", FormValue(value=Decimal(9), sample=30, window_days=7, sufficient=True)
+            "hits", FormValue(value=Decimal(9), sample=30, window_games=7, sufficient=True)
         ),
         pull_pct=overrides.get(
-            "pull_pct", FormValue(value=Decimal("41.2"), sample=24, window_days=7, sufficient=True)
+            "pull_pct", FormValue(value=Decimal("41.2"), sample=24, window_games=7, sufficient=True)
         ),
     )
 
@@ -92,8 +92,8 @@ def test_the_volume_counts_open_the_table_without_bands() -> None:
     names the absence."""
     texts, styles = streamlit_app._form_section_frames(
         _form(
-            at_bats=FormValue(value=Decimal(26), sample=30, window_days=7, sufficient=True),
-            hits=FormValue(value=Decimal(9), sample=30, window_days=7, sufficient=True),
+            at_bats=FormValue(value=Decimal(26), sample=30, window_games=7, sufficient=True),
+            hits=FormValue(value=Decimal(9), sample=30, window_games=7, sufficient=True),
         )
     )
     assert texts.at[0, "AB"] == "26"
@@ -102,7 +102,7 @@ def test_the_volume_counts_open_the_table_without_bands() -> None:
     assert "H" not in styles.columns
     texts, styles = streamlit_app._form_section_frames(
         _form(
-            at_bats=FormValue(value=Decimal(0), sample=2, window_days=14, sufficient=True),
+            at_bats=FormValue(value=Decimal(0), sample=2, window_games=14, sufficient=True),
         )
     )
     assert texts.at[0, "AB"] == "0 · L14"  # 0 is a real observation of a played window
@@ -117,7 +117,7 @@ def test_present_and_sufficient_cell_is_the_plain_value_with_its_band() -> None:
     researched band — 18.2 barrels per 100 batted balls is elite."""
     texts, styles = streamlit_app._form_section_frames(
         _form(
-            barrel_pct=FormValue(value=Decimal("18.24"), sample=22, window_days=7, sufficient=True)
+            barrel_pct=FormValue(value=Decimal("18.24"), sample=22, window_games=7, sufficient=True)
         )
     )
     assert texts.at[0, "Barrel%"] == "18.2"
@@ -126,16 +126,16 @@ def test_present_and_sufficient_cell_is_the_plain_value_with_its_band() -> None:
     # D-144 (PO): Pull % greens open at the PO's 40 line — 41.2 lands the
     # first green, 46.0 the strong one; a league-average 36.5 stays neutral.
     texts, styles = streamlit_app._form_section_frames(
-        _form(pull_pct=FormValue(value=Decimal("41.2"), sample=24, window_days=7, sufficient=True))
+        _form(pull_pct=FormValue(value=Decimal("41.2"), sample=24, window_games=7, sufficient=True))
     )
     assert texts.at[0, "Pull %"] == "41.2"
     assert styles.at[0, "Pull %"] == streamlit_app._BAND_G1_CSS
     texts, styles = streamlit_app._form_section_frames(
-        _form(pull_pct=FormValue(value=Decimal("46.0"), sample=24, window_days=7, sufficient=True))
+        _form(pull_pct=FormValue(value=Decimal("46.0"), sample=24, window_games=7, sufficient=True))
     )
     assert styles.at[0, "Pull %"] == streamlit_app._BAND_G2_CSS
     texts, styles = streamlit_app._form_section_frames(
-        _form(pull_pct=FormValue(value=Decimal("36.5"), sample=24, window_days=7, sufficient=True))
+        _form(pull_pct=FormValue(value=Decimal("36.5"), sample=24, window_games=7, sufficient=True))
     )
     assert "Pull %" not in styles.columns  # the neutral middle — no fill
 
@@ -144,7 +144,7 @@ def test_l14_fallback_cell_names_the_window_and_keeps_its_band() -> None:
     texts, styles = streamlit_app._form_section_frames(
         _form(
             pull_air_pct=FormValue(
-                value=Decimal("41.7"), sample=18, window_days=14, sufficient=True
+                value=Decimal("41.7"), sample=18, window_games=14, sufficient=True
             )
         )
     )
@@ -159,7 +159,7 @@ def test_below_floor_cell_keeps_value_sample_and_insufficient_marker() -> None:
     texts, styles = streamlit_app._form_section_frames(
         _form(
             ideal_attack_angle_pct=FormValue(
-                value=Decimal("58.0"), sample=9, window_days=14, sufficient=False
+                value=Decimal("58.0"), sample=9, window_games=14, sufficient=False
             )
         )
     )
@@ -171,7 +171,7 @@ def test_absent_metric_reads_not_enough_data_available() -> None:
     """Nothing at either reach: D-078's wording, muted-reason styling — an
     absence outranks a band (D-129)."""
     texts, styles = streamlit_app._form_section_frames(
-        _form(barrel_pct=FormValue(value=None, sample=0, window_days=7, sufficient=False))
+        _form(barrel_pct=FormValue(value=None, sample=0, window_games=7, sufficient=False))
     )
     assert texts.at[0, "Barrel%"] == "not enough data available"
     assert styles.at[0, "Barrel%"] == streamlit_app._REASON_CSS

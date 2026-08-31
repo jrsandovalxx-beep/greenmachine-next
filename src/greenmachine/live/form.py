@@ -267,17 +267,19 @@ def aggregate_form(events: tuple[PitchEvent, ...]) -> FormMetrics:
 
 @dataclass(frozen=True)
 class FormValue:
-    """One resolved form metric with its sample and window provenance."""
+    """One resolved form metric with its sample and window provenance —
+    the window is the batter's last 7 or 14 PLAYED games (D-163, PO)."""
 
     value: Decimal | None
     sample: int
-    window_days: int
+    window_games: int
     sufficient: bool
 
 
 @dataclass(frozen=True)
 class FormSection:
-    """The form metrics after L7/L14 resolution, all nullable.
+    """The form metrics after L7/L14 (last 7 / last 14 played games —
+    D-163, PO) resolution, all nullable.
 
     xwOBA left the popup under D-102 — it stays on the Matchups main
     tables, whose grid lines carry it. SP-1 (D-109) amended the D-068 set:
@@ -316,7 +318,8 @@ def _pick(
     floor: int,
     floor_l7: int | None = None,
 ) -> FormValue:
-    """Per-metric window resolution: prefer L7, fall back to L14 on empty.
+    """Per-metric window resolution: prefer L7, fall back to L14 on empty
+    (the batter's last 7, then his last 14, PLAYED games — D-163, PO).
 
     ``floor`` binds the L14 window; ``floor_l7`` binds the L7 window where
     v2.2 ratified a lighter short-window floor (air balls: 5 at L7 per
@@ -324,16 +327,16 @@ def _pick(
     short_floor = floor if floor_l7 is None else floor_l7
     if sample_l7 > 0 and value_l7 is not None:
         return FormValue(
-            value=value_l7, sample=sample_l7, window_days=7, sufficient=sample_l7 >= short_floor
+            value=value_l7, sample=sample_l7, window_games=7, sufficient=sample_l7 >= short_floor
         )
     if sample_l14 > 0 and value_l14 is not None:
         return FormValue(
-            value=value_l14, sample=sample_l14, window_days=14, sufficient=sample_l14 >= floor
+            value=value_l14, sample=sample_l14, window_games=14, sufficient=sample_l14 >= floor
         )
     return FormValue(
         value=value_l7 if value_l7 is not None else value_l14,
         sample=max(sample_l7, sample_l14),
-        window_days=7 if sample_l7 >= sample_l14 else 14,
+        window_games=7 if sample_l7 >= sample_l14 else 14,
         sufficient=False,
     )
 
@@ -347,17 +350,17 @@ def _pulled_barrels(recent: FormMetrics, extended: FormMetrics) -> FormValue:
         return FormValue(
             value=Decimal(recent.pulled_barrels),
             sample=recent.batted_ball_events,
-            window_days=7,
+            window_games=7,
             sufficient=True,
         )
     if extended.air_balls > 0:
         return FormValue(
             value=Decimal(extended.pulled_barrels),
             sample=extended.batted_ball_events,
-            window_days=14,
+            window_games=14,
             sufficient=True,
         )
-    return FormValue(value=None, sample=0, window_days=7, sufficient=False)
+    return FormValue(value=None, sample=0, window_games=7, sufficient=False)
 
 
 def _window_count(count_l7: int, count_l14: int, pa_l7: int, pa_l14: int) -> FormValue | None:
@@ -366,9 +369,9 @@ def _window_count(count_l7: int, count_l14: int, pa_l7: int, pa_l14: int) -> For
     A count carries no sample floor — 0 is a real observation of a played
     window (0 hits in a 20-AB week says something; no PA says nothing)."""
     if pa_l7 > 0:
-        return FormValue(value=Decimal(count_l7), sample=pa_l7, window_days=7, sufficient=True)
+        return FormValue(value=Decimal(count_l7), sample=pa_l7, window_games=7, sufficient=True)
     if pa_l14 > 0:
-        return FormValue(value=Decimal(count_l14), sample=pa_l14, window_days=14, sufficient=True)
+        return FormValue(value=Decimal(count_l14), sample=pa_l14, window_games=14, sufficient=True)
     return None
 
 
@@ -470,7 +473,7 @@ def resolve_form_section(
         ideal_attack_angle_pct=FormValue(
             value=iaa.value * Decimal(100) if iaa.value is not None else None,
             sample=iaa.sample,
-            window_days=iaa.window_days,
+            window_games=iaa.window_games,
             sufficient=iaa.sufficient,
         ),
         bat_speed_mph=_pick(

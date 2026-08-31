@@ -4285,3 +4285,38 @@ behavioral payload's phases read the live sha exactly as the markers do.
 
 Full gate green (3460 passed, 1 skipped), consistency check clean, all
 four showcase runners clean.
+
+## D-163 - The form windows anchor to each batter's last 7 and 14 played games, never the calendar
+
+2026-08-31 (PO): "here are merrils recent form numbers as well, from the
+last 7 days. AUg 23rd to 30th. Jackson Merrill SDP 29 6 8.7% 91.6 54.1%
+34.8% figure out why there is a discrepancy" — then, asked whether to
+re-anchor the windows to his last 7 games played: "Yes".
+
+The discrepancy was window semantics, never counting: every one of the
+PO's six numbers reproduces exactly over Aug 23-30 — Merrill's last seven
+GAME dates — while the app sliced a trailing calendar window (game_date
+>= as_of - 7 days) that had dropped the Aug 23 game by slate day and slid
+again on every off-day with no new baseball played.
+
+Directive, ratified by the PO's yes: the form section's windows are the
+batter's own played game dates — his last 7, his last 14 at the fallback
+reach — computed from the event record. Off-days never slide the window;
+a rested or returning player's week stretches back to his seventh game,
+and a batter whose seventh game is older than the event record gets a
+partial window that the sample floors name. The bat-tracking read follows
+the same windows: Savant's board aggregates over the fetched range, so
+one league-wide range can never express per-batter game windows — the
+league board is fetched per needed window day and the day rows combine
+swing-weighted, exactly as the form section already combined a window's
+side rows. The FormValue provenance field is renamed window_games so the
+code stops calling a game count a day count. The robbed-HR count keeps
+its ratified calendar basis (D-128: 375+ ft over the last 7 days) — the
+PO's directive spoke to the form numbers, and the robbed tag's basis was
+already stated on the surface.
+
+Full gate green (3462 passed, 1 skipped — new tests pin the off-day
+anchor (a game ten calendar days back still counts inside seven played
+games), the fallback reading exactly played dates 8-14 of 16, and the
+swing-weighted day-board combination excluding a day he didn't play),
+consistency check clean, all four showcase runners clean.

@@ -82,8 +82,13 @@ from greenmachine.live.savant import (
 )
 from greenmachine.live.wind import wind_from_degrees as _parse_wind_from
 
-FORM_REACH_DAYS = 14
-FORM_SHORT_DAYS = 7
+# D-163 (PO): the form windows anchor to the batter's own played GAME
+# DATES, never the trailing calendar — his last 7 games, 14 at the
+# fallback reach. A calendar window slides on off-days: by Aug 31 it had
+# dropped Merrill's Aug 23 game while every form source the PO checks
+# (his last 7 games) still counted it.
+FORM_REACH_GAMES = 14
+FORM_SHORT_GAMES = 7
 # The exit-velocity log lists every pitch from the batter's most recent games
 # in the form window, capped at this many games (D-086).
 RECENT_EVENT_GAMES_CAP = 7
@@ -1805,36 +1810,13 @@ def build_board(
         if not pitcher_statcast:
             diagnostics.append("statcast pitcher board: returned zero rows")
 
-    short_start = (as_of - timedelta(days=FORM_SHORT_DAYS)).date()
-    reach_start = (as_of - timedelta(days=FORM_REACH_DAYS)).date()
-    tracking_short_result = savant.fetch_bat_tracking(
-        year=year, start=short_start.isoformat(), end=as_of.date().isoformat()
-    )
-    tracking_short: tuple[BatTrackingRow, ...]
-    if isinstance(tracking_short_result, FetchFailure):
-        diagnostics.append(f"bat tracking (short window): {tracking_short_result.reason}")
-        tracking_short = ()
-    else:
-        tracking_short = tracking_short_result
-    tracking_reach_result = savant.fetch_bat_tracking(
-        year=year, start=reach_start.isoformat(), end=as_of.date().isoformat()
-    )
-    tracking_reach: tuple[BatTrackingRow, ...]
-    if isinstance(tracking_reach_result, FetchFailure):
-        diagnostics.append(f"bat tracking (fallback window): {tracking_reach_result.reason}")
-        tracking_reach = ()
-    else:
-        tracking_reach = tracking_reach_result
-    # Grouped once: the per-batter loop below reads each board hundreds of
-    # times, and a full-board scan per batter is quadratic in slate size.
-    short_tracking_by_batter = _by_player(tracking_short)
-    reach_tracking_by_batter = _by_player(tracking_reach)
-
     # The event record spans the batter window the Matchups tab selected
     # (D-128, PO — thirty days by default), stretched to the pitcher
     # recent-form reach when that is longer, so one fetch serves the
     # batter grids, the grade, the robbed count, and the starter reads.
-    # Form still slices its own L7/L14 reaches out of it.
+    # Form slices its own last-7/last-14-GAMES windows out of it (D-163,
+    # PO); a batter whose seventh game is older than the record gets a
+    # partial window — the sample floors name the thinness.
     if batter_window_days < ROBBED_HR_WINDOW_DAYS:
         raise ValueError(
             f"the batter window ({batter_window_days} days) must at least "
@@ -1861,6 +1843,51 @@ def build_board(
     for event in events:
         events_by_batter.setdefault(event.batter_id, []).append(event)
         events_by_pitcher.setdefault(event.pitcher_id, []).append(event)
+    # D-163 (PO): the form windows are each batter's own played game dates
+    # — his last 7, his last 14 at the fallback reach — computed from the
+    # event record; an off-day never slides them. The bat-tracking board
+    # follows the same windows: Savant's board aggregates over the fetched
+    # range, so one league-wide range can never express per-batter game
+    # windows — the league board is fetched per needed day instead, and
+    # the form section's tracking read combines the day rows
+    # swing-weighted, exactly as it already combined a window's side rows.
+    form_dates_by_batter: dict[int, tuple[frozenset[str], frozenset[str]]] = {}
+    needed_tracking_dates: set[str] = set()
+    for batter_id in slate_batters:
+        played = sorted(
+            {event.game_date for event in events_by_batter.get(batter_id, ())},
+            reverse=True,
+        )
+        short_dates = frozenset(played[:FORM_SHORT_GAMES])
+        reach_dates = frozenset(played[:FORM_REACH_GAMES])
+        form_dates_by_batter[batter_id] = (short_dates, reach_dates)
+        needed_tracking_dates.update(reach_dates)
+    tracking_by_date: dict[str, dict[int, tuple[BatTrackingRow, ...]]] = {}
+    for day_iso in sorted(needed_tracking_dates):
+        tracking_day_result = savant.fetch_bat_tracking(year=year, start=day_iso, end=day_iso)
+        if isinstance(tracking_day_result, FetchFailure):
+            diagnostics.append(f"bat tracking ({day_iso}): {tracking_day_result.reason}")
+            continue
+        # Grouped once per day: the per-batter windows below read each
+        # day's board, and a full-board scan per batter is quadratic in
+        # slate size.
+        tracking_by_date[day_iso] = _by_player(tracking_day_result)
+    tracking_windows_by_batter: dict[
+        int, tuple[tuple[BatTrackingRow, ...], tuple[BatTrackingRow, ...]]
+    ] = {}
+    for batter_id, (short_dates, reach_dates) in form_dates_by_batter.items():
+        tracking_windows_by_batter[batter_id] = (
+            tuple(
+                row
+                for day_iso in sorted(short_dates)
+                for row in tracking_by_date.get(day_iso, {}).get(batter_id, ())
+            ),
+            tuple(
+                row
+                for day_iso in sorted(reach_dates)
+                for row in tracking_by_date.get(day_iso, {}).get(batter_id, ())
+            ),
+        )
     # The batter scope (grid line, grade leg, robbed count, dialog reaches)
     # reads the selected window; the starter scope (recent-form lines,
     # per-side usage, stuff drift) reads the three-month pitcher reach.
@@ -1899,9 +1926,6 @@ def build_board(
         else:
             mix_by_pitcher[pid] = ()
             mix_label_by_pitcher[pid] = ""
-    short_cutoff = short_start.isoformat()
-    reach_cutoff = reach_start.isoformat()
-
     capture = SourceCaptureId(f"gmf-006-board-{slate.official_date}-{as_of.isoformat()}")
     season_start = _season_window_start(slate_date)
 
@@ -2008,8 +2032,7 @@ def build_board(
                 bats = line.bats if line else ""
                 display_name = line.full_name if line and line.full_name else f"Player {player_id}"
                 statcast_row = statcast.get(player_id)
-                player_short = short_tracking_by_batter.get(player_id, ())
-                player_reach = reach_tracking_by_batter.get(player_id, ())
+                player_short, player_reach = tracking_windows_by_batter.get(player_id, ((), ()))
                 sides = tuple({row.side for row in player_reach if row.side in ("R", "L")})
                 side, _side_reason = resolve_batting_side(bats, sides, pitcher_throws)
                 side_short = _side_resolved_tracking(player_short, side)
@@ -2027,11 +2050,16 @@ def build_board(
                     and event.game_date >= matchup_cutoff
                 )
                 recent_events = _recent_window_events(player_events)
+                # D-163 (PO): the window slices are his played game dates —
+                # membership, never a calendar comparison.
+                short_dates, reach_dates = form_dates_by_batter.get(
+                    player_id, (frozenset(), frozenset())
+                )
                 short_events = tuple(
-                    event for event in player_events if event.game_date >= short_cutoff
+                    event for event in player_events if event.game_date in short_dates
                 )
                 reach_events = tuple(
-                    event for event in player_events if event.game_date >= reach_cutoff
+                    event for event in player_events if event.game_date in reach_dates
                 )
                 form = resolve_form_section(
                     aggregate_form(short_events),
