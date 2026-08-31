@@ -1673,49 +1673,63 @@ def _card_tag_lists(
                     )
                 else:
                     vetoes.append(f"cold suppress: {float(temp):.0f}°F")
-        # Wind reads (SP-4, D-119): the forecast resolved against the
-        # batter's dominant air field on the measured park axis. Assist
-        # out toward his field, kill in from it, kill out to the opposite
-        # corner; first match wins. A center-dominant spray has no
-        # opposite corner, and without a sufficient spray record there is
-        # no field to resolve toward — both stay silent.
+        # Wind reads (SP-4, D-119; D-161, PO): the forecast resolved on
+        # the measured park axis. D-161 (PO): a wind plainly out to
+        # center is a buff for EVERYBODY — at ≥ 8 mph resolved along the
+        # axis every batter reads the assist, spray record or not, and
+        # the away-corner kill never fires on it. (2026-08-31 at Wrigley:
+        # an SW wind 8° off the axis put "wind kill: out to right" on
+        # Suzuki while the weather column read "out to center" — the
+        # column was the honest one.) Otherwise the reads resolve against
+        # the batter's dominant air field: assist out toward it, kill in
+        # from it, kill out to the opposite corner; first match wins. A
+        # center-dominant spray has no opposite corner, and without a
+        # sufficient spray record there is no field to resolve toward —
+        # both stay silent.
         if open_air and axis is not None and wind_from is not None and wind_speed is not None:
-            side = card.batting_side
-            air = _air_field(card)
-            if air is not None and side is not None:
-                field, field_name = air
-                resolved = resolved_wind_mph(
-                    wind_speed, wind_from, spray_field_bearing(axis, side, field)
+            direction = game.wind_direction
+            raw = (
+                f"{direction.upper()} {float(wind_speed):.0f} mph"
+                if direction
+                else f"{float(wind_speed):.0f} mph"
+            )
+            center_out = wind_field_words(wind_from, axis) == "out to center"
+            if center_out and in_axis is not None and in_axis >= _WIND_ASSIST_LINE:
+                strong = "strong " if in_axis >= _WIND_ASSIST_STRONG_LINE else ""
+                boosters.append(
+                    f"wind assist: {strong}{float(in_axis):.0f} mph out to center ({raw})"
                 )
-                direction = game.wind_direction
-                raw = (
-                    f"{direction.upper()} {float(wind_speed):.0f} mph"
-                    if direction
-                    else f"{float(wind_speed):.0f} mph"
-                )
-                if resolved >= _WIND_ASSIST_LINE:
-                    strong = "strong " if resolved >= _WIND_ASSIST_STRONG_LINE else ""
-                    boosters.append(
-                        f"wind assist: {strong}{float(resolved):.0f} mph "
-                        f"out to {field_name} ({raw})"
+            else:
+                side = card.batting_side
+                air = _air_field(card)
+                if air is not None and side is not None:
+                    field, field_name = air
+                    resolved = resolved_wind_mph(
+                        wind_speed, wind_from, spray_field_bearing(axis, side, field)
                     )
-                elif resolved <= -_WIND_KILL_IN_LINE:
-                    vetoes.append(
-                        f"wind kill: {float(-resolved):.0f} mph in from {field_name} ({raw})"
-                    )
-                elif field != "center":
-                    opposing_field = "oppo" if field == "pull" else "pull"
-                    opposing_name = "right" if field_name == "left" else "left"
-                    opposing_resolved = resolved_wind_mph(
-                        wind_speed,
-                        wind_from,
-                        spray_field_bearing(axis, side, opposing_field),
-                    )
-                    if opposing_resolved >= _WIND_ASSIST_LINE:
-                        vetoes.append(
-                            f"wind kill: {float(opposing_resolved):.0f} mph out to "
-                            f"{opposing_name}, away from his air field ({raw})"
+                    if resolved >= _WIND_ASSIST_LINE:
+                        strong = "strong " if resolved >= _WIND_ASSIST_STRONG_LINE else ""
+                        boosters.append(
+                            f"wind assist: {strong}{float(resolved):.0f} mph "
+                            f"out to {field_name} ({raw})"
                         )
+                    elif resolved <= -_WIND_KILL_IN_LINE:
+                        vetoes.append(
+                            f"wind kill: {float(-resolved):.0f} mph in from {field_name} ({raw})"
+                        )
+                    elif field != "center" and not center_out:
+                        opposing_field = "oppo" if field == "pull" else "pull"
+                        opposing_name = "right" if field_name == "left" else "left"
+                        opposing_resolved = resolved_wind_mph(
+                            wind_speed,
+                            wind_from,
+                            spray_field_bearing(axis, side, opposing_field),
+                        )
+                        if opposing_resolved >= _WIND_ASSIST_LINE:
+                            vetoes.append(
+                                f"wind kill: {float(opposing_resolved):.0f} mph out to "
+                                f"{opposing_name}, away from his air field ({raw})"
+                            )
         # Spray-alignment reads (v2.2, D-120): his air contact going where
         # the park boosts. Pull-air match on the same-side factor;
         # oppo-air match on the OPPOSITE-side factor (the Walker
@@ -2924,16 +2938,20 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "at ≤ 90 (strong ≤ 85); the heat boost at ≥ 85°F (strong ≥ 90°F) "
         "and the cold suppress below 45°F, open-air venues only — a "
         "roofed stadium is the indoor neutral value. "
-        "Wind reads (D-119): the forecast resolved against the batter's "
-        "dominant air field — pull or oppo, the larger half of his "
-        "measurable air balls in the form record (5 air balls L7 / 15 at "
-        "L14+) — on the measured park axis. The "
-        "wind assist at ≥ 8 mph resolved out toward his field (strong "
-        "≥ 12), the wind kill at ≥ 10 mph resolved in from it or ≥ 8 mph "
-        "resolved out to the opposite corner (the v2.2 table names no "
-        "number for the opposing case, so it borrows the assist line), "
-        "and the severe cold suppress below 38°F with an in-wind ≥ 5 mph "
-        "along the axis. A roofed venue or an insufficient spray record "
+        "Wind reads (D-119; D-161, PO): the forecast resolved on the "
+        "measured park axis. A wind plainly out to center at ≥ 8 mph "
+        "resolved along the axis (strong ≥ 12) is a wind assist for "
+        "EVERY batter — spray record or not — and the away-corner kill "
+        "never fires on it. Otherwise the reads resolve against the "
+        "batter's dominant air field — pull or oppo, the larger half of "
+        "his measurable air balls in the form record (5 air balls L7 / "
+        "15 at L14+): the wind assist at ≥ 8 mph resolved out toward "
+        "his field (strong ≥ 12), the wind kill at ≥ 10 mph resolved "
+        "in from it or ≥ 8 mph resolved out to the opposite corner "
+        "(the v2.2 table names no number for the opposing case, so it "
+        "borrows the assist line), and the severe cold suppress below "
+        "38°F with an in-wind ≥ 5 mph along the axis. A roofed venue "
+        "or, off the center-out read, an insufficient spray record "
         "carries no wind read. "
         "Spray-alignment reads (D-120): the oppo-air match at an oppo "
         "share over 20% of measurable air balls (the same signed halves "
@@ -3368,26 +3386,25 @@ _MATCHUPS_HELP: dict[str, str] = {
         "count keeps its event-record basis on both views."
     ),
     "Pull Air %": (
-        "Recent view: share of measurable air balls pulled, signed spray "
-        "(the ratified v2.2 read — ≥ 40% with a boosting same-side park "
-        "factor reads the pull-air match). Season view: Savant's "
-        "published pull-air bucket, rebased per air ball (D-128, PO). "
+        "Savant's season published pulled-air share of ALL batted "
+        "balls, read raw on every view (D-160, PO) — the recent and "
+        "season rows both carry the season card's spray profile, so "
+        "the two never disagree. ≥ 40% with a boosting same-side park "
+        "factor reads the pull-air match (v2.2). "
         f"Cell colors (researched 2025 baselines, D-127): "
         f"{_band_scale_text(_GRID_BANDS['Pull Air %'])}."
     ),
     "Straight Air %": (
-        "The third air profile (D-128, PO). Recent view: air balls "
-        "within 15° of dead center over the measurable-air set — a "
-        "near-center ball also counts in its signed side column. Season "
-        "view: Savant's published straight-away bucket, rebased per air "
-        "ball. No cell colors: a fit read, not a quality grade."
+        "Savant's season published straight-away air share of ALL "
+        "batted balls, read raw on every view (D-160, PO). No cell "
+        "colors: a fit read, not a quality grade."
     ),
     "Oppo Air %": (
-        "Recent view: share of measurable air balls to the opposite "
-        "field, signed spray — over 20% reads against the opposite-side "
-        "factor (v2.2). Season view: Savant's published oppo-air bucket, "
-        "rebased per air ball (D-128, PO). No cell colors: a fit read "
-        "against the park, not a quality grade (D-127)."
+        "Savant's season published opposite-field air share of ALL "
+        "batted balls, read raw on every view (D-160, PO) — over 20% "
+        "reads against the opposite-side factor (v2.2). No cell "
+        "colors: a fit read against the park, not a quality grade "
+        "(D-127)."
     ),
     "xwOBA": (
         "Expected wOBA from contact quality over the scope. "
@@ -3603,8 +3620,8 @@ def _grid_line_cells(
             "Pull Air %": (
                 _pct_text(line.pull_air_share) if line.pull_air_share is not None else None
             ),
-            # D-128 (PO): the third air profile — pull, straight and oppo
-            # read the identical measurable-air denominator.
+            # D-160 (PO): pull, straight and oppo all read the season
+            # board's published of-BBE shares, raw, on every view.
             "Straight Air %": (
                 _pct_text(line.straight_air_share) if line.straight_air_share is not None else None
             ),

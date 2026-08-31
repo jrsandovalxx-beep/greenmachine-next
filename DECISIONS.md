@@ -4203,3 +4203,59 @@ proves four phases: stale pre-load evicted with cache-clear scheduled,
 same-epoch reruns never re-evict, in-flight imports spared, old-epoch
 modules evicted on the bump), consistency check clean, all four
 showcase runners clean.
+
+## D-160 - The matchup grid's three air columns read Savant's season published shares of all batted balls, raw, on every view
+
+2026-08-31 (PO): "for merril in the matchup tab, the three colums for air
+pull stAIGHT AND OPPO rong. makwe sure these columns are pulling seasonal
+data in the future., here are the correct numbers 19.2 21.5 22.5."
+
+The PO's numbers are Savant's season batted-ball board exactly — Merrill's
+published pull/straight/oppo air shares of ALL batted balls are 19.17 /
+21.50 / 22.54. The app showed two different wrong things: the season row
+rebased those published shares onto the air share (30.3 / 34.0 / 35.7),
+and the window row computed its own spray split off the window's events.
+Both derivations contradicted the season card the PO checks against.
+
+Directive: the three columns ARE the season board's published of-BBE
+shares, read raw, on every view — window rows carry the same board as
+the season row, so the grid never disagrees with the card. The window's
+own events keep feeding every other column (AB/H/HR, EV, barrels, the
+robbed count); only the spray profile changes basis. A missing board row
+still reads as a named absence, never an invented split; the D-128
+rebase helper is gone with the rebase. The form section's own Pull/Oppo
+Air % — a different, windowed metric with its own floors — is untouched.
+
+Full gate green (3460 passed, 1 skipped — the rewritten tests pin the
+raw passthrough on both views, the no-row absence, and the PO's exact
+Merrill card), consistency check clean, all four showcase runners clean.
+
+## D-161 - A wind plainly out to center is a wind assist for every batter
+
+2026-08-31 (PO): "FOR SUZUKI, WIND KILL SAYS OUT TO RIGHT BUT IN WEATHER
+ON THE SLUGGER TABLE IT SAYS OUT TO CENTER. WHICH IS ? ALSO IWIND OUT TO
+CENTER ISA BUFF FOR AEVERYBODY."
+
+The weather column was the honest one: at Wrigley (axis 37°) an SW
+10 mph forecast sits 8° off straight-away center — plainly "out to
+center". The kill tag was the away-corner read doing what D-119 said:
+9.3 mph resolved toward the right-field corner of a left-pull batter's
+opposite side, over the borrowed 8 mph line. Technically per spec,
+practically a lie — a center-out wind carries everyone's fly balls, and
+no corner of it is a kill.
+
+Directive, ratified as read: when the wind words read "out to center"
+and the along-axis resolution reaches the 8 mph assist line (strong at
+12), EVERY batter on the card gets the wind assist — "wind assist:
+[strong ]X mph out to center" — spray record or not, pull side or oppo,
+form floors irrelevant. The away-corner kill never fires on a center-out
+reading. Off the center sector the D-119 reads stand unchanged: assist
+toward the dominant air field, kill in from it, kill out to the opposite
+corner. The weather column and the tags now agree by construction — both
+speak wind_field_words on the measured axis.
+
+Full gate green (3460 passed, 1 skipped — the new render test pins the
+assist for five batter shapes on a straight-out wind, the strong line,
+the Suzuki case itself with the away-kill suppressed 15° off the axis,
+and the silences below the line and without an axis), consistency check
+clean, all four showcase runners clean.

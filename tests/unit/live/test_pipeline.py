@@ -1446,35 +1446,41 @@ def test_the_batter_window_cannot_undercut_the_robbed_basis() -> None:
         )
 
 
-def test_straight_air_share_reads_the_fifteen_degree_band() -> None:
-    """D-128 (PO): the straight-away profile is the air balls within
-    fifteen degrees of dead center over the identical measurable-air
-    denominator. Pull and oppo keep the ratified signed convention, so
-    they partition the set while straight overlaps a near-center ball's
-    signed side — one denominator, not a partition."""
+def test_the_window_spray_columns_read_the_season_board() -> None:
+    """D-160 (PO): the window row's Pull/Straight/Oppo Air % are Savant's
+    season published shares of ALL batted balls, read raw off the
+    batted-ball board — the same profile the season view publishes, so
+    the grid never contradicts the season card (the PO's Merrill check:
+    19.2 / 21.5 / 22.5). Without a board row the columns stay None — a
+    named absence, never an invented split."""
     from greenmachine.live.pipeline import _batter_grid_line
 
-    # The fixture batter is a lefty: spray < 0 is his pull side.
-    pull = _window_event(hc_x=Decimal("96.9"), hc_y=Decimal("120"))  # -20 deg
-    straight = _window_event(hc_x=Decimal("125.42"), hc_y=Decimal("120"))  # dead center
-    oppo = _window_event(hc_x=Decimal("153.9"), hc_y=Decimal("120"))  # +20 deg
-    overlap = _window_event(
-        hc_x=Decimal("111.6"), hc_y=Decimal("120")
-    )  # -10 deg: pull AND straight
-    line = _batter_grid_line((pull, straight, oppo, overlap), robbed_count=0)
+    board_row = BattedBallRow(
+        player_id=BATTER_ID,
+        batted_ball_events=319,
+        air_share=Decimal("0.6321"),
+        pull_air_share_of_bbe=Decimal("0.1917"),
+        straight_air_share_of_bbe=Decimal("0.2150"),
+        oppo_air_share_of_bbe=Decimal("0.2254"),
+    )
+    line = _batter_grid_line((_window_event(),), robbed_count=0, batted_ball=board_row)
     assert line is not None
-    assert line.pull_air_share == Decimal("0.5")  # the -20 and the -10
-    assert line.oppo_air_share == Decimal("0.25")
-    assert line.straight_air_share == Decimal("0.5")  # dead center and the -10
-    # Pull and oppo partition; straight's band crosses the signed sides.
-    assert line.pull_air_share + line.oppo_air_share == Decimal("0.75")
+    assert line.pull_air_share == Decimal("0.1917")
+    assert line.straight_air_share == Decimal("0.2150")
+    assert line.oppo_air_share == Decimal("0.2254")
+
+    no_row = _batter_grid_line((_window_event(),), robbed_count=0)
+    assert no_row is not None
+    assert no_row.pull_air_share is None
+    assert no_row.straight_air_share is None
+    assert no_row.oppo_air_share is None
 
 
 def test_the_season_line_reads_the_published_air_profiles() -> None:
-    """D-128 (PO): the season view's pull/straight/oppo are Savant's own
-    published buckets off the batted-ball board, rebased pipeline-side to
-    shares of the batter's air balls — published numbers, never a
-    home-built derivation. No board row, no split: named absences."""
+    """D-160 (PO): the season view's pull/straight/oppo are Savant's own
+    published buckets off the batted-ball board, read RAW as shares of
+    ALL batted balls — the PO's card numbers, never a home-built rebase.
+    No board row, no split: named absences."""
     hitting = {
         BATTER_ID: SeasonHittingLine(
             player_id=BATTER_ID,
@@ -1504,14 +1510,14 @@ def test_the_season_line_reads_the_published_air_profiles() -> None:
     assert not isinstance(board, FetchFailure)
     line = board.games[0].away_batters[0].season_line
     assert line is not None
-    assert line.pull_air_share == Decimal("0.32")  # 0.16 / 0.50
-    assert line.straight_air_share == Decimal("0.38")
-    assert line.oppo_air_share == Decimal("0.30")
+    assert line.pull_air_share == Decimal("0.16")  # the published of-BBE share, raw
+    assert line.straight_air_share == Decimal("0.19")
+    assert line.oppo_air_share == Decimal("0.15")
     total = line.pull_air_share + line.straight_air_share + line.oppo_air_share
-    assert total == Decimal(1)  # the published buckets partition air balls
+    assert total == Decimal("0.50")  # the three published buckets sum to the air share
 
-    # An empty air share publishes no split — named absences, never a
-    # divide-by-zero.
+    # An all-ground-ball profile publishes its zeros as-is — no rebase,
+    # no division, no invented absence.
     grounded = _FakeSavant(
         batted_ball={
             BATTER_ID: BattedBallRow(
@@ -1528,9 +1534,9 @@ def test_the_season_line_reads_the_published_air_profiles() -> None:
     assert not isinstance(board, FetchFailure)
     line = board.games[0].away_batters[0].season_line
     assert line is not None
-    assert line.pull_air_share is None
-    assert line.straight_air_share is None
-    assert line.oppo_air_share is None
+    assert line.pull_air_share == Decimal("0")
+    assert line.straight_air_share == Decimal("0")
+    assert line.oppo_air_share == Decimal("0")
 
 
 def test_mix_falls_back_to_the_season_board_when_no_window_pitches() -> None:
@@ -1615,10 +1621,11 @@ def test_robbed_hr_counts_375_plus_balls_that_stayed_in_the_park_over_l7() -> No
     assert line.robbed_hr_count == 2
 
 
-def test_pull_air_share_mirrors_the_form_section() -> None:
-    """D-090: Pull Air % is its own metric — pulled air balls over
-    measurable air balls, matching the form section's definition; distance
-    plays no part."""
+def test_the_window_line_carries_the_season_spray_board() -> None:
+    """D-160 (PO): the window view's three air columns read the season
+    batted-ball board raw — the same profile the season row shows — while
+    the scope's own events keep feeding the rest of the line and the
+    robbed count."""
     pull_x, oppo_x = Decimal("100"), Decimal("150")  # L batter: spray < 0 pulls
     base = {
         "pitch_type": "FF",
@@ -1636,14 +1643,27 @@ def test_pull_air_share_mirrors_the_form_section() -> None:
         ),  # unmeasurable: out of both pull-air counts
         _window_event(bb_type="ground_ball", hc_x=pull_x, hit_distance=Decimal("60"), **base),
     )
-    board = _build(_FakeApi(), _FakeSavant(), events=events)
+    savant = _FakeSavant(
+        batted_ball={
+            BATTER_ID: BattedBallRow(
+                player_id=BATTER_ID,
+                batted_ball_events=319,
+                air_share=Decimal("0.6321"),
+                pull_air_share_of_bbe=Decimal("0.1917"),
+                straight_air_share_of_bbe=Decimal("0.2150"),
+                oppo_air_share_of_bbe=Decimal("0.2254"),
+            )
+        },
+    )
+    board = _build(_FakeApi(), savant, events=events)
     assert not isinstance(board, FetchFailure)
     line = board.games[0].away_batters[0].mix_line
     assert line is not None
-    # 2 pulls over 3 measurable air balls (the hc-less fly ball is out of
-    # both counts); distance plays no part — the pulls are 290 and 310 ft.
-    assert line.pull_air_share is not None
-    assert line.pull_air_share.quantize(Decimal("0.001")) == Decimal("0.667")
+    # D-160 (PO): the season card's numbers on the window view too — the
+    # scope's own spray plays no part in the three air columns.
+    assert line.pull_air_share == Decimal("0.1917")
+    assert line.straight_air_share == Decimal("0.2150")
+    assert line.oppo_air_share == Decimal("0.2254")
     assert line.robbed_hr_count == 2  # the 390 and 380: distance only
 
 
@@ -1651,9 +1671,9 @@ def test_season_grid_line_composes_the_season_sources() -> None:
     """D-079's toggle target: the season line reads the hitting line
     (AVG/SLG/ISO from total bases), the statcast board (EV, barrels,
     hard-hit), and the arsenal board (PA-weighted xwOBA, pitch-weighted
-    Swing-Str). The season scope has no per-event record, so the spray
-    reads stay None — while the robbed count rides along on its own L7
-    basis (D-128, PO)."""
+    Swing-Str). No batted-ball board row here, so the spray columns
+    stay None — a named absence (D-160, PO) — while the robbed count
+    rides along on its own L7 basis (D-128, PO)."""
     hitting = {
         BATTER_ID: SeasonHittingLine(
             player_id=BATTER_ID,
@@ -1695,8 +1715,8 @@ def test_season_grid_line_composes_the_season_sources() -> None:
     # D-128 (PO): the robbed count rides the season line too — always the
     # L7 basis; the fixture's balls carry no distances, so zero robbed.
     assert line.robbed_hr_count == 0
-    assert line.pull_air_share is None
-    assert line.straight_air_share is None  # no season spray read
+    assert line.pull_air_share is None  # no batted-ball board row
+    assert line.straight_air_share is None
     # D-124: the season average launch angle rides the season line off the
     # Statcast board — context only, never a firing line.
     assert line.avg_launch_angle == Decimal("16.4")
