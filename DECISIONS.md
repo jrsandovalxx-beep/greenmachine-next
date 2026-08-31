@@ -4166,3 +4166,40 @@ Full gate green (3459 passed, 1 skipped — the eviction contract test
 now proves all three phases: stale pre-load evicted, fresh modules
 never re-evicted, in-flight imports spared), consistency check clean,
 all four showcase runners clean.
+
+
+## D-159 - The host's process outlives deploys: the eviction is once per deploy epoch, and an eviction clears the st caches
+
+2026-08-31: D-158 deployed and the PicklingError persisted — identical
+message, same value hash. Its own forensics explained why. Two tells:
+the pycache prefix printed the SAME mkdtemp directory across the D-157
+and D-158 deploys (a random per-process name cannot repeat across
+reboots), and the header COMMIT moved while it stayed — the host
+serves new commits through file-watcher reruns in one long-lived
+process, not through reboots. And the identity probe named the split:
+the cache_resource Savant client still built rows with one module
+object while sys.modules held another.
+
+Two consequences. First, D-158's once-per-process flag — set during
+the poisoned era — permanently disabled the very eviction the next
+deploy needed; the flag is now keyed to the DEPLOY_EPOCH: an epoch
+mismatch fires the eviction at most once per epoch (concurrency-safe
+via the lock on sys), so a rerun inside one epoch never re-evicts
+(the D-158 fix stands) while the next deploy in the same process gets
+its fresh start. The pop loop also learned to spare a half-initialized
+module: importlib re-registers a completing import unconditionally, so
+popping one mid-flight breaks that import outright.
+
+Second, evicting sys.modules is only half the cleanup: the st caches
+hold objects built from the old module set — the Savant client's
+methods keep the old module's globals — so a real eviction now
+schedules a one-shot st.cache_data/st.cache_resource clear, consumed
+at the top of main() before anything reads the caches. DEPLOY_EPOCH
+bumps to 159 in deploy_bootstrap, greenmachine/__init__, and the
+entrypoint's expected literal.
+
+Full gate green (3459 passed, 1 skipped — the behavioral contract now
+proves four phases: stale pre-load evicted with cache-clear scheduled,
+same-epoch reruns never re-evict, in-flight imports spared, old-epoch
+modules evicted on the bump), consistency check clean, all four
+showcase runners clean.

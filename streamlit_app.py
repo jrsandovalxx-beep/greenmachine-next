@@ -80,52 +80,61 @@ if sys.pycache_prefix is None or "gm_pycache_" not in sys.pycache_prefix:
 # whose cache path was computed while the prefix was still None, i.e.
 # before the redirect above existed. No line here can run earlier than
 # that pre-import, so the guard works the other direction: record what
-# was pre-loaded, and evict any of it that is stale (no DEPLOY_EPOCH
-# marker) so the imports below re-execute from source under our cache
-# root. Fresh pre-loads are left alone — evicting them on every rerun
-# would rebuild the package per interaction and break isinstance checks
-# against cached objects.
+# was pre-loaded, and evict any of it that is stale (the wrong
+# DEPLOY_EPOCH marker) so the imports below re-execute from source
+# under our cache root.
 #
-# D-158: the eviction now runs AT MOST ONCE PER PROCESS, under a
-# process-wide lock. D-157 re-ran the marker check on every execution
-# of this file, and Streamlit re-executes it per session and per
-# interaction: a second execution starting while the first was still
-# importing saw a half-initialized greenmachine (the marker line had
-# not run yet), read it as stale, and deleted the package mid-import.
-# The process ended up with two greenmachine.live.savant module
-# objects, and st.cache_data could not pickle the freshly built rows
-# ("not the same object as greenmachine.live.savant.PitchArsenalRow").
-# __main__'s globals are rebuilt on every rerun, so the once-guard and
-# its lock live on sys — the one object every rerun and session thread
-# shares.
+# D-158/D-159: the eviction runs AT MOST ONCE PER DEPLOY EPOCH, under a
+# process-wide lock — and the epoch key matters because the host's
+# process OUTLIVES deploys: D-159's forensics caught one process serving
+# two commits (the same mkdtemp prefix across pushes — file-watcher
+# reruns instead of reboots), and D-158's process-wide flag disabled the
+# eviction exactly when the new deploy needed it. Within one epoch a
+# re-check never fires — D-158's bug was a rerun evicting a
+# half-initialized package mid-import, leaving two savant module objects
+# (the PicklingError). Only FULLY initialized roots are judged: a
+# half-initialized module is an import in flight under our redirect,
+# joined through the per-module import locks, never evicted. __main__'s
+# globals are rebuilt on every rerun, so the epoch flag and its lock
+# live on sys — the one object every rerun and session thread shares.
+_EXPECTED_DEPLOY_EPOCH = 159
 _PRELOADED_OURS = tuple(
     name
     for name in sys.modules
     if name == "deploy_bootstrap" or name == "greenmachine" or name.startswith("greenmachine.")
 )
-if not getattr(sys, "_gm_eviction_decided", False):
+if getattr(sys, "_gm_eviction_epoch", None) != _EXPECTED_DEPLOY_EPOCH:
     _eviction_lock = getattr(sys, "_gm_eviction_lock", None)
     if _eviction_lock is None:
         _eviction_lock = threading.Lock()
         sys._gm_eviction_lock = _eviction_lock  # type: ignore[attr-defined]
     with _eviction_lock:
-        if not getattr(sys, "_gm_eviction_decided", False):
-            sys._gm_eviction_decided = True  # type: ignore[attr-defined]
+        if getattr(sys, "_gm_eviction_epoch", None) != _EXPECTED_DEPLOY_EPOCH:
+            sys._gm_eviction_epoch = _EXPECTED_DEPLOY_EPOCH  # type: ignore[attr-defined]
             # The marker check reads the two ROOTS only (importing any
             # submodule imports its parents first, so a stale pre-load
-            # always shows at the root), and only a FULLY initialized
-            # root can be judged: a half-initialized one means an import
-            # is in flight under our redirect, which the import block
-            # below joins through the per-module import locks instead.
+            # always shows at the root).
             if any(
                 getattr(getattr(sys.modules[root], "__spec__", None), "_initialized", True)
-                and getattr(sys.modules[root], "DEPLOY_EPOCH", None) != 158
+                and getattr(sys.modules[root], "DEPLOY_EPOCH", None) != _EXPECTED_DEPLOY_EPOCH
                 for root in ("deploy_bootstrap", "greenmachine")
                 if root in sys.modules
             ):
                 importlib.invalidate_caches()
                 for _preloaded in _PRELOADED_OURS:
-                    sys.modules.pop(_preloaded, None)
+                    # Never pop a module mid-import: importlib re-registers
+                    # it on completion (the pop would break that import
+                    # outright). An in-flight import here already read its
+                    # source under our redirect, so it finishes fresh.
+                    _module = sys.modules.get(_preloaded)
+                    if getattr(getattr(_module, "__spec__", None), "_initialized", True):
+                        sys.modules.pop(_preloaded, None)
+                # Every cached object built from the evicted modules is
+                # now a foreign-class object — the cache_resource Savant
+                # client's methods keep the old module globals, which is
+                # the PicklingError's other half. main() clears both
+                # caches once, right after the fresh imports below.
+                sys._gm_cache_clear_pending = True  # type: ignore[attr-defined]
 
 # D-153/D-155: the deploy bootstrap sweeps stale bytecode from the
 # checkout's src tree before any greenmachine import can load it — it
@@ -4608,13 +4617,17 @@ def render_live_board() -> None:
         _probe("pycache prefix (effective)", lambda: _sys.pycache_prefix)
         _probe("PYTHONPYCACHEPREFIX (env)", lambda: os.environ.get("PYTHONPYCACHEPREFIX"))
         _probe("pre-loaded before entrypoint ran", lambda: _PRELOADED_OURS or "none")
-        # D-158: module-identity postmortem. The PicklingError that
+        # D-158/D-159: module-identity postmortem. The PicklingError that
         # surfaced after D-157 ("not the same object as ...PitchArsenalRow")
         # means two module objects existed for one dotted name; if it ever
         # recurs, these probes name both objects and the guard's state.
         _probe(
-            "eviction decided this process",
-            lambda: getattr(_sys, "_gm_eviction_decided", "<unset>"),
+            "eviction epoch (process vs expected)",
+            lambda: f"{getattr(_sys, '_gm_eviction_epoch', '<unset>')} vs {_EXPECTED_DEPLOY_EPOCH}",
+        )
+        _probe(
+            "cache clear pending",
+            lambda: getattr(_sys, "_gm_cache_clear_pending", False),
         )
 
         def _savant_identity() -> str:
@@ -5052,6 +5065,13 @@ def _render_glossary() -> None:
 
 
 def main() -> None:
+    # D-159: an eviction at the entrypoint invalidates every cached object
+    # built from the old module set — clear both caches once, before
+    # anything reads them (st is imported by the time main runs).
+    if getattr(sys, "_gm_cache_clear_pending", False):
+        sys._gm_cache_clear_pending = False  # type: ignore[attr-defined]
+        st.cache_data.clear()
+        st.cache_resource.clear()
     st.set_page_config(page_title="GreenMachine", layout="wide")
     bridge_secrets_into_environment()
     st.markdown(SHELL_CSS, unsafe_allow_html=True)

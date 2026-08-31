@@ -79,4 +79,4 @@ SWEPT_COUNT, LEFTOVER_CACHES = sweep_bytecode_caches(Path(__file__).parent)
 # the matching constant in greenmachine/__init__.py. A pre-loaded module
 # without it is by definition stale and gets evicted — at most once per
 # process (D-158) — before the real imports run.
-DEPLOY_EPOCH = 158
+DEPLOY_EPOCH = 159
