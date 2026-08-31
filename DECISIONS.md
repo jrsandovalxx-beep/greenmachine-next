@@ -3957,3 +3957,33 @@ not what its HEAD claims. Diagnostics only; no behaviour changed.
 
 Gate: failure-surface AppTest, architecture suite and the render suite
 green.
+
+
+## D-153 - The real root cause: stale bytecode inside the checkout; a deploy bootstrap sweeps it before every import
+
+2026-08-31: the deploy crash's root cause, found. The D-152 diagnostics
+showed the impossible combination — the module's __file__ named the
+current pipeline.py, the working file's sha256 matched the committed
+blob, git was clean at the current HEAD — yet the imported module
+served the pre-D-143 build_board. The only layer that can serve old
+code from a current file is bytecode caching inside the checkout:
+streamlit_app.py runs as __main__ (always compiled fresh, which is why
+app-file changes always deployed) while imported packages load from
+__pycache__ beside the source — a cache that survives the host's git
+syncs AND its environment rebuilds (D-149/D-151 rebuilt the venv; the
+poison lived outside it). Reproduced off-host: an unchecked hash-based
+.pyc serves its stale code while the module still names the current
+source. (The D-137 ImportError in August reads as the same failure
+class; its env rebuild "fix" working then was the coincidence, not the
+mechanism.)
+
+The fix is permanent and host-proof: a new deploy_bootstrap module,
+imported ahead of every greenmachine import in the entrypoint, sweeps
+every __pycache__ under src/ on every script run and sets
+sys.dont_write_bytecode so the layer cannot regrow. The D-150 failure
+surface and its module-origin diagnostics stay — any future host drift
+is diagnosable on first load.
+
+Full gate green (3458 passed, 1 skipped — the deployment contract gains
+the sweep test and the import-ordering pin), consistency check clean,
+all four showcase runners clean.
