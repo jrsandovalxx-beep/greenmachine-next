@@ -370,6 +370,29 @@ def test_main_screen_is_the_shell_plus_the_live_board(_staged_app: SlateBoard) -
     assert [tab.label for tab in at.tabs] == ["Sluggers", "Arms", "Matchups", "Conditions"]
 
 
+def test_a_build_failure_degrades_to_a_named_traceback_surface(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-150: an unexpected build exception no longer becomes the host's
+    redacted crash page — the app names the failure and prints the full
+    traceback, so the owner sees the real frame on the first load."""
+    import streamlit as st
+
+    import greenmachine.live.pipeline as pipeline
+
+    def _boom(**kwargs: object) -> SlateBoard:
+        raise TypeError("synthetic build failure")
+
+    monkeypatch.setattr(pipeline, "build_board", _boom)
+    monkeypatch.setenv("GM_ENVIRONMENT", "staging")
+    st.cache_data.clear()
+    at = AppTest.from_file(str(_APP_PATH), default_timeout=_TIMEOUT)
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert any("build failed unexpectedly" in str(element.value) for element in at.error)
+    assert any("synthetic build failure" in element.value for element in at.code)
+
+
 def test_one_tabs_failure_cannot_blank_the_rest(tmp_path: Path) -> None:
     """D-075: a tab that raises degrades to a named warning; the other tab and
     every section after the board still render. Driven through a minimal script

@@ -48,6 +48,7 @@ import base64
 import html
 import os
 import subprocess
+import traceback
 from collections.abc import Callable, Iterable
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -4460,7 +4461,18 @@ def render_live_board() -> None:
     # D-128 (PO): the board builds on the Matchups tab's batter window —
     # the selector's session state is read before its widgets render, so a
     # changed window rebuilds on the rerun (a fresh build, then cached).
-    board = live_board(slate_date.isoformat(), _matchups_window_days())
+    # D-150: an unexpected build failure degrades to a named surface with
+    # the full traceback — the host's redacted crash page hid the D-149
+    # TypeError's real frame for a whole diagnostic round. The tabs already
+    # degrade this way (D-075); the build itself now does too. Owner-only
+    # app: a traceback names code paths, never secrets.
+    try:
+        board = live_board(slate_date.isoformat(), _matchups_window_days())
+    except Exception:
+        blot.empty()
+        st.error("The slate board build failed unexpectedly (D-150).")
+        st.code(traceback.format_exc())
+        return
     blot.empty()
     if isinstance(board, FetchFailure):
         st.warning(f"The {slate_date.isoformat()} schedule could not be fetched: {board.reason}")
