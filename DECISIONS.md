@@ -4052,3 +4052,40 @@ greenmachine import.
 
 Full gate green (3458 passed, 1 skipped), consistency check clean, all
 four showcase runners clean.
+
+
+## D-156 - The host precompiles bytecode under PYTHONPYCACHEPREFIX: the redirect becomes unconditional, and the failure surface becomes crash-proof
+
+2026-08-31: D-155 deployed and the app stayed down with the identical
+double failure — stale build_board TypeError, then the surface itself
+crashing on _deploy_bootstrap.SWEPT_COUNT. The entrypoint redirect WAS
+running (the traceback's line numbers tracked the new source), yet the
+stale serve continued. Reproduced off-host on 3.14: with
+PYTHONPYCACHEPREFIX set and an unchecked hash-based entry precompiled
+INTO that prefix, D-155's guarded redirect — fire only when the prefix
+is None — skips, and the host's stale entries serve old code from
+current sources. That is the deployment host's architecture: the image
+builder precompiles bytecode into a root-owned prefix layer that
+survives git syncs and environment rebuilds, and the runtime exports
+the variable. Every observed fact fits, including the ones the
+beside-source theory strained on.
+
+Two fixes, both permanent:
+
+1. The redirect is unconditional in the entrypoint and the bootstrap:
+   only a prefix the process created itself (marked gm_pycache_) is
+   trusted; anything inherited is replaced. A guarded interpreter test
+   reproduces the full incident — fake host prefix, planted stale
+   entry, env var set — and proves the entrypoint sequence loads fresh.
+
+2. The D-150 failure surface is now structurally crash-proof: every
+   diagnostic line is an isolated probe that reports its own failure
+   instead of taking the surface down (the D-155 crash hid the
+   forensics behind one missing attribute). New probes name the
+   effective prefix, the PYTHONPYCACHEPREFIX env var, and the
+   bootstrap module's own file and cached paths — a future stale serve
+   identifies its layer on the crash page.
+
+Full gate green (3459 passed, 1 skipped — the contract suite gains the
+incident-mechanism repro and pins the unconditional form), consistency
+check clean, all four showcase runners clean.

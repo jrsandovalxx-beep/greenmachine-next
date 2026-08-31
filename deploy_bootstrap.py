@@ -24,10 +24,12 @@ D-155 moved the redirect itself into the entrypoint: D-154 kept it here,
 and the host's root ``__pycache__`` served THIS module from D-153
 bytecode — a module cannot protect its own cache. ``__main__``
 (streamlit_app.py) is never bytecode-cached, so the redirect there is
-the one line of the guard the host must execute fresh. This module now
-adopts the entrypoint's prefix when it exists and sets one only for its
-other importers (tests, runners, scripts); it keeps the sweep and the
-forensics constants the failure surface prints.
+the one line of the guard the host must execute fresh. D-156 then made
+the redirect unconditional in both places: the host arrives with
+``PYTHONPYCACHEPREFIX`` already set (a root-owned precompiled tree),
+and D-155's guarded form — fire only when the prefix is None — skipped
+exactly when it mattered. This module keeps the sweep and the forensics
+constants the failure surface prints.
 
 Imported ahead of every greenmachine import in streamlit_app.py; the
 module's own location anchors the repo root, so it works identically on
@@ -63,9 +65,12 @@ def sweep_bytecode_caches(root: Path) -> tuple[int, tuple[str, ...]]:
 
 
 # The prefix redirect comes first: from this line on, no import ever reads
-# bytecode from beside a source file again. The entrypoint already set the
-# prefix (D-155) — adopt it; only other importers need one created here.
-if sys.pycache_prefix is None:
+# bytecode from beside a source file again. Unconditional (D-156): the
+# host can arrive with PYTHONPYCACHEPREFIX already set — a precompiled,
+# root-owned cache tree whose stale entries a guarded redirect keeps
+# serving. Only a prefix this process created is trusted; anything else
+# is replaced.
+if sys.pycache_prefix is None or "gm_pycache_" not in sys.pycache_prefix:
     sys.pycache_prefix = tempfile.mkdtemp(prefix="gm_pycache_")
 PYCACHE_PREFIX = Path(sys.pycache_prefix)
 SWEPT_COUNT, LEFTOVER_CACHES = sweep_bytecode_caches(Path(__file__).parent)
