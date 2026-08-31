@@ -302,8 +302,9 @@ def _babip(line: SeasonHittingLine | None) -> Decimal | None:
 class BatterGridLine:
     """One row of the matchups grid (D-079): every figure derived here,
     pipeline-side, over a stated scope — the view formats, never derives.
-    The L30 row reads the batter's events against the starter's qualifying
-    mix pitches; the season row reads the season sources. Rate columns are
+    The window row reads the batter's events against the starter's mix
+    pitches — qualifying-only (D-079) or every pitch type (D-145, PO: the
+    default now); the season row reads the season sources. Rate columns are
     None where their denominator is empty or the scope publishes no count,
     so the surface names the absence instead of inventing a zero."""
 
@@ -336,6 +337,11 @@ class BatterGridLine:
     straight_air_share: Decimal | None = None
     expected_woba: Decimal | None = None
     whiff_share: Decimal | None = None
+    # D-145 (PO): strikeouts per plate appearance over the scope — the grid's
+    # K% column, which replaced Swing-Str % at the PO's direction. The window
+    # line counts the scope's own events; the season line reads the statsapi
+    # counting line.
+    strikeout_share: Decimal | None = None
     # SP-2 (D-110): the season regression gaps — carried only by the season
     # scope's line; the L30 line leaves this None and the surface omits the
     # columns there.
@@ -378,6 +384,12 @@ class BatterCard:
     # game going final. Never a guess: no log, no tag.
     homered_on_slate_day: str | None
     result: EvaluatedGradeResult | NotEvaluableGradeResult
+    # D-145 (PO): the same matchup-window scope WITHOUT the 14% usage filter
+    # — every pitch type the batter saw from the starter's hand enters the
+    # denominators. The matchup tables default to this line now (PO: "season
+    # numbers against all hands with all their pitches"); mix_line keeps the
+    # qualifying-mix scope for the threshold toggle's on position.
+    mix_line_all: BatterGridLine | None = None
     # SP-1 (D-109): season strikeout share (K/PA) for the high-K tags —
     # computed here, selected by the view.
     season_k_share: Decimal | None = None
@@ -1138,6 +1150,7 @@ def _batter_grid_line(
         ),
         expected_woba=outcomes.expected_woba,
         whiff_share=outcomes.whiff_share,
+        strikeout_share=outcomes.strikeout_share,
     )
 
 
@@ -1218,6 +1231,13 @@ def _season_grid_line(
         straight_air_share=_per_air_share(batted_ball, "straight"),
         expected_woba=(woba_total / Decimal(woba_pa)) if woba_pa else None,
         whiff_share=(whiff_total / Decimal(whiff_pitches)) if whiff_pitches else None,
+        # D-145 (PO): the season K% reads the statsapi counting line — the
+        # same figure BatterCard.season_k_share carries for the K tags.
+        strikeout_share=(
+            Decimal(line.strikeouts) / Decimal(line.plate_appearances)
+            if line is not None and line.plate_appearances
+            else None
+        ),
         gaps=gaps,
         avg_launch_angle=statcast.avg_launch_angle if statcast else None,
     )
@@ -2124,6 +2144,14 @@ def build_board(
                         ),
                         mix_line=(
                             _batter_grid_line(mix_scope_events, robbed_count=robbed_count)
+                            if pitcher_entity is not None
+                            else None
+                        ),
+                        # D-145 (PO): the unfiltered twin — the whole window
+                        # scope, every pitch type. The matchup tables default
+                        # to it; the threshold toggle reads mix_line.
+                        mix_line_all=(
+                            _batter_grid_line(matchup_scope_events, robbed_count=robbed_count)
                             if pitcher_entity is not None
                             else None
                         ),

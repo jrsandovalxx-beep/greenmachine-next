@@ -974,8 +974,11 @@ def _band_css(spec: _BandSpec, value: float) -> str | None:
 # hard-hit ≈ 40% league; AVG .245 / SLG .404 / ISO .158 / wOBA .313 with
 # xwOBA tracking it; pull-air ≈ 31% of measurable air balls (17.8% of
 # batted balls pulled in the air over a 57.6% air share) with the elite
-# edge past the ratified 40% spray line; whiff 25.3% of swings with the
-# ratified ≤ 20% unlock anchor inside the strong band. Oppo Air % carries
+# edge past the ratified 40% spray line. D-145 (PO): K % replaced
+# Swing-Str % — strikeouts per plate appearance, league ≈ 22.2% (2025),
+# anchored to the ratified v2.2 K reads: the 22% unlock anchor is the
+# above-average edge, the 28% binary read the poor edge, the 30% high-K
+# caution the very-poor edge. Oppo Air % carries
 # no quality scale — a fit read against the park, not a grade — and the
 # counting columns are volume, not quality: both stay neutral, and the
 # caption says so.
@@ -989,7 +992,7 @@ _GRID_BANDS: dict[str, _BandSpec] = {
     "ISO": _BandSpec("high", 0.240, 0.200, 0.170, 0.140, 0.115, 0.090, "avg"),
     "Pull Air %": _BandSpec("high", 0.43, 0.38, 0.33, 0.27, 0.22, 0.17, "pct"),
     "xwOBA": _BandSpec("high", 0.370, 0.345, 0.325, 0.300, 0.280, 0.260, "avg"),
-    "Swing-Str %": _BandSpec("low", 0.18, 0.21, 0.24, 0.27, 0.30, 0.33, "pct"),
+    "K %": _BandSpec("low", 0.15, 0.185, 0.22, 0.26, 0.28, 0.30, "pct"),
 }
 
 # The pitcher scale (the Arms tab and the starter header cards) — read as
@@ -3235,10 +3238,14 @@ _MATCHUPS_HELP: dict[str, str] = {
         "Expected wOBA from contact quality over the scope. "
         f"Cell colors (researched 2025 baselines, D-127): {_band_scale_text(_GRID_BANDS['xwOBA'])}."
     ),
-    "Swing-Str %": (
-        "Whiffs per swing over the scope. "
+    # D-145 (PO): K % replaced Swing-Str % on the matchup tables.
+    "K %": (
+        "Strikeouts per plate appearance over the scope (D-145, PO — the "
+        "Swing-Str % column left for it). The v2.2 K reads: the unlock "
+        "needs a season K% ≥ 22% with an arsenal-wide whiff ≤ 20%, both; "
+        "matchup K% ≥ 28% reads binary, ≥ 30% is the high-K caution. "
         f"Cell colors (researched 2025 baselines, D-127): "
-        f"{_band_scale_text(_GRID_BANDS['Swing-Str %'])}."
+        f"{_band_scale_text(_GRID_BANDS['K %'])}."
     ),
     "Grade": (
         "The provisional v1 grade — the L30 computation on the season view; "
@@ -3423,7 +3430,7 @@ def _grid_line_cells(
             "Straight Air %": "—",
             "Oppo Air %": "—",
             "xwOBA": "—",
-            "Swing-Str %": "—",
+            "K %": "—",
         }
         styles = {column: _REASON_CSS for column in texts}
     else:
@@ -3450,7 +3457,9 @@ def _grid_line_cells(
                 _pct_text(line.oppo_air_share) if line.oppo_air_share is not None else None
             ),
             "xwOBA": _avg_text(line.expected_woba) if line.expected_woba is not None else None,
-            "Swing-Str %": _pct_text(line.whiff_share) if line.whiff_share is not None else None,
+            # D-145 (PO): K % — strikeouts per plate appearance over the
+            # scope — replaced Swing-Str % on the matchup tables.
+            "K %": (_pct_text(line.strikeout_share) if line.strikeout_share is not None else None),
         }
         texts = {
             "AB": str(line.at_bats),
@@ -3488,7 +3497,7 @@ def _grid_line_cells(
                 "ISO": line.iso,
                 "Pull Air %": line.pull_air_share,
                 "xwOBA": line.expected_woba,
-                "Swing-Str %": line.whiff_share,
+                "K %": line.strikeout_share,
             },
         )
     if include_gaps:
@@ -3762,20 +3771,95 @@ def _stadium_panel(game: GameCard) -> None:
     )
 
 
+# D-145 (PO): the matchup grid as one HTML row per batter with its More
+# button at the row's end — the Sluggers layout. The metric cells keep the
+# D-127 band fills (inline styles now), the headers keep their D-124 hover
+# definitions as title attributes, and a star still marks a ratified v2.2
+# firing line. The 22-column st.dataframe could not carry in-row buttons,
+# so the rows of five buttons under each grid are gone.
+_MATCHUPS_GRID_CSS = """
+<style>
+.gm-grid{width:100%;border-collapse:collapse;table-layout:fixed}
+.gm-grid th{padding:2px 3px;font-size:.72rem;color:#9fb3a6;font-weight:600;
+white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:help;
+border-bottom:1px solid #2c3a30;text-align:left}
+.gm-grid td{padding:2px 3px;font-size:.76rem;white-space:nowrap;overflow:hidden;
+text-overflow:ellipsis;border-bottom:1px solid #1e2922}
+</style>
+"""
+
+# Each row's two Streamlit columns: the metric table, then the More button.
+_GRID_ROW_SPECS = [13.5, 1.0]
+
+# Identity and result columns take fixed shares of the row; the metric
+# columns split the rest evenly.
+_GRID_COL_WIDTHS = {"#": 2.8, "Batter": 10, "Bats": 3.6, "Grade": 5, "Total": 5, "Lineup": 4.2}
+
+
+def _grid_colgroup(columns: Iterable[str]) -> str:
+    """One <colgroup> shared by the header and every row table of a matchup
+    grid, so the per-row tables' columns align (table-layout: fixed)."""
+    listed = list(columns)
+    fixed = sum(_GRID_COL_WIDTHS.get(column, 0.0) for column in listed)
+    flex = [column for column in listed if column not in _GRID_COL_WIDTHS]
+    share = (100.0 - fixed) / len(flex) if flex else 0.0
+    return (
+        "<colgroup>"
+        + "".join(
+            f'<col style="width:{_GRID_COL_WIDTHS.get(column, share):g}%">' for column in listed
+        )
+        + "</colgroup>"
+    )
+
+
+def _grid_header_html(columns: list[str], help_map: dict[str, str]) -> str:
+    """The header row as an HTML table — hover a header for its one-line
+    definition (D-124, as a title attribute now)."""
+    cells = "".join(
+        f'<th title="{html.escape(help_map.get(column, ""), quote=True)}">'
+        f"{html.escape(column)}</th>"
+        for column in columns
+    )
+    return (
+        f'<table class="gm-grid">{_grid_colgroup(columns)}<thead><tr>{cells}</tr></thead></table>'
+    )
+
+
+def _grid_row_html(columns: list[str], texts: dict[str, str], styles: dict[str, str]) -> str:
+    """One batter's grid row as an HTML table — every cell keeps its text,
+    and the D-127 band/absence fills ride as inline styles."""
+    cells = "".join(
+        (
+            f'<td style="{styles[column]}">{html.escape(texts.get(column, ""))}</td>'
+            if column in styles
+            else f"<td>{html.escape(texts.get(column, ''))}</td>"
+        )
+        for column in columns
+    )
+    return f'<table class="gm-grid">{_grid_colgroup(columns)}<tr>{cells}</tr></table>'
+
+
 def _render_matchups(board: SlateBoard) -> BatterCard | None:
     window_days = _matchups_window_days()
     season_view = st.session_state.get("matchups_view_mode") != _MATCHUPS_RECENT_LABEL
+    st.markdown(_MATCHUPS_GRID_CSS, unsafe_allow_html=True)
     st.caption(
-        "One row per batter against the expected starter's mix — his "
-        "whole season mix off the arsenal board (D-128, PO), pitches at "
-        "or above a 14% usage share, with the scope actually used named "
-        "under each game. The grid's window is yours below: the 2026 "
-        "season sources by default, or a recent window counted in weeks "
-        "(to 12) or months (to 3) — the grade stays the L30 computation "
-        "on the season view and follows the window otherwise. A wider "
-        "window takes longer to build the first time (each day is one "
-        "fetch; the board then caches). Tap a batter's **More** button "
-        "under his grid to open his recent-form detail. Hover any column "
+        "One row per batter against the expected starter. His mix is the "
+        "whole-season arsenal against ALL hands off the arsenal board "
+        "(D-128, PO) — a named fallback reads his recent record when no "
+        "board exists. On the recent-window view the batter's columns "
+        "read his window events against the starter's hand of pitching: "
+        "every pitch type by default (D-145, PO), or only the qualifying "
+        "mix — pitches at or above 14% of the mix's usage — when the "
+        "pitch-filter toggle below is on; the scope actually used is "
+        "named under each game. The grid's window is yours below: the "
+        "2026 season sources by default, or a recent window counted in "
+        "weeks (to 12) or months (to 3) — the grade stays the L30 "
+        "computation on the season view and follows the window "
+        "otherwise. A wider window takes longer to build the first time "
+        "(each day is one fetch; the board then caches). Tap a batter's "
+        "**More** button at the end of his row (D-145, PO) to open his "
+        "recent-form detail. Hover any column "
         "header for its one-line definition. A **★** on a header marks a "
         "metric carrying a ratified v2.2 firing line (D-124) — recent "
         "view: Pull Air % at ≥ 40% of measurable air balls with a "
@@ -3804,7 +3888,7 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
         "they carry no color. An amber INSUFFICIENT cell and a named "
         "absence always outrank a band."
     )
-    mode_col, count_col, unit_col = st.columns([3, 2, 2])
+    mode_col, count_col, unit_col, pitch_col = st.columns([3, 2, 2, 3])
     with mode_col:
         mode = st.radio(
             "Batter window",
@@ -3814,7 +3898,9 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
             help=(
                 "D-128 (PO). The year reads every batter's season sources. "
                 "The recent window reads his events against the starter's "
-                "qualifying mix over the counted days — the grade follows "
+                "hand of pitching over the counted days — every pitch type, "
+                "or only the qualifying mix when the pitch-filter toggle "
+                "is on (D-145, PO) — and the grade follows "
                 "that window (it stays L30 on the season view)."
             ),
         )
@@ -3837,6 +3923,27 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
             key="matchups_window_unit",
             horizontal=True,
             disabled=not recent,
+        )
+    with pitch_col:
+        # D-145 (PO): the usage-threshold toggle on the main matchup
+        # tables. Off (the PO's default): every pitch type the batter saw
+        # enters the scope — "all hands with all their pitches". On: only
+        # the starter's qualifying mix (≥14% of the mix's usage).
+        qualifying_only = st.toggle(
+            "Pitch filter: qualifying mix only (≥14% usage)",
+            value=False,
+            key="matchups_pitch_threshold",
+            disabled=not recent,
+            help=(
+                "D-145 (PO). Off — the default: the recent-window columns "
+                "read every pitch type the batter saw from the starter's "
+                "hand of pitching; the starter's whole season arsenal "
+                "against all hands enters unfiltered. On: only his "
+                "qualifying mix pitches (at or above 14% of the mix's "
+                "usage). Reads the recent-window view only — the season "
+                "view's columns come from the season boards, never the "
+                "pitch filter."
+            ),
         )
     if recent:
         st.caption(
@@ -3902,6 +4009,16 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
             ):
                 st.markdown(f"**{label} lineup**")
                 if batters:
+                    throws_text = (
+                        {"R": "right", "L": "left"}.get(opposing_card.throws, "")
+                        if opposing_card is not None
+                        else ""
+                    )
+                    hand_text = (
+                        f"{throws_text}-handed pitching"
+                        if throws_text
+                        else "the starter's hand of pitching"
+                    )
                     if opposing_card is None:
                         scope_text = "no expected starter named — no mix to line up against"
                     elif batters[0].mix_label:
@@ -3919,19 +4036,35 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
                             if season_view
                             else (
                                 f"Columns read the batter's last {window_days} days "
-                                "against that mix's qualifying pitches — "
+                                f"against {hand_text}, filtered to that "
+                                "mix's qualifying pitches (≥14% usage) — "
                                 "except Robbed HR: 375+ ft balls that "
                                 "stayed in the park, last 7 days."
+                                if qualifying_only
+                                else (
+                                    f"Columns read the batter's last {window_days} days "
+                                    f"against {hand_text} — every pitch "
+                                    "type (D-145, PO; the pitch-filter "
+                                    "toggle above restricts to the "
+                                    "qualifying mix) — except Robbed HR: "
+                                    "375+ ft balls that stayed in the "
+                                    "park, last 7 days."
+                                )
                             )
                         )
                     )
-                text_rows: list[dict[str, str]] = []
-                style_rows: list[dict[str, str]] = []
+                rows: list[tuple[BatterCard, dict[str, str], dict[str, str]]] = []
                 for card in batters:
                     # D-098: no Form column here — the full form section is one
                     # tap away in the batter detail, so the grid stays lean.
                     evaluated = isinstance(card.result, EvaluatedGradeResult)
-                    line = card.season_line if season_view else card.mix_line
+                    if season_view:
+                        line = card.season_line
+                    elif qualifying_only:
+                        line = card.mix_line
+                    else:
+                        # D-145 (PO): every pitch type — the default scope.
+                        line = card.mix_line_all
                     metric_texts, metric_styles = _grid_line_cells(line, include_gaps=season_view)
                     texts = {
                         "#": (str(card.order_position) if card.order_position is not None else "—"),
@@ -3944,31 +4077,33 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
                         f"{float(card.result.total_score):.1f}" if evaluated else _NOT_EVALUABLE
                     )
                     texts["Lineup"] = "est." if card.lineup_is_estimate else ""
-                    text_rows.append(texts)
                     styles = dict(metric_styles)
                     if not evaluated:
                         styles["Total"] = _REASON_CSS
-                    style_rows.append(styles)
-                frame = pd.DataFrame(text_rows)
-                st.dataframe(
-                    styled_text_frame(frame, pd.DataFrame(style_rows)),
-                    hide_index=True,
-                    column_config=_column_help(
-                        frame.columns,
-                        _MATCHUPS_HELP,
-                        _GRID_STARS_SEASON if season_view else _GRID_STARS_WINDOW,
-                    ),
-                    key=f"matchups_{board.official_date}_{game.game_pk}_{label.lower()}",
-                )
-                # D-128 (PO): the detail opens from a named More button
-                # per batter, not a row selection — a 22-column metric
-                # grid cannot carry in-grid buttons, so they sit in rows
-                # of five under their own grid.
-                for row_start in range(0, len(batters), 5):
-                    button_columns = st.columns(5)
-                    for offset, card in enumerate(batters[row_start : row_start + 5]):
-                        if selected is None and button_columns[offset].button(
-                            f"More — {card.full_name}",
+                    rows.append((card, texts, styles))
+                if rows:
+                    # D-145 (PO): the Sluggers layout — each row is its own
+                    # one-line table with the More button at its end; the
+                    # 22-column st.dataframe could not carry in-row buttons,
+                    # so the rows of five under the grid are gone. Header
+                    # hovers keep the D-124 definitions as title attributes,
+                    # and the cells keep the D-127 band fills inline.
+                    columns = list(rows[0][1])
+                    stars = _GRID_STARS_SEASON if season_view else _GRID_STARS_WINDOW
+                    help_by_header = {
+                        stars.get(name, name): text for name, text in _MATCHUPS_HELP.items()
+                    }
+                    head = st.columns(_GRID_ROW_SPECS, vertical_alignment="center")
+                    head[0].markdown(
+                        _grid_header_html(columns, help_by_header), unsafe_allow_html=True
+                    )
+                    for card, texts, styles in rows:
+                        cells = st.columns(_GRID_ROW_SPECS, vertical_alignment="center")
+                        cells[0].markdown(
+                            _grid_row_html(columns, texts, styles), unsafe_allow_html=True
+                        )
+                        if selected is None and cells[1].button(
+                            "More",
                             key=(
                                 f"more_{board.official_date}_{game.game_pk}_"
                                 f"{label.lower()}_{card.player_id}"
