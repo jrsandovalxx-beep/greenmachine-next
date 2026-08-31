@@ -1410,13 +1410,11 @@ def _card_tag_lists(
     if card.order_position is not None:
         slot = f"bats {_ordinal(card.order_position)}"
         slot += " (est.)" if card.lineup_is_estimate else ""
-        # v2.2 (D-115): a top-5 slot is a booster — the 4-5 PA tier — and
-        # the leadoff spot adds the extra look at the starter. Later slots
-        # stay neutral advisories.
+        # v2.2 (D-115): a top-5 slot is a booster — the 4-5 PA tier.
+        # D-146 (PO): the leadoff "extra look at the starter" tag is
+        # removed completely. Later slots stay neutral advisories.
         if card.order_position <= _TOP5_SLOT:
             boosters.append(slot)
-            if card.order_position == 1:
-                boosters.append("extra look at the starter (4-5 PA tier)")
         else:
             advisories.append(slot)
     pa = card.season.plate_appearances if card.season is not None else 0
@@ -1772,6 +1770,9 @@ class _SluggerRow(NamedTuple):
     weather_absent: bool
     factor_text: str
     factor_absent: bool
+    # D-146 (PO): the raw batter-side HR factor for the park-factor sort —
+    # None when the venue publishes no split (the text names the absence).
+    factor_value: Decimal | None = None
 
 
 def _slugger_rows(board: SlateBoard) -> list[_SluggerRow]:
@@ -1812,9 +1813,55 @@ def _slugger_rows(board: SlateBoard) -> list[_SluggerRow]:
                             f"{float(factor.factor):.0f}" if factor is not None else "not covered"
                         ),
                         factor_absent=factor is None,
+                        factor_value=factor.factor if factor is not None else None,
                     )
                 )
     return rows
+
+
+# D-146 (PO): the shortlist's sort choices — highest at the top on every
+# one. Grade is the default: S before A, the total score breaking ties.
+_SLUGGER_SORTS = ("Grade", "Park factor", "Form Score")
+_SLUGGER_GRADE_RANK = {Grade.S: 0, Grade.A: 1, Grade.B: 2, Grade.C: 3, Grade.D: 4}
+
+
+def _sorted_slugger_rows(rows: list[_SluggerRow], sort: str) -> list[_SluggerRow]:
+    """D-146 (PO): order the shortlist — highest first on every choice.
+    Grade: S before A, then the total score. Park factor: the batter-side
+    HR factor, an uncovered park last. Form Score: the graded form
+    subtotal, a missing one last. Grade-then-name breaks every tie so the
+    order never wobbles between refreshes."""
+
+    def grade_rank(row: _SluggerRow) -> int:
+        return _SLUGGER_GRADE_RANK.get(row.card.result.grade, 9)
+
+    def total(row: _SluggerRow) -> Decimal:
+        result = row.card.result
+        return result.total_score if isinstance(result, EvaluatedGradeResult) else Decimal(0)
+
+    if sort == "Park factor":
+        return sorted(
+            rows,
+            key=lambda row: (
+                row.factor_value is None,
+                -(row.factor_value if row.factor_value is not None else Decimal(0)),
+                grade_rank(row),
+                -total(row),
+                row.card.full_name,
+            ),
+        )
+    if sort == "Form Score":
+        return sorted(
+            rows,
+            key=lambda row: (
+                _form_points(row.card.result) is None,
+                -(_form_points(row.card.result) or Decimal(0)),
+                grade_rank(row),
+                -total(row),
+                row.card.full_name,
+            ),
+        )
+    return sorted(rows, key=lambda row: (grade_rank(row), -total(row), row.card.full_name))
 
 
 def _component_flags(card: BatterCard) -> tuple[str, str]:
@@ -1956,15 +2003,13 @@ def _form_max_points(config: GreenMachineConfig) -> Decimal:
     )
 
 
-def _form_score_text(result: GradeResult, form_max: Decimal) -> str | None:
-    """The batter's graded form subtotal as 'points / max' (D-132, PO): the
-    placeholder dash is dead — the cell shows the actual form score the
-    grade already computed (max 2 in v1; weights and scoring may change in a
-    future version). None when there is no evaluated grade to read, so the
-    cell names the absence rather than inventing a number."""
+def _form_points(result: GradeResult) -> Decimal | None:
+    """The batter's graded form subtotal as a number (D-132) — None without
+    an evaluated grade or a form category. D-146 (PO): the Sluggers sort
+    reads this, so the cell text and the sort can never disagree."""
     if not isinstance(result, EvaluatedGradeResult):
         return None
-    points = next(
+    return next(
         (
             score.points_awarded
             for score in result.category_scores
@@ -1972,6 +2017,15 @@ def _form_score_text(result: GradeResult, form_max: Decimal) -> str | None:
         ),
         None,
     )
+
+
+def _form_score_text(result: GradeResult, form_max: Decimal) -> str | None:
+    """The batter's graded form subtotal as 'points / max' (D-132, PO): the
+    placeholder dash is dead — the cell shows the actual form score the
+    grade already computed (max 2 in v1; weights and scoring may change in a
+    future version). None when there is no evaluated grade to read, so the
+    cell names the absence rather than inventing a number."""
+    points = _form_points(result)
     if points is None:
         return None
     return f"{format(points.normalize(), 'f')} / {format(form_max.normalize(), 'f')}"
@@ -2766,8 +2820,9 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "suppressive home park (HR factor ≤ 90) can hold the gap open; "
         "barrel elite at barrel% ≥ 15 over "
         "≥ 50 season BBE; the power profile at season EV ≥ 91 mph AND "
-        "bat speed ≥ 73 mph; a top-5 slot is the 4-5 PA tier, leadoff "
-        "adds the extra look; platoon advantage reads the batter's side "
+        "bat speed ≥ 73 mph; a top-5 slot is the 4-5 PA tier (D-146, PO: "
+        "the leadoff extra-look tag is gone); platoon advantage reads "
+        "the batter's side "
         "against the starter's hand (+28 wOBA pts LHB vs RHP, +16 RHB vs "
         "LHP long-run — 2025 broke the RHB pattern for the first time in "
         "20+ years, so it stays a contact-quality signal); robbed counts "
@@ -2811,6 +2866,21 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
     if not rows:
         st.info(f"No batter grades A or S on the {board.official_date} slate.")
         return None
+    # D-146 (PO): the shortlist loads highest grades at the top and sorts
+    # on grade, park factor or form — highest first on every choice.
+    sort = st.radio(
+        "Sort by",
+        _SLUGGER_SORTS,
+        key="sluggers_sort",
+        horizontal=True,
+        help=(
+            "D-146 (PO). Grade — the default: S before A, the total score "
+            "breaking ties. Park factor: the batter-side HR factor, an "
+            "uncovered park last. Form Score: the graded form subtotal, a "
+            "missing one last."
+        ),
+    )
+    rows = _sorted_slugger_rows(rows, sort)
     # D-126 (PO): the shortlist as bubble rows, not a data grid — the tag
     # columns became hoverable pills, and a More button per row replaces
     # the row-select box. Header cells carry the same one-line definitions

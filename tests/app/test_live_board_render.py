@@ -293,6 +293,9 @@ def test_sluggers_render_as_bubble_rows_with_more_buttons(_staged_app: SlateBoar
     assert 'class="gm-head"' in markup
     buttons = [button for button in tab.button if button.label == "More"]
     assert len(buttons) == 2  # the two A/S batters on the staged board
+    # D-146 (PO): the sort control renders with Grade as the default.
+    sorts = [radio for radio in at.radio if radio.key == "sluggers_sort"]
+    assert sorts and sorts[0].value == "Grade"
     buttons[0].click()
     at.run()
     assert not at.exception, [str(e.value) for e in at.exception]
@@ -352,10 +355,12 @@ def test_main_screen_is_the_shell_plus_the_live_board(_staged_app: SlateBoard) -
     assert not at.selectbox
     assert not at.multiselect
     # D-128 (PO): the only radios on the board are the Matchups tab's
-    # batter-window selector — scope picks, never a ranking control.
+    # batter-window selector and the Sluggers sort (D-146, PO) — scope and
+    # row-order picks, never a ranking control.
     assert {radio.key for radio in at.radio} <= {
         "matchups_view_mode",
         "matchups_window_unit",
+        "sluggers_sort",
     }
     markup = "\n".join(element.value for element in at.markdown)
     assert "gm-orb" in markup
@@ -463,6 +468,61 @@ def test_form_score_cell_reads_the_actual_graded_subtotal() -> None:
         text = streamlit_app._form_score_text(row.card.result, form_max)
         assert text is not None
         assert text.endswith(" / 2")
+
+
+def test_sluggers_sort_highest_first_on_every_choice() -> None:
+    """D-146 (PO): the shortlist loads highest grades at the top and sorts
+    on grade, park factor or form — highest first on every choice. Grade:
+    S before A, the total score breaking ties; Park factor: the
+    batter-side HR factor, an uncovered park last; Form Score: the graded
+    form subtotal."""
+    import dataclasses
+
+    import streamlit_app
+
+    from greenmachine.domain.enums import Category, Grade
+
+    rows = streamlit_app._slugger_rows(_graded_board())
+    assert [row.card.result.grade for row in rows] == [Grade.S, Grade.A]
+
+    def tuned(row: object, *, total: str, form: str, factor: str | None) -> object:
+        result = row.card.result  # type: ignore[attr-defined]
+        result = dataclasses.replace(result, total_score=Decimal(total))
+        result = dataclasses.replace(
+            result,
+            category_scores=tuple(
+                dataclasses.replace(score, points_awarded=Decimal(form))
+                if score.category is Category.FORM
+                else score
+                for score in result.category_scores
+            ),
+        )
+        return row._replace(  # type: ignore[attr-defined]
+            card=dataclasses.replace(row.card, result=result),  # type: ignore[attr-defined]
+            factor_value=Decimal(factor) if factor is not None else None,
+        )
+
+    # The A batter beats the S batter on total, park and form — only the
+    # grade sort keeps him second.
+    s_row, a_row = rows
+    s_row = tuned(s_row, total="61.0", form="1.0", factor="98")
+    a_row = tuned(a_row, total="74.5", form="2.0", factor="121")
+    pair = [s_row, a_row]
+
+    def grades(ordered: list) -> list:
+        return [row.card.result.grade for row in ordered]
+
+    assert grades(streamlit_app._sorted_slugger_rows(pair, "Grade")) == [Grade.S, Grade.A]
+    assert grades(streamlit_app._sorted_slugger_rows(pair, "Park factor")) == [Grade.A, Grade.S]
+    assert grades(streamlit_app._sorted_slugger_rows(pair, "Form Score")) == [Grade.A, Grade.S]
+    # An uncovered park sorts last regardless of grade.
+    uncovered = a_row._replace(factor_value=None)  # type: ignore[attr-defined]
+    parked = streamlit_app._sorted_slugger_rows([s_row, uncovered], "Park factor")
+    assert parked[-1] is uncovered
+    # A missing form subtotal sorts last on the form read.
+    assert streamlit_app._sorted_slugger_rows(pair, "Bogus") == streamlit_app._sorted_slugger_rows(
+        pair, "Grade"
+    )
 
 
 def test_money_tag_marks_a_batter_who_homered_with_the_date() -> None:
@@ -1932,9 +1992,10 @@ def test_card_tags_carry_the_slot_and_the_v22_k_reads() -> None:
     )
     advisories, boosters, vetoes = streamlit_app._card_tags(card, arm)
     assert "est. lineup" in advisories
-    # v2.2 (D-115): the leadoff slot is a booster and adds the extra look.
+    # v2.2 (D-115): the leadoff slot is a booster. D-146 (PO): the extra
+    # look at the starter tag is removed completely.
     assert "bats 1st (est.)" in boosters
-    assert "extra look at the starter (4-5 PA tier)" in boosters
+    assert all("extra look" not in tag for tag in (*boosters, *advisories, *vetoes))
     assert "high-K bat vs low-whiff arm: K% 28.0 (402 PA), arsenal whiff 20.0%" in boosters
     assert "low-whiff arm: arsenal whiff 20.0% (season)" in boosters
     assert "high-K profile" not in vetoes  # the unlock tag supersedes it
