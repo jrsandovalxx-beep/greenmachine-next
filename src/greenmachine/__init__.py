@@ -18,4 +18,11 @@ except PackageNotFoundError as exc:  # pragma: no cover - only reachable when no
     )
     raise RuntimeError(message) from exc
 
-__all__ = ["__version__"]
+# D-157: staleness marker for the entrypoint's eviction guard. The deploy
+# host can import this package before streamlit_app.py's first line runs,
+# serving bytecode compiled from older sources; any module carrying this
+# marker was necessarily loaded from current code. Bump on any deploy-cache
+# incident so a stale serve is detectable (and evictable) in one getattr.
+DEPLOY_EPOCH = 157
+
+__all__ = ["DEPLOY_EPOCH", "__version__"]
