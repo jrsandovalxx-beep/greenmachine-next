@@ -75,6 +75,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 if sys.pycache_prefix is None or "gm_pycache_" not in sys.pycache_prefix:
     sys.pycache_prefix = tempfile.mkdtemp(prefix="gm_pycache_")
 
+
 # D-157: the host can import our modules BEFORE this file's first line
 # runs — D-156's forensics caught deploy_bootstrap loaded from bytecode
 # whose cache path was computed while the prefix was still None, i.e.
@@ -97,7 +98,32 @@ if sys.pycache_prefix is None or "gm_pycache_" not in sys.pycache_prefix:
 # joined through the per-module import locks, never evicted. __main__'s
 # globals are rebuilt on every rerun, so the epoch flag and its lock
 # live on sys — the one object every rerun and session thread shares.
-_EXPECTED_DEPLOY_EPOCH = 159
+def _deploy_epoch() -> str:
+    """The deploy epoch is the checkout's own commit sha (D-162): every
+    deploy moves it by construction, so the once-per-epoch eviction no
+    longer depends on anyone remembering to bump a literal — the
+    D-160/D-161 deploy kept 159, the stale module set survived the
+    rerun, and the PicklingError returned within the hour. Git first,
+    then GM_COMMIT, else "unknown" — a blind read can only match an
+    equally blind marker, so a total miss simply never evicts."""
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).resolve().parent,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        completed = None
+    if completed is not None and completed.returncode == 0 and completed.stdout.strip():
+        return completed.stdout.strip()
+    env_value = os.environ.get("GM_COMMIT", "").strip()
+    return env_value or "unknown"
+
+
+_EXPECTED_DEPLOY_EPOCH = _deploy_epoch()
 _PRELOADED_OURS = tuple(
     name
     for name in sys.modules

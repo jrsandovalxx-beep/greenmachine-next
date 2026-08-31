@@ -4259,3 +4259,29 @@ assist for five batter shapes on a straight-out wind, the strong line,
 the Suzuki case itself with the away-kill suppressed 15° off the axis,
 and the silences below the line and without an axis), consistency check
 clean, all four showcase runners clean.
+
+## D-162 - The deploy epoch is the commit sha itself: no hand-bumped literal can be forgotten again
+
+2026-08-31: the D-160/D-161 deploy brought the PicklingError back within
+the hour — same message, same foreign-class signature the D-159 eviction
+was built to kill. The mechanism had not failed; the key had. The
+once-per-epoch eviction fires only when the entrypoint's expected epoch
+differs from the process's last-evicted epoch, and both markers were
+hand-bumped literals. D-160/D-161 shipped code changes with the literal
+still reading 159, so on the rerun the guard saw "same epoch", skipped
+the eviction and the cache clear, and the host's mixed module sets met
+exactly as D-157/158/159 described. A guard whose key depends on a
+human remembering a bump is a guard that will be off when it matters.
+
+Directive: the epoch is the checkout's own commit sha, read at runtime.
+The entrypoint, deploy_bootstrap, and greenmachine/__init__ each read
+`git rev-parse HEAD` against the checkout (GM_COMMIT fallback, then
+"unknown") — the entrypoint at rerun time, the two markers at import
+time. A stale pre-load carries the old sha by construction; a fresh one
+carries the current one; the comparison is unchanged. No deploy can
+forget to move the epoch again, because moving code IS moving the epoch.
+The deployment contract now pins the runtime read (no literal), and the
+behavioral payload's phases read the live sha exactly as the markers do.
+
+Full gate green (3460 passed, 1 skipped), consistency check clean, all
+four showcase runners clean.
