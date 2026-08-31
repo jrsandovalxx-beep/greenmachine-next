@@ -140,6 +140,59 @@ def test_the_deploy_bootstrap_sweeps_bytecode_before_the_package_imports(
     bootstrap_at = entrypoint.index("import deploy_bootstrap")
     first_package_at = entrypoint.index("from greenmachine")
     assert redirect_at < bootstrap_at < first_package_at
+    # D-156: the redirect must be unconditional — the host arrives with
+    # PYTHONPYCACHEPREFIX already set, and a guard that fires only on
+    # None keeps serving the host's precompiled stale entries.
+    assert 'or "gm_pycache_" not in sys.pycache_prefix' in entrypoint
+
+
+def test_the_bootstrap_replaces_a_host_prefix_full_of_stale_bytecode(tmp_path: Path) -> None:
+    """D-156: the host precompiles bytecode under PYTHONPYCACHEPREFIX —
+    unchecked hash-based entries that serve stale code from current
+    sources. Reproduced end to end: a fake host prefix carrying a stale
+    deploy_bootstrap entry (no SWEPT_COUNT), the env var set, then the
+    entrypoint's own sequence — the unconditional redirect first (it
+    lives in __main__, never bytecode-cached, because no module can
+    protect its own cache), then the import. The stale entry must be
+    invisible and the fresh module loaded. This is the 2026-08-31
+    incident mechanism and its fix."""
+    import os
+    import py_compile
+    import sys
+
+    from tests.network_guard.guarded_child import run_guarded_python
+
+    repo_file = REPO_ROOT / "deploy_bootstrap.py"
+    tag = sys.implementation.cache_tag
+    host_prefix = tmp_path / "hostprefix"
+    # PEP 3147 prefix layout: <prefix>/<abspath dirs>/<stem>.<tag>.pyc
+    # (no __pycache__ segment under a prefix).
+    mirrored = host_prefix / Path(str(repo_file.with_suffix(""))).relative_to("/")
+    mirrored.parent.mkdir(parents=True)
+    stale_source = tmp_path / "stale_bootstrap.py"
+    stale_source.write_text("# stale pre-D-154 module: no SWEPT_COUNT\n", encoding="utf-8")
+    py_compile.compile(
+        str(stale_source),
+        cfile=str(mirrored.parent / f"{mirrored.name}.{tag}.pyc"),
+        doraise=True,
+        invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
+    )
+    ran = run_guarded_python(
+        "-c",
+        "import sys, tempfile; "
+        "sys.pycache_prefix = tempfile.mkdtemp(prefix='gm_pycache_'); "
+        "import deploy_bootstrap; "
+        "assert 'gm_pycache_' in (sys.pycache_prefix or ''), sys.pycache_prefix; "
+        "assert hasattr(deploy_bootstrap, 'SWEPT_COUNT'), 'stale module served'; "
+        "print('FRESH')",
+        env={
+            **os.environ,
+            "PYTHONPYCACHEPREFIX": str(host_prefix),
+            "PYTHONPATH": str(REPO_ROOT),
+        },
+    )
+    assert ran.returncode == 0, ran.stderr
+    assert "FRESH" in ran.stdout
 
 
 def test_deployment_documentation_names_the_entrypoint_and_requirements() -> None:

@@ -67,7 +67,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 # deploy_bootstrap, and the host's root __pycache__ served the bootstrap
 # itself from D-153 bytecode (a module cannot protect its own cache),
 # taking every guard below down with it.
-if sys.pycache_prefix is None:
+# D-156 makes the redirect UNCONDITIONAL: the host precompiles bytecode
+# under PYTHONPYCACHEPREFIX, so a guard that fires only on None skips
+# exactly when it matters. Only a prefix this process created is trusted.
+if sys.pycache_prefix is None or "gm_pycache_" not in sys.pycache_prefix:
     sys.pycache_prefix = tempfile.mkdtemp(prefix="gm_pycache_")
 
 # D-153/D-155: the deploy bootstrap sweeps stale bytecode from the
@@ -4491,10 +4494,14 @@ def render_live_board() -> None:
         st.error("The slate board build failed unexpectedly (D-150).")
         st.code(traceback.format_exc())
         # D-150 diagnostics: WHERE the installed package resolves from and
-        # what signature it actually carries — the host served a stale
-        # installed copy of the package while the checkout was current.
+        # what signature it actually carries. D-156: every probe is
+        # isolated — the surface itself crashed on the host (a stale
+        # bootstrap module missing the constants the probes referenced),
+        # which hid the very forensics meant to explain the failure. No
+        # single probe may ever take this surface down again.
         import hashlib
         import inspect
+        import sys as _sys
         from pathlib import Path as _Path
 
         import greenmachine.live.pipeline as _pipeline
@@ -4508,19 +4515,60 @@ def render_live_board() -> None:
             )
             return (ran.stdout or ran.stderr or "").strip()
 
-        committed = subprocess.run(
-            ["git", "-C", str(repo_root), "show", "HEAD:src/greenmachine/live/pipeline.py"],
-            capture_output=True,
-        ).stdout
-        # D-154: the bytecode layer's own state — the redirect prefix, what
-        # the sweep removed vs could not, and the stale cache entry's own
-        # header (its invalidation mode and what it was compiled from).
-        import sys as _sys
+        diag_lines: list[str] = []
 
-        cache_tag = _sys.implementation.cache_tag
-        pyc = module_path.parent / "__pycache__" / f"{module_path.stem}.{cache_tag}.pyc"
-        pyc_line = "no bytecode file beside the source"
-        if pyc.is_file():
+        def _probe(label: str, probe: Callable[[], object]) -> None:
+            try:
+                diag_lines.append(f"{label}: {probe()}")
+            except Exception as probe_error:
+                diag_lines.append(f"{label}: <probe failed: {probe_error!r}>")
+
+        _probe("pipeline module file", lambda: module_path)
+        _probe(
+            "build_board parameters",
+            lambda: sorted(inspect.signature(_pipeline.build_board).parameters),
+        )
+        _probe(
+            "working-file sha256",
+            lambda: hashlib.sha256(module_path.read_bytes()).hexdigest()[:16],
+        )
+        _probe(
+            "HEAD blob sha256",
+            lambda: hashlib.sha256(
+                subprocess.run(
+                    ["git", "-C", str(repo_root), "show", "HEAD:src/greenmachine/live/pipeline.py"],
+                    capture_output=True,
+                ).stdout
+            ).hexdigest()[:16],
+        )
+        _probe("git HEAD", lambda: _git("rev-parse", "--short", "HEAD"))
+        _probe("git status", lambda: _git("status", "--porcelain")[:600] or "clean")
+        _probe(
+            "git log pipeline.py",
+            lambda: _git("log", "--oneline", "-3", "--", "src/greenmachine/live/pipeline.py"),
+        )
+        # D-156: the bytecode layer's full state, every piece named. The
+        # host precompiles bytecode under PYTHONPYCACHEPREFIX (root-owned,
+        # surviving git syncs and env rebuilds); these probes exist so a
+        # stale serve names its own layer on the crash page.
+        _probe("pycache prefix (effective)", lambda: _sys.pycache_prefix)
+        _probe("PYTHONPYCACHEPREFIX (env)", lambda: os.environ.get("PYTHONPYCACHEPREFIX"))
+        _probe("bootstrap module file", lambda: getattr(_deploy_bootstrap, "__file__", "?"))
+        _probe("bootstrap module cached", lambda: getattr(_deploy_bootstrap, "__cached__", "?"))
+        _probe(
+            "bootstrap sweep",
+            lambda: (
+                "removed "
+                f"{getattr(_deploy_bootstrap, 'SWEPT_COUNT', '<missing>')}, leftover "
+                f"{getattr(_deploy_bootstrap, 'LEFTOVER_CACHES', '<missing>')}"
+            ),
+        )
+
+        def _pyc_header() -> str:
+            cache_tag = _sys.implementation.cache_tag
+            pyc = module_path.parent / "__pycache__" / f"{module_path.stem}.{cache_tag}.pyc"
+            if not pyc.is_file():
+                return "no bytecode file beside the source"
             header = pyc.read_bytes()[:16]
             flags = int.from_bytes(header[4:8], "little")
             mode = (
@@ -4529,26 +4577,14 @@ def render_live_board() -> None:
                 else "timestamp"
             )
             stat = pyc.stat()
-            pyc_line = (
-                f"bytecode beside source: {pyc.name} — {mode}, "
-                f"header {header.hex()}, owner-writable={bool(stat.st_mode & 0o200)}, "
+            return (
+                f"{pyc.name} — {mode}, header {header.hex()}, "
+                f"owner-writable={bool(stat.st_mode & 0o200)}, "
                 f"mtime={datetime.fromtimestamp(stat.st_mtime, UTC):%Y-%m-%d %H:%M}"
             )
-        st.code(
-            f"pipeline module file: {module_path}\n"
-            "build_board parameters: "
-            f"{sorted(inspect.signature(_pipeline.build_board).parameters)}\n"
-            f"working-file sha256: {hashlib.sha256(module_path.read_bytes()).hexdigest()[:16]}\n"
-            f"HEAD blob sha256:    {hashlib.sha256(committed).hexdigest()[:16]}\n"
-            f"git HEAD: {_git('rev-parse', '--short', 'HEAD')}\n"
-            f"git status: {_git('status', '--porcelain')[:600] or 'clean'}\n"
-            "git log pipeline.py: "
-            + _git("log", "--oneline", "-3", "--", "src/greenmachine/live/pipeline.py")
-            + f"\npycache prefix: {_sys.pycache_prefix}\n"
-            f"bootstrap sweep: removed {_deploy_bootstrap.SWEPT_COUNT}, "
-            f"leftover {_deploy_bootstrap.LEFTOVER_CACHES}\n"
-            f"{pyc_line}"
-        )
+
+        _probe("bytecode beside source", _pyc_header)
+        st.code("\n".join(diag_lines))
         return
     blot.empty()
     if isinstance(board, FetchFailure):
