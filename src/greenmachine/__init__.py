@@ -23,6 +23,6 @@ except PackageNotFoundError as exc:  # pragma: no cover - only reachable when no
 # serving bytecode compiled from older sources; any module carrying this
 # marker was necessarily loaded from current code. Bump on any deploy-cache
 # incident so a stale serve is detectable (and evictable) in one getattr.
-DEPLOY_EPOCH = 157
+DEPLOY_EPOCH = 158
 
 __all__ = ["DEPLOY_EPOCH", "__version__"]

@@ -51,6 +51,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import traceback
 from collections.abc import Callable, Iterable
 from datetime import UTC, date, datetime, timedelta, timezone
@@ -84,23 +85,47 @@ if sys.pycache_prefix is None or "gm_pycache_" not in sys.pycache_prefix:
 # root. Fresh pre-loads are left alone — evicting them on every rerun
 # would rebuild the package per interaction and break isinstance checks
 # against cached objects.
+#
+# D-158: the eviction now runs AT MOST ONCE PER PROCESS, under a
+# process-wide lock. D-157 re-ran the marker check on every execution
+# of this file, and Streamlit re-executes it per session and per
+# interaction: a second execution starting while the first was still
+# importing saw a half-initialized greenmachine (the marker line had
+# not run yet), read it as stale, and deleted the package mid-import.
+# The process ended up with two greenmachine.live.savant module
+# objects, and st.cache_data could not pickle the freshly built rows
+# ("not the same object as greenmachine.live.savant.PitchArsenalRow").
+# __main__'s globals are rebuilt on every rerun, so the once-guard and
+# its lock live on sys — the one object every rerun and session thread
+# shares.
 _PRELOADED_OURS = tuple(
     name
     for name in sys.modules
     if name == "deploy_bootstrap" or name == "greenmachine" or name.startswith("greenmachine.")
 )
-# The marker check reads the two ROOTS only: importing any submodule
-# imports its parent first, so a stale pre-load always shows at the root.
-# (Submodules carry no marker of their own — checking them would evict
-# fresh packages on every rerun.)
-if any(
-    getattr(sys.modules[root], "DEPLOY_EPOCH", None) != 157
-    for root in ("deploy_bootstrap", "greenmachine")
-    if root in sys.modules
-):
-    importlib.invalidate_caches()
-    for _preloaded in _PRELOADED_OURS:
-        del sys.modules[_preloaded]
+if not getattr(sys, "_gm_eviction_decided", False):
+    _eviction_lock = getattr(sys, "_gm_eviction_lock", None)
+    if _eviction_lock is None:
+        _eviction_lock = threading.Lock()
+        sys._gm_eviction_lock = _eviction_lock  # type: ignore[attr-defined]
+    with _eviction_lock:
+        if not getattr(sys, "_gm_eviction_decided", False):
+            sys._gm_eviction_decided = True  # type: ignore[attr-defined]
+            # The marker check reads the two ROOTS only (importing any
+            # submodule imports its parents first, so a stale pre-load
+            # always shows at the root), and only a FULLY initialized
+            # root can be judged: a half-initialized one means an import
+            # is in flight under our redirect, which the import block
+            # below joins through the per-module import locks instead.
+            if any(
+                getattr(getattr(sys.modules[root], "__spec__", None), "_initialized", True)
+                and getattr(sys.modules[root], "DEPLOY_EPOCH", None) != 158
+                for root in ("deploy_bootstrap", "greenmachine")
+                if root in sys.modules
+            ):
+                importlib.invalidate_caches()
+                for _preloaded in _PRELOADED_OURS:
+                    sys.modules.pop(_preloaded, None)
 
 # D-153/D-155: the deploy bootstrap sweeps stale bytecode from the
 # checkout's src tree before any greenmachine import can load it — it
@@ -4583,6 +4608,27 @@ def render_live_board() -> None:
         _probe("pycache prefix (effective)", lambda: _sys.pycache_prefix)
         _probe("PYTHONPYCACHEPREFIX (env)", lambda: os.environ.get("PYTHONPYCACHEPREFIX"))
         _probe("pre-loaded before entrypoint ran", lambda: _PRELOADED_OURS or "none")
+        # D-158: module-identity postmortem. The PicklingError that
+        # surfaced after D-157 ("not the same object as ...PitchArsenalRow")
+        # means two module objects existed for one dotted name; if it ever
+        # recurs, these probes name both objects and the guard's state.
+        _probe(
+            "eviction decided this process",
+            lambda: getattr(_sys, "_gm_eviction_decided", "<unset>"),
+        )
+
+        def _savant_identity() -> str:
+            client = live_mlb_adapters()[1]
+            method_globals = client.fetch_pitch_arsenal.__func__.__globals__
+            built_with = method_globals.get("PitchArsenalRow")
+            current = getattr(_sys.modules.get("greenmachine.live.savant"), "PitchArsenalRow", None)
+            return (
+                f"client builds rows with id={id(built_with)}, sys.modules holds "
+                f"id={id(current)}, same={built_with is current}"
+            )
+
+        _probe("savant row-class identity", _savant_identity)
+        _probe("modules named *savant*", lambda: sorted(n for n in _sys.modules if "savant" in n))
         _probe("bootstrap module file", lambda: getattr(_deploy_bootstrap, "__file__", "?"))
         _probe("bootstrap module cached", lambda: getattr(_deploy_bootstrap, "__cached__", "?"))
         _probe("pipeline module cached", lambda: getattr(_pipeline, "__cached__", "?"))

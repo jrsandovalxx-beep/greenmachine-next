@@ -4126,3 +4126,43 @@ import — binds the fresh module.
 
 Full gate green (3459 passed, 1 skipped), consistency check clean, all
 four showcase runners clean.
+
+
+## D-158 - The eviction must run at most once per process: a concurrent rerun evicted the package mid-import
+
+2026-08-31: D-157 deployed and the build finally ran CURRENT code — the
+stale-bytecode incident itself is closed (the failure surface's own
+forensics confirm: current build_board signature, file hash matching
+HEAD, prefix redirect in effect). But the board still failed, one layer
+up: st.cache_data could not pickle the freshly built pitch-arsenal
+rows — "not the same object as greenmachine.live.savant.PitchArsenalRow"
+— the signature of two module objects existing for one dotted name in
+one process.
+
+The mechanism: D-157's eviction re-ran its marker check on EVERY
+execution of the entrypoint, and Streamlit re-executes the script per
+session and per interaction. A second execution starting while the
+first was still importing saw a half-initialized greenmachine (its
+marker line had not run yet), read it as stale, and deleted the package
+mid-import. References acquired before the deletion and sys.modules
+after the re-import named different module objects — and the
+cache_resource Savant client kept building rows with the evicted set's
+classes, which cache_data then could not pickle against the new set.
+
+The fix makes the module set immutable after process start. The
+eviction is now once-per-process: the decision flag and its lock live
+on sys (the one object shared across reruns and session threads —
+__main__'s globals are rebuilt every execution, so they cannot hold
+process state). The marker check additionally judges only FULLY
+initialized modules (spec._initialized): a half-initialized module is
+an import in flight under our redirect, which the import block joins
+through the per-module import locks — never evicted. DEPLOY_EPOCH bumps
+to 158 so every pre-D-158 serve reads stale. The failure surface gains
+identity postmortems (eviction state, the client-vs-sys.modules row
+class ids, a *savant* module scan), so any recurrence prints both
+objects instead of a bare pickle error.
+
+Full gate green (3459 passed, 1 skipped — the eviction contract test
+now proves all three phases: stale pre-load evicted, fresh modules
+never re-evicted, in-flight imports spared), consistency check clean,
+all four showcase runners clean.
