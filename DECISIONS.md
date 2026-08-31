@@ -3896,3 +3896,25 @@ install environment drifting from the checked-out code. The fix is the
 D-137 mechanism: the cache-bust comment in requirements.txt changes,
 which forces the host to rebuild its environment from scratch on the
 next deploy. No application code changed.
+
+
+## D-150 - A build failure shows its own traceback; the redacted crash page never hides a frame again
+
+2026-08-31: the deployed app kept serving the redacted TypeError crash
+page after D-149's from-scratch environment rebuild, while the identical
+commit built the same slate cleanly off-host on Python 3.12 and a fresh
+3.14 environment — so the failure is real on the host and the redaction
+was costing a full diagnostic round per guess. The build call now sits
+inside the same degradation pattern the tabs already had (D-075): an
+unexpected exception empties the build blot, names the failure in an
+error banner, and prints the full traceback in a code block. This is
+an owner-only app — a traceback names code paths, never secrets — and
+the surface is permanent: any future host-side failure is diagnosable
+on first load instead of after a deploy-and-wait per hypothesis. (D-149
+stays as the record of the first repair attempt; its mechanism was the
+right one under the D-137 precedent, it simply was not the cause.)
+
+Full gate green (3457 passed, 1 skipped — a new AppTest drives a
+synthetic build failure through the real entry path and asserts the
+named surface, the printed traceback, and zero uncaught exceptions),
+consistency check clean, all four showcase runners clean.
