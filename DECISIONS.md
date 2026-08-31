@@ -3939,3 +3939,21 @@ application behaviour changed.
 
 Gate: full suite green after the three-file dependency move; no logic
 changed.
+
+
+## D-152 - The failure surface goes deeper: file hash vs committed blob, dirty-tree state
+
+2026-08-31: D-151's real specification change rebuilt the host
+environment and the stale-signature failure persisted — the diagnostics
+then showed the module resolves from the checkout path itself
+(/mount/src/greenmachine-next/src/greenmachine/live/pipeline.py) yet
+carries the pre-D-143 build_board signature, while the checkout's HEAD
+reads the current merge. That combination means the file's CONTENT on
+the host is older than its own commit, so the failure surface now
+prints the working file's sha256 beside the committed blob's sha256,
+the checkout's git status, and the file's recent git log — one load
+settles whether the tree is dirty, overlaid, or the checkout itself is
+not what its HEAD claims. Diagnostics only; no behaviour changed.
+
+Gate: failure-surface AppTest, architecture suite and the render suite
+green.
