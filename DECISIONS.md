@@ -3831,3 +3831,55 @@ Full gate green (3455 passed, 1 skipped — a new regression test pins
 that a tracked foul with a measured 60-degree angle and no
 classification never enters the pitcher or per-pitch contact reads),
 consistency check clean, all four showcase runners clean.
+
+
+## D-148 - The scoped counting follows the official scoring: intent walks, truncated PAs, double-play strikeouts
+
+2026-08-31 (PO change doc P0 item 5 — "confirm all the timeframe toggles
+pull accurate info"; the window math checked out, and the live
+cross-check behind it exposed three event-vocabulary gaps in the shared
+counting):
+
+- The audit's method: the app's own plate-outcome aggregation over
+  Savant pitch events for a four-week window, compared against the
+  official statsapi game logs for the same players and dates (Ohtani,
+  Witt Jr, Raleigh). Once the source's one-day indexing lag is set
+  aside (the search CSV had not yet indexed the previous day's games —
+  a source freshness fact, not a window bug), every mismatch traced to
+  three event strings.
+- intent_walk was charged as an at-bat. An intentional walk is a walk —
+  never an at-bat — and it is common: 81 across four 2025 seasons, 4 in
+  one sample batter's four-week window. Every event-derived AVG/SLG/ISO
+  on the matchup grids, the popup per-pitch lines and the form table
+  understated slightly wherever an intentional walk landed in scope.
+- truncated_pa counted as a plate appearance and an at-bat. It is
+  neither on the official line (the inning or game ended on the bases
+  with the appearance unresolved): the event-derived season PA count
+  ran exactly the truncated count above the statsapi season line. It
+  now leaves the PA denominator entirely.
+- strikeout_double_play was missed by the strikeout reads (four across
+  four 2025 seasons). The batter struck out; the K% columns count it.
+- The never-observed sacrifice double-plays (sac_fly_double_play,
+  sac_bunt_double_play) joined the non-at-bat family on the official
+  rule — a sacrifice is never an at-bat — after ~17k scanned pitches
+  across two seasons showed none: inclusion is zero-risk, omission
+  would be a silently wrong at-bat.
+- One shared vocabulary in form.py (NON_PLATE_APPEARANCE_EVENTS new,
+  NON_AT_BAT_EVENTS extended, STRIKEOUT_EVENTS new) serves the matchup
+  grid lines, the popup per-pitch lines and the form table, so the
+  surfaces can never disagree. The season counting lines were already
+  the official statsapi lines and needed nothing. After the fix the
+  three sample batters' window PA/AB/H/HR/K match the official game
+  logs exactly.
+- The timeframe toggles themselves verified accurate: the count/unit
+  math (weeks times seven, months capped at three times thirty), the
+  90-day record span always covering the longest selectable window, the
+  season endpoints pinned to the regular season and year, the form
+  L7/L14 reaches, and the D-142 three-month pitcher window all pull
+  what their surfaces name.
+
+Full gate green (3456 passed, 1 skipped — a new regression test pins
+the official scoring rules on the shared aggregation, and the form
+table's volume-count test now carries an intentional walk and a
+truncated PA), consistency check clean, all four showcase runners
+clean.
