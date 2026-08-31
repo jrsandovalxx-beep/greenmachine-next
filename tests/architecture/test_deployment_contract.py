@@ -150,23 +150,35 @@ def test_the_deploy_bootstrap_sweeps_bytecode_before_the_package_imports(
     # from source. The eviction is marker-guarded: fresh pre-loads stay.
     eviction_at = entrypoint.index("_PRELOADED_OURS")
     assert redirect_at < eviction_at < bootstrap_at
-    assert 'getattr(sys.modules[root], "DEPLOY_EPOCH", None) != 157' in entrypoint
+    assert 'getattr(sys.modules[root], "DEPLOY_EPOCH", None) != 158' in entrypoint
+    # D-158: the eviction is once-per-process (a flag and a lock on sys —
+    # __main__'s globals are rebuilt every rerun) and never judges a
+    # half-initialized module: D-157's every-rerun check saw a concurrent
+    # import's not-yet-marked package as stale, deleted it mid-import, and
+    # the process ended with two savant module objects (the PicklingError).
+    assert "_gm_eviction_decided" in entrypoint
+    assert "threading.Lock()" in entrypoint
+    assert '"_initialized"' in entrypoint
     bootstrap_text = (REPO_ROOT / "deploy_bootstrap.py").read_text(encoding="utf-8")
-    assert "DEPLOY_EPOCH = 157" in bootstrap_text
+    assert "DEPLOY_EPOCH = 158" in bootstrap_text
     package_text = (REPO_ROOT / "src" / "greenmachine" / "__init__.py").read_text(encoding="utf-8")
-    assert "DEPLOY_EPOCH = 157" in package_text
+    assert "DEPLOY_EPOCH = 158" in package_text
 
 
 def test_the_entrypoint_evicts_a_preloaded_stale_bootstrap(tmp_path: Path) -> None:
-    """D-157: the deploy host imports app modules BEFORE the entrypoint
-    runs — D-156's forensics caught deploy_bootstrap served from bytecode
-    whose cache path was computed while the pycache prefix was still
-    None. Reproduced end to end: a stale deploy_bootstrap is pre-imported
-    (the host's position), then the entrypoint's own sequence runs —
-    unconditional redirect, marker-checked eviction, real import — and
-    the fresh module must be the one bound. A module cannot protect its
-    own cache (D-155), and no entrypoint line can run before the
-    pre-import; eviction is the guard that remains."""
+    """D-157/D-158: the deploy host imports app modules BEFORE the
+    entrypoint runs — D-156's forensics caught deploy_bootstrap served
+    from bytecode whose cache path was computed while the pycache prefix
+    was still None. Reproduced end to end: a stale deploy_bootstrap is
+    pre-imported (the host's position), then the entrypoint's own
+    sequence runs — unconditional redirect, marker-checked eviction,
+    real import — and the fresh module must be the one bound. A module
+    cannot protect its own cache (D-155), and no entrypoint line can run
+    before the pre-import; eviction is the guard that remains. D-158
+    adds the two properties the host's PicklingError demanded: the
+    eviction runs at most once per process (a re-run never re-evicts
+    fresh modules), and a half-initialized module is an import in
+    flight, never a stale serve."""
     import os
     import py_compile
     import sys
@@ -193,18 +205,52 @@ def test_the_entrypoint_evicts_a_preloaded_stale_bootstrap(tmp_path: Path) -> No
     # entrypoint get its first line — redirect, evict the stale pre-load,
     # import for real.
     payload = (
-        "import importlib, sys, tempfile\n"
+        "import importlib, sys, tempfile, threading\n"
         "import deploy_bootstrap as stale\n"
-        "assert getattr(stale, 'DEPLOY_EPOCH', None) != 157, 'stale serve expected'\n"
+        "assert getattr(stale, 'DEPLOY_EPOCH', None) != 158, 'stale serve expected'\n"
         "sys.pycache_prefix = tempfile.mkdtemp(prefix='gm_pycache_')\n"
-        "preloaded = [n for n in list(sys.modules) if n == 'deploy_bootstrap']\n"
-        "assert any(getattr(sys.modules[n], 'DEPLOY_EPOCH', None) != 157 for n in preloaded)\n"
-        "importlib.invalidate_caches()\n"
-        "for n in preloaded: del sys.modules[n]\n"
+        # The entrypoint's D-158 guard, mirrored line for line: once per
+        # process, under a lock on sys, judging only fully initialized roots.
+        "def entrypoint_guard():\n"
+        "    preloaded = tuple(n for n in sys.modules if n == 'deploy_bootstrap'"
+        " or n == 'greenmachine' or n.startswith('greenmachine.'))\n"
+        "    if not getattr(sys, '_gm_eviction_decided', False):\n"
+        "        lock = getattr(sys, '_gm_eviction_lock', None)\n"
+        "        if lock is None:\n"
+        "            lock = threading.Lock(); sys._gm_eviction_lock = lock\n"
+        "        with lock:\n"
+        "            if not getattr(sys, '_gm_eviction_decided', False):\n"
+        "                sys._gm_eviction_decided = True\n"
+        "                if any(getattr(getattr(sys.modules[r], '__spec__', None),"
+        " '_initialized', True) and getattr(sys.modules[r], 'DEPLOY_EPOCH', None)"
+        " != 158 for r in ('deploy_bootstrap', 'greenmachine') if r in sys.modules):\n"
+        "                    importlib.invalidate_caches()\n"
+        "                    for n in preloaded: sys.modules.pop(n, None)\n"
+        "entrypoint_guard()\n"
         "import deploy_bootstrap\n"
-        "assert deploy_bootstrap.DEPLOY_EPOCH == 157, 'still stale after eviction'\n"
+        "assert deploy_bootstrap.DEPLOY_EPOCH == 158, 'still stale after eviction'\n"
         "assert hasattr(deploy_bootstrap, 'SWEPT_COUNT'), 'still stale after eviction'\n"
         "assert 'gm_pycache_' in (sys.pycache_prefix or '')\n"
+        # D-158 phase 2: a re-run of the guard (the flag forced off, as a
+        # rerun would see fresh state) must NOT evict fresh modules — the
+        # bound object stays the process's one copy.
+        "first = sys.modules['deploy_bootstrap']\n"
+        "sys._gm_eviction_decided = False\n"
+        "entrypoint_guard()\n"
+        "assert sys.modules['deploy_bootstrap'] is first, 'fresh module re-evicted'\n"
+        # D-158 phase 3: a half-initialized markerless root is an import in
+        # flight, not a stale serve — the guard must spare it even when it
+        # re-runs.
+        "import importlib.machinery, types\n"
+        "fake = types.ModuleType('greenmachine')\n"
+        "fake.__spec__ = importlib.machinery.ModuleSpec('greenmachine', None)\n"
+        "fake.__spec__._initialized = False\n"
+        "sys.modules['greenmachine'] = fake\n"
+        "sys._gm_eviction_decided = False\n"
+        "entrypoint_guard()\n"
+        "assert sys.modules.get('greenmachine') is fake, 'in-flight import evicted'\n"
+        "assert sys.modules['deploy_bootstrap'] is first, 'fresh module evicted alongside'\n"
+        "del sys.modules['greenmachine']\n"
         "print('FRESH')\n"
     )
     ran = run_guarded_python(
