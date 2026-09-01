@@ -4426,3 +4426,22 @@ order is unchanged: highest grades at the top.
 Full gate green (3467 passed, 1 skipped — a new AppTest drives the
 header taps and the flip, the unit test gains direction and text-column
 coverage), consistency check clean, all four showcase runners clean.
+
+## D-169 - A More tap never vanishes the other More buttons
+
+PO 2026-09-02: "when I click more for batter details pop up, the mores
+on other tabs dissapear." Root cause: the Matchups grid rendered each
+More behind a `selected is None` guard, so on the click's rerun every
+More after the tapped one was never rendered — Streamlit unmounts what
+a run does not render. Both grids now queue the tapped batter in session
+state through an on-click callback; the callback runs before the rerun,
+every More renders on every run, and the board pops the queue once after
+the tabs to open the single dialog Streamlit allows per run. The staged
+fixture also gained the dialog's Savant seam (the D-129 lazy season
+fetch, stubbed at the adapter per the AppTest rule) — the gap predates
+this change and only surfaced because the new regression test asserts a
+clean run after the tap.
+
+Full gate green (3468 passed, 1 skipped — the new test taps a Matchups
+More and asserts every More key on the board survives), consistency
+check clean, all four showcase runners clean.
