@@ -4392,3 +4392,20 @@ and wind orientation for their games through the existing joins.
 
 Full gate green (3465 passed, 1 skipped), consistency check clean, all
 four showcase runners clean.
+
+## D-167 - The parks screen joins the app as a top-right view
+
+PO 2026-09-01, asked what is next, answered "no preference" to the
+recommendation: the parks reference screen (GMF-004) was built, tested,
+and reachable only in its test runner — finished work sitting in the
+dark. It now ships as a top-right view beside Backtest, D-095's
+mechanism: reference data, not a slate read, so it is a view and never a
+fifth tab on the dial. All thirty venues show their two-season HR
+factors per bat side with the PA samples (Sutter Health Park included
+since D-166), roof type, and — in the deployed environment — live NWS
+forecasts through the existing weather seam; local runs bind the fixture
+as always. The board's four tabs are untouched.
+
+Full gate green (3466 passed, 1 skipped — a new test drives the header
+button both ways and proves the parks table renders with Sutter covered),
+consistency check clean, all four showcase runners clean.

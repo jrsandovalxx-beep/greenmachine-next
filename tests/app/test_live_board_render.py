@@ -1882,6 +1882,49 @@ def test_backtest_button_swaps_the_view(monkeypatch: pytest.MonkeyPatch) -> None
     assert not any("Backtest — grade hit rates" in h.value for h in at.subheader)
 
 
+def test_parks_button_swaps_the_view(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-167: the parks reference screen joins the board as a top-right view
+    — D-095's mechanism, never a dial tab. The weather seam binds the
+    fixture here: a test render never becomes a network call."""
+    import streamlit as st
+
+    import greenmachine.live.pipeline as pipeline
+    from greenmachine.parks import VENUE_COLUMN
+
+    monkeypatch.setattr(pipeline, "build_board", lambda **kwargs: _board_with_grid_lines())
+    # Local environment: the weather seam binds the fixture adapter inside
+    # the fresh script run — a test render never becomes a network call
+    # (AppTest re-executes the script, so same-module stubs cannot reach it).
+    monkeypatch.setenv("GM_ENVIRONMENT", "local")
+    st.cache_data.clear()
+    at = AppTest.from_file(str(_APP_PATH), default_timeout=_TIMEOUT)
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert not any(h.value == "Parks" for h in at.subheader)
+
+    openers = [b for b in at.button if b.key == "view_parks"]
+    assert openers, "the parks button rendered in the header beside Backtest"
+    openers[0].click()
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert any(h.value == "Parks" for h in at.subheader)
+    captions = " ".join(element.value for element in at.caption)
+    assert "2025-2026" in captions  # the factor window is stated (D-166)
+    assert "fixture-bound" in captions  # the stubbed weather seam is named
+    venue_frames = [
+        element.value for element in at.dataframe if VENUE_COLUMN in list(element.value.columns)
+    ]
+    assert venue_frames, "the parks table rendered"
+    assert "Sutter Health Park" in venue_frames[0][VENUE_COLUMN].tolist()
+
+    closers = [b for b in at.button if b.key == "view_board"]
+    assert closers, "the board button rendered while the parks screen shows"
+    closers[0].click()
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert not any(h.value == "Parks" for h in at.subheader)
+
+
 def test_backtest_excludes_a_day_the_source_has_not_indexed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

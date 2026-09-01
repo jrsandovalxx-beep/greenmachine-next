@@ -5148,7 +5148,9 @@ def main() -> None:
         )
     # D-095: the backtest is a separate view behind a top-right button, not a
     # tab on the dial — the dial is for reading a slate, this is for auditing
-    # the grades.
+    # the grades. D-167: the parks reference screen joins the same mechanism —
+    # thirty venues with their factors, roofs and forecasts are reference
+    # data, not a slate read.
     with action:
         st.markdown('<div style="height: 3.2rem"></div>', unsafe_allow_html=True)
         # st.rerun after the swap: the button itself is drawn from the view
@@ -5156,13 +5158,24 @@ def main() -> None:
         # until the next interaction.
         view_button, glossary_button = st.columns([4, 1])
         with view_button:
-            if st.session_state.get("view") == "backtest":
+            if st.session_state.get("view", "board") != "board":
                 if st.button("← Board", key="view_board"):
                     st.session_state["view"] = "board"
                     st.rerun()
-            elif st.button("Backtest", key="view_backtest"):
-                st.session_state["view"] = "backtest"
-                st.rerun()
+            else:
+                backtest_button, parks_button = st.columns(2)
+                with backtest_button:
+                    if st.button("Backtest", key="view_backtest"):
+                        st.session_state["view"] = "backtest"
+                        st.rerun()
+                with parks_button:
+                    if st.button(
+                        "Parks",
+                        key="view_parks",
+                        help="All thirty parks — HR factors, roof, forecast",
+                    ):
+                        st.session_state["view"] = "parks"
+                        st.rerun()
         # D-117: the glossary sits beside the view button on both views — the
         # "?" opens the plain-language metric glossary in a dialog.
         with glossary_button:
@@ -5172,8 +5185,11 @@ def main() -> None:
                 help="Glossary — every metric in plain terms",
             ):
                 _render_glossary()
-    if st.session_state.get("view") == "backtest":
+    view = st.session_state.get("view")
+    if view == "backtest":
         _render_backtest()
+    elif view == "parks":
+        render_parks_screen()
     else:
         render_live_board()
 
