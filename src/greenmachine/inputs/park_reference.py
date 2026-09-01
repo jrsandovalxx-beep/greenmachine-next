@@ -50,9 +50,9 @@ committed export's own rows — the file and its sha256 digest are pinned by
 data/SAVANT_PARK_FACTORS_PROVENANCE.md and by the snapshot test — never
 from memory: the original authoring deliberately declined to assert MLBAM
 ids from recall, and the join now binds against data. The Athletics carried
-``None`` until D-166 moved the snapshot to the 2025-2026 two-season window
-— the only uniform window that can cover Sutter Health Park (opened 2025);
-their venue now joins on Savant id 2529 like every other club.
+``None`` until D-166 moved the snapshot to a window covering Sutter Health
+Park (opened 2025); their venue now joins on Savant id 2529 like every
+other club, on the 2023-2026 four-season window derived at D-171.
 """
 
 from __future__ import annotations

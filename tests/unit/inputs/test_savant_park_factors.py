@@ -52,7 +52,7 @@ def test_a_moved_file_yields_nothing_at_all(tmp_path: Path) -> None:
     from the digest, not from a parse error, or the gate is not what stopped it.
     """
     original = snapshot_path().read_text(encoding="utf-8")
-    moved = tmp_path / "savant_park_factors_2025-2026.csv"
+    moved = tmp_path / "savant_park_factors_2023-2026.csv"
     moved.write_text(original.replace("Angel Stadium", "Angel Stadium (edited)"), encoding="utf-8")
     with pytest.raises(InputContractError, match="digest mismatch"):
         read_factors(moved)
@@ -72,10 +72,10 @@ def test_the_product_consumes_the_home_run_factor_not_the_headline() -> None:
     fenway = next(v for v in PARK_VENUES if v.venue_id == "fenway-park")
     assert fenway.savant_venue_id is not None
     lhb = factors[fenway.savant_venue_id][Handedness.LEFT]
-    # D-166's derived snapshot: Fenway LHB index_hr = 85 over 14,232 PA on
-    # the 2025-2026 two-season window.
-    assert lhb.factor == Decimal("85")
-    assert lhb.plate_appearances == 14232
+    # D-171's derived snapshot: Fenway LHB index_hr = 88 over 31,422 PA on
+    # the 2023-2026 four-season window.
+    assert lhb.factor == Decimal("88")
+    assert lhb.plate_appearances == 31422
 
 
 def test_every_venue_with_a_row_yields_two_present_fields() -> None:
@@ -92,19 +92,19 @@ def test_every_venue_with_a_row_yields_two_present_fields() -> None:
             assert field.derivation is None  # sourced, never computed
 
 
-def test_the_athletics_are_covered_since_the_two_season_window() -> None:
-    """D-166 (PO): Sutter Health Park opened in 2025, so only a window that
-    does not reach back to 2024 can hold it. The snapshot moved to 2025-2026
-    and the Athletics read the source's own factors like every other club."""
+def test_the_athletics_are_covered_since_d166s_gap_closure() -> None:
+    """D-166 closed the Sutter Health Park gap; D-171 (PO) holds it on the
+    2023-2026 window — Sutter's factor is the documented blend of its two
+    played seasons, and the Athletics read real factors like every club."""
     factors = read_factors()
     athletics = next(v for v in PARK_VENUES if v.team == "Athletics")
     assert athletics.savant_venue_id == 2529
     fields = factor_fields(athletics, factors)
     assert fields[Handedness.LEFT].value is not None
     assert fields[Handedness.LEFT].value.factor == Decimal("119")
-    assert fields[Handedness.LEFT].value.plate_appearances == 13794
+    assert fields[Handedness.LEFT].value.plate_appearances == 13438
     assert fields[Handedness.RIGHT].value is not None
-    assert fields[Handedness.RIGHT].value.factor == Decimal("122")
+    assert fields[Handedness.RIGHT].value.factor == Decimal("118")
     for field in fields.values():
         assert field.display_state() is DisplayState.VALUE
         assert field.source_id == SOURCE_ID
@@ -134,7 +134,7 @@ def test_a_venue_without_a_row_is_not_yet_observed_never_a_number() -> None:
 def test_the_source_record_carries_the_pinned_provenance() -> None:
     assert SOURCE.provenance is PROVENANCE
     assert PROVENANCE.sha256 == PINNED_SHA256
-    assert PROVENANCE.export_date.isoformat() == "2026-09-01"  # the D-166 scripted pull
+    assert PROVENANCE.export_date.isoformat() == "2026-09-01"  # the D-171 scripted pulls
     assert PROVENANCE.row_count == EXPECTED_ROWS
 
 
@@ -143,7 +143,8 @@ def test_the_basis_statement_says_rolling_window_and_export_date() -> None:
     which rolling window they describe; this is that promise, kept in words."""
     statement = basis_statement()
     assert window_label() in statement
-    assert "rolling" in statement
+    assert "four-season" in statement
+    assert "single-year boards" in statement  # the derivation is named on screen
     assert "2026-09-01" in statement
     assert "100 = neutral" in statement
     assert "never fetched" in statement

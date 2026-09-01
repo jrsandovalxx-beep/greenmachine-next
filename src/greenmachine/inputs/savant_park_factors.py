@@ -14,12 +14,16 @@ first code that reads it. Three properties hold by construction:
   dial. D-166 (PO: no preference between the two) moved the acquisition
   itself from the D-057 hand export to a scripted pull of the leaderboard's
   embedded data payload — the same Savant host the live app reads daily.
-- **Gaps are represented, never filled.** All thirty venues have rows since
-  D-166 moved the snapshot to the 2025-2026 two-season rolling window — the
-  only uniform window that can cover Sutter Health Park (opened 2025). A
-  venue a future snapshot does not cover still comes back absent with
-  ``NOT_YET_OBSERVED``: ``SOURCE_UNAVAILABLE`` would assert a failure that
-  did not happen, and a league-average substitute would invent one.
+- **Gaps are represented, never filled.** All thirty venues have rows: the
+  snapshot is the 2023-2026 four-season window (D-171, PO), which covers
+  Sutter Health Park (opened 2025) on its two played seasons. Savant
+  publishes no four-year window — only one, two or three rolling years — so
+  each venue-side factor is the plate-appearance-weighted blend of its
+  single-year boards, pulled once and derived by the deterministic rule the
+  provenance record documents. A venue a future snapshot does not cover
+  still comes back absent with ``NOT_YET_OBSERVED``: ``SOURCE_UNAVAILABLE``
+  would assert a failure that did not happen, and a league-average
+  substitute would invent one.
 
 ``index_hr`` is the column this product consumes — the home-run park factor —
 not ``index_woba``, the leaderboard's headline number. The two sit adjacent in
@@ -49,8 +53,8 @@ from greenmachine.inputs.errors import InputContractError
 
 SOURCE_ID = "savant-park-factors"
 
-PINNED_SHA256 = "c077ec837e811a470b47c614eaa1bc173fa5d22d5de241d256dd869cce920d73"
-PINNED_BYTES = 7505
+PINNED_SHA256 = "67ca75125fdeaab6db854267f85161969e855a6932983bb7f83f68033eecf5f4"
+PINNED_BYTES = 7506
 EXPECTED_ROWS = 60
 EXPECTED_VENUES = 30
 
@@ -61,9 +65,10 @@ _SIDES = {"L": Handedness.LEFT, "R": Handedness.RIGHT}
 
 PROVENANCE = ManualExportProvenance(
     source_url=(
+        # The D-171 acquisition is eight scripted pulls — the four single-year
+        # boards per bat side — blended by the rule the provenance record
+        # documents; the leaderboard page stands here as the documented origin.
         "https://baseballsavant.mlb.com/leaderboard/statcast-park-factors"
-        "?type=year&year=2026&batSide=L&stat=index_wOBA&condition=All&rolling=2"
-        "&parks=mlb"
     ),
     export_date=date(2026, 9, 1),
     row_count=EXPECTED_ROWS,
@@ -75,8 +80,9 @@ SOURCE = SourceRecord(
     kind=SourceKind.MANUAL_EXPORT,
     description=(
         "Savant per-handedness park factors, index_hr, "
-        "2025-2026 two-season rolling window - pulled once from the "
-        "leaderboard's embedded data payload (D-166, PO), pinned and "
+        "2023-2026 four-season window - derived from the four single-year "
+        "boards, plate-appearance-weighted per venue-side (D-171, PO: "
+        "Savant publishes no four-year window), pulled once, pinned and "
         "never fetched at runtime"
     ),
     provenance=PROVENANCE,
@@ -88,7 +94,7 @@ def snapshot_path() -> Path:
     return (
         Path(__file__).resolve().parents[3]
         / "data"
-        / "savant_park_factors_2025-2026.csv"  # the §GMF-001 criterion 4 pin
+        / "savant_park_factors_2023-2026.csv"  # the §GMF-001 criterion 4 pin
     )
 
 
@@ -167,7 +173,7 @@ def read_factors(path: Path | None = None) -> dict[int, dict[Handedness, ParkFac
 
 def window_label() -> str:
     """The window these factors describe, as the snapshot itself labels it."""
-    return "2025-2026"
+    return "2023-2026"
 
 
 def basis_statement() -> str:
@@ -179,10 +185,10 @@ def basis_statement() -> str:
     window they describe, and this is where that promise is kept.
     """
     return (
-        f"Savant home-run park factors ({FACTOR_COLUMN}), {window_label()} two-season "
-        f"rolling window, 100 = neutral. Pulled from Baseball Savant on "
-        f"{PROVENANCE.export_date.isoformat()}, pinned in the repository and never "
-        "fetched at runtime."
+        f"Savant home-run park factors ({FACTOR_COLUMN}), {window_label()} four-season "
+        f"window, 100 = neutral. Derived from Baseball Savant's single-year boards "
+        f"pulled on {PROVENANCE.export_date.isoformat()} — Savant publishes no "
+        "four-year window — pinned in the repository and never fetched at runtime."
     )
 
 

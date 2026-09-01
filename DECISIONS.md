@@ -4463,3 +4463,32 @@ never the removed surface.
 Full gate green (3407 passed, 1 skipped — the screen's page, unit and
 swap tests left with it), consistency check clean, the three remaining
 showcase runners clean.
+
+## D-171 - Park factors move to a derived 2023-2026 four-season window
+
+PO 2026-09-01, after "park factor for rangers seems wrong, verify":
+"lets use years 2023 - 2026 instead." The verification first, because it
+decided the shape of the fix: Globe Life Field's 89/87 on the superseded
+two-season window was correct — the live two-season board showed the same
+89 that day — but the park was HR-friendly in 2023-2024 (126/138, then
+109/101), flipped pitcher-friendly in 2025 (80/81) and neutral in 2026
+(100/99); the window was the question. Savant publishes no four-year
+window (one, two and three-year boards answer; rolling=4 returns an empty
+payload, probed 2026-09-01), and the official three-season board still
+excludes Sutter Health Park, so the PO — "no preference" between the
+fallbacks — got the recommendation: derive the window from Savant's four
+single-year boards per bat side. Each venue-side factor is the
+plate-appearance-weighted blend of its single-year factors, rounded
+half-up; n_pa is the four-year sum; the venue set is the current thirty,
+each venue blending only the seasons it actually hosted (Sutter two,
+Tropicana three — the Rays played 2025 in a temporary park; both that
+park and Oakland Coliseum are excluded as non-current venues). The rule
+and all eight page digests are documented in the provenance record so
+every number is reproducible, and the file is pinned and digest-gated
+like every snapshot before it: no code path fetches park factors at
+runtime. Globe Life now reads 105/106 — the PO's instinct was right for
+the longer window — and Sutter stays covered at 119/118 on its two
+played seasons.
+
+Full gate green (3407 passed, 1 skipped), consistency check clean, all
+three showcase runners clean.
