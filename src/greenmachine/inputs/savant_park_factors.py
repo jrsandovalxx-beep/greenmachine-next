@@ -7,17 +7,19 @@ first code that reads it. Three properties hold by construction:
   alongside: a reader that parses first and checks later has already acted on
   bytes it had not authenticated. If the bytes moved, nothing is returned at
   all.
-- **No fetch, ever.** The only input is a committed file path. There is no URL
-  here and no HTTP client anywhere in the tree (D-057 boundary 1); the source
-  URL lives in the provenance record as documentation of how the Product Owner
-  exported it by hand, on 2026-08-06, and nowhere as an address this code
-  could dial.
-- **The gap is represented, never filled.** Twenty-nine venues have rows; the
-  Athletics have none (provenance finding 1), so their factors come back
-  absent with ``NOT_YET_OBSERVED`` — the source answered completely and the
-  2024-2026 rolling window has not accumulated Sutter Health Park history.
-  ``SOURCE_UNAVAILABLE`` would assert a failure that did not happen, and a
-  league-average substitute would invent one.
+- **No fetch at runtime, ever.** The only input is a committed file path.
+  There is no URL here and no HTTP client anywhere in the tree (D-057
+  boundary 1); the source URL lives in the provenance record as documentation
+  of how the snapshot was taken, and nowhere as an address this code could
+  dial. D-166 (PO: no preference between the two) moved the acquisition
+  itself from the D-057 hand export to a scripted pull of the leaderboard's
+  embedded data payload — the same Savant host the live app reads daily.
+- **Gaps are represented, never filled.** All thirty venues have rows since
+  D-166 moved the snapshot to the 2025-2026 two-season rolling window — the
+  only uniform window that can cover Sutter Health Park (opened 2025). A
+  venue a future snapshot does not cover still comes back absent with
+  ``NOT_YET_OBSERVED``: ``SOURCE_UNAVAILABLE`` would assert a failure that
+  did not happen, and a league-average substitute would invent one.
 
 ``index_hr`` is the column this product consumes — the home-run park factor —
 not ``index_woba``, the leaderboard's headline number. The two sit adjacent in
@@ -47,10 +49,10 @@ from greenmachine.inputs.errors import InputContractError
 
 SOURCE_ID = "savant-park-factors"
 
-PINNED_SHA256 = "2bbaee9d049008bdd9887f8c68feecc683c4e1803513b12c9797cb9037252ebf"
-PINNED_BYTES = 7196
-EXPECTED_ROWS = 58
-EXPECTED_VENUES = 29
+PINNED_SHA256 = "c077ec837e811a470b47c614eaa1bc173fa5d22d5de241d256dd869cce920d73"
+PINNED_BYTES = 7505
+EXPECTED_ROWS = 60
+EXPECTED_VENUES = 30
 
 FACTOR_COLUMN = "index_hr"
 SAMPLE_COLUMN = "n_pa"
@@ -60,10 +62,10 @@ _SIDES = {"L": Handedness.LEFT, "R": Handedness.RIGHT}
 PROVENANCE = ManualExportProvenance(
     source_url=(
         "https://baseballsavant.mlb.com/leaderboard/statcast-park-factors"
-        "?type=year&year=2026&batSide=L&stat=index_wOBA&condition=All&rolling=3"
+        "?type=year&year=2026&batSide=L&stat=index_wOBA&condition=All&rolling=2"
         "&parks=mlb"
     ),
-    export_date=date(2026, 8, 6),
+    export_date=date(2026, 9, 1),
     row_count=EXPECTED_ROWS,
     sha256=PINNED_SHA256,
 )
@@ -73,8 +75,9 @@ SOURCE = SourceRecord(
     kind=SourceKind.MANUAL_EXPORT,
     description=(
         "Savant per-handedness park factors, index_hr, "
-        "2024-2026 three-season rolling window - exported by hand "
-        "by the Product Owner (D-057 boundary 1), never fetched"
+        "2025-2026 two-season rolling window - pulled once from the "
+        "leaderboard's embedded data payload (D-166, PO), pinned and "
+        "never fetched at runtime"
     ),
     provenance=PROVENANCE,
 )
@@ -85,7 +88,7 @@ def snapshot_path() -> Path:
     return (
         Path(__file__).resolve().parents[3]
         / "data"
-        / "savant_park_factors_2024-2026.csv"  # the §GMF-001 criterion 4 pin
+        / "savant_park_factors_2025-2026.csv"  # the §GMF-001 criterion 4 pin
     )
 
 
@@ -116,7 +119,7 @@ def read_factors(path: Path | None = None) -> dict[int, dict[Handedness, ParkFac
     """Every pinned row as ``ParkFactor`` values, keyed by Savant venue id.
 
     The shape the provenance record declares is enforced here, not assumed:
-    58 rows, 29 venues, both bat sides for every venue, and one uniform
+    60 rows, 30 venues, both bat sides for every venue, and one uniform
     window across the file. A snapshot that half-matched would otherwise
     render as a screen half-full of plausible numbers.
     """
@@ -163,8 +166,8 @@ def read_factors(path: Path | None = None) -> dict[int, dict[Handedness, ParkFac
 
 
 def window_label() -> str:
-    """The window these factors describe, as the export itself labels it."""
-    return "2024-2026"
+    """The window these factors describe, as the snapshot itself labels it."""
+    return "2025-2026"
 
 
 def basis_statement() -> str:
@@ -172,24 +175,26 @@ def basis_statement() -> str:
 
     Every clause is a fact a reader needs to not misread the column: which
     metric, which window, how old, and that 100 is neutral. The provenance
-    record insists any screen rendering these values says it is a three-season
-    rolling window, and this is where that promise is kept.
+    record insists any screen rendering these values says which rolling
+    window they describe, and this is where that promise is kept.
     """
     return (
-        f"Savant home-run park factors ({FACTOR_COLUMN}), {window_label()} three-season "
-        f"rolling window, 100 = neutral. Manual export of "
-        f"{PROVENANCE.export_date.isoformat()}, pinned in the repository and never fetched."
+        f"Savant home-run park factors ({FACTOR_COLUMN}), {window_label()} two-season "
+        f"rolling window, 100 = neutral. Pulled from Baseball Savant on "
+        f"{PROVENANCE.export_date.isoformat()}, pinned in the repository and never "
+        "fetched at runtime."
     )
 
 
 def factor_fields(
     venue: ParkVenue, factors: dict[int, dict[Handedness, ParkFactor]]
 ) -> dict[Handedness, SnapshotField[ParkFactor]]:
-    """One venue's two factor fields — present from the export, or absent.
+    """One venue's two factor fields — present from the snapshot, or absent.
 
-    A venue the export does not cover carries ``NOT_YET_OBSERVED`` naming this
-    source: the export answered, and this venue's three-season history has not
-    accumulated. The absence is the value (§7); nothing is substituted for it.
+    A venue the snapshot does not cover carries ``NOT_YET_OBSERVED`` naming
+    this source: the source answered completely, and this venue is not in
+    the window it published. The absence is the value (§7); nothing is
+    substituted for it.
     """
     if venue.savant_venue_id is None or venue.savant_venue_id not in factors:
         return {

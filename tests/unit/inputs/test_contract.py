@@ -684,13 +684,15 @@ def test_every_park_reference_row_is_a_valid_venue() -> None:
         assert isinstance(venue.venue_type, VenueType)
 
 
-def test_savant_join_ids_are_unique_and_absent_only_for_the_athletics() -> None:
+def test_savant_join_ids_are_unique_and_cover_all_thirty_clubs() -> None:
+    """D-166 (PO): the two-season snapshot covers Sutter Health Park, so all
+    thirty reference venues carry a Savant join id — the gap closed."""
     joined = [v for v in PARK_VENUES if v.savant_venue_id is not None]
-    missing = [v for v in PARK_VENUES if v.savant_venue_id is None]
-    assert len(joined) == 29
+    assert len(joined) == 30
     ids = [v.savant_venue_id for v in joined]
     assert len(ids) == len(set(ids))
-    assert [v.team for v in missing] == ["Athletics"]  # the gap is represented, never filled
+    athletics = next(v for v in PARK_VENUES if v.team == "Athletics")
+    assert athletics.savant_venue_id == 2529
 
 
 def test_relative_humidity_is_a_percent() -> None:

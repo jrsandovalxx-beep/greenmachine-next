@@ -51,8 +51,8 @@ is the product's spine: a screen renders an ``InputSnapshot`` and never fetches
   Every present field names its contributing source by ``source_id``, and so
   does every **source-dependent absence**: ``SOURCE_UNAVAILABLE`` and
   ``NOT_YET_OBSERVED`` must name the source they implicate (only
-  ``NOT_APPLICABLE`` may omit it). A manual-export source carries the full
-  ``ManualExportProvenance`` record, so D-057's manual-export chain is
+  ``NOT_APPLICABLE`` may omit it). A pinned-snapshot source carries the full
+  ``ManualExportProvenance`` record, so the acquisition chain is
   auditable from the snapshot alone.
 - **Source health has one representation.** The source table carries identity
   and provenance only — there is no availability flag, because a source's
@@ -243,7 +243,9 @@ class SnapshotField(Generic[T]):
 
 @dataclass(frozen=True)
 class ManualExportProvenance:
-    """D-053/D-057: the provenance record of a manual export, never a fetch."""
+    """D-053/D-057: the provenance record of a pinned snapshot's single
+    acquisition act — a manual export or the D-166 scripted pull — never a
+    runtime fetch."""
 
     source_url: str
     export_date: date
@@ -852,9 +854,10 @@ class ParkFactor:
 
     ``plate_appearances`` is the sample behind the factor (``n_pa`` in the
     pinned snapshot) — the D-014 evidence axis carried as a field of the
-    value, not decoration, so a screen cannot render a 13,560-PA factor
-    identically to a 31,000-PA one without deciding to. The pinned snapshot
-    is a three-season rolling window (2024-2026); a screen rendering these
+    value, not decoration, so a screen cannot render a 6,995-PA factor
+    identically to a 21,000-PA one without deciding to. The pinned snapshot
+    is a two-season rolling window (2025-2026 — D-166 moved the window so
+    Sutter Health Park, opened 2025, is covered); a screen rendering these
     values states which window they describe.
     """
 

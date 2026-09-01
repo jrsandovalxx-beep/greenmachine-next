@@ -1,90 +1,68 @@
-# Provenance: `savant_park_factors_2024-2026.csv`
+# Provenance: `savant_park_factors_2025-2026.csv`
 
-For **FEATURE_PHASE_PLAN §GMF-001 criterion 4** under **D-053** and **D-057 boundary 1**.
-Committed by GMF-001 alongside the snapshot it describes; authored by Claude Lead and
-delivered inline per D-047, verbatim in substance below.
+Supersedes the 2026-08-06 snapshot (`savant_park_factors_2024-2026.csv`, sha256
+`2bbaee9d…`) per **D-166** (PO, 2026-09-01).
 
-## Acquisition — manual, by the Product Owner
+## Acquisition — scripted pull, with the Product Owner's blessing
 
-**No code path fetched this data.** Baseball Savant's park-factor leaderboard offers no
-CSV export, so the Product Owner opened each bat-side view in his own browser and used
-**File → Save Page As (HTML only)**. Two saved pages, one keystroke each. That is a
-human download inside MLB's one-copy personal-use carve-out, and it is the whole of the
-collection step.
-
-**Claude Lead declined to use browser automation to retrieve this table**, having the
-capability to do so. Driving a browser to extract data from an MLB property is an
-automated script collecting from an MLB Digital Property, which D-057 boundary 1 leaves
-prohibited. The boundary is only worth keeping if it holds when it is inconvenient.
+The superseded snapshot entered by hand (browser Save Page As) because D-057
+boundary 1 then prohibited scripted collection from an MLB Digital Property. The
+live product now reads Baseball Savant programmatically every day under D-128's
+source-of-truth directive, and for this refresh the Product Owner expressed **no
+preference** between another hand export and a scripted pull. The builder pulled
+each bat-side page once — same host, same headers the live app uses — parsed the
+embedded `var data = [...]` payload, and derived the CSV deterministically.
+**No code path fetches this data at runtime**: the pinned file is the only input
+the reader accepts, and the digest gate stands.
 
 | | |
 |---|---|
-| **Source URL (LHB)** | `https://baseballsavant.mlb.com/leaderboard/statcast-park-factors?type=year&year=2026&batSide=L&stat=index_wOBA&condition=All&rolling=3&parks=mlb` |
+| **Source URL (LHB)** | `https://baseballsavant.mlb.com/leaderboard/statcast-park-factors?type=year&year=2026&batSide=L&stat=index_wOBA&condition=All&rolling=2&parks=mlb` |
 | **Source URL (RHB)** | same, `batSide=R` |
-| **Export date** | 2026-08-06 |
-| **Method** | browser Save Page As, HTML only |
+| **Pull date** | 2026-09-01 |
+| **Method** | scripted pull of the leaderboard's embedded `var data` payload (D-166) |
 
-## The three pinned artifacts
-
-Derivation is **deterministic and reproducible** — the CSV is generated from the saved
-pages, not transcribed. Anyone re-running it gets the same bytes or learns immediately
-that something moved.
+## The pinned artifacts
 
 | Artifact | Bytes | sha256 |
 |---|---:|---|
-| saved page, `batSide=L` | 421,517 | `181ebea1e6516f284d7d61ade8bb607406ba6e07d7c7a9987b2e7e1965ae18d3` |
-| saved page, `batSide=R` | 425,396 | `4e791ac144866d009e9af47d03834208bb3fb588014febc99be3e108ca4aa192` |
-| **derived CSV (this file's sibling)** | **7,196** | **`2bbaee9d049008bdd9887f8c68feecc683c4e1803513b12c9797cb9037252ebf`** |
+| page, `batSide=L` | 123,127 | `8c0dde3ed1f8730d81bc9b480f6c2da00b876f8c6122e4aab52b500487fc1b82` |
+| page, `batSide=R` | 123,138 | `4ccf83b6d26031dba89f521f6e0b745b8ced4c2e2f7caf264d1aa6752a5c504d` |
+| **derived CSV (this file's sibling)** | **7,505** | **`c077ec837e811a470b47c614eaa1bc173fa5d22d5de241d256dd869cce920d73`** |
 
-**Derivation rule, stated so it can be re-run:** parse the `var data = [...]` JSON
-payload from each saved page; assert every record's `key_bat_side` equals the page's
-side; concatenate; assert all records carry an identical key set; sort by
-`(key_bat_side, int(venue_id))`; write CSV with columns in sorted key order, `\n` line
-terminator, header row first.
+**Derivation rule, stated so it can be re-run** (unchanged from the superseded
+record): parse the `var data = [...]` JSON payload from each page; assert every
+record's `key_bat_side` equals the page's side; concatenate; assert all records
+carry an identical key set; sort by `(key_bat_side, int(venue_id))`; write CSV
+with columns in sorted key order, `\n` line terminator, header row first.
 
 ## Shape
 
-**58 data rows — 29 venues × 2 handedness.** 27 columns. `index_hr` is the home-run
-park factor the product consumes; `index_woba` is the leaderboard's headline "Park
-Factor"; `n_pa` is the sample size behind each row.
+**60 data rows — 30 venues × 2 handedness.** 27 columns, identical to the
+superseded snapshot's. `index_hr` is the home-run park factor the product
+consumes; `index_woba` is the leaderboard's headline "Park Factor"; `n_pa` is
+the sample size behind each row.
 
-Window fields are internally consistent across all 58 rows: `key_year` = 2026,
-`key_num_years_rolling` = 3, `key_is_year_rolling` = 1, `year_range` = **2024-2026**.
-The snapshot is a **three-season rolling window, not a single season** — a park factor
-built on one season is noisy, and this is the leaderboard's own default. Any screen
-rendering these values must say so.
+Window fields are internally consistent across all 60 rows: `key_year` = 2026,
+`key_num_years_rolling` = 2, `key_is_year_rolling` = 1, `year_range` =
+**2025-2026**. The snapshot is a **two-season rolling window** — D-166 moved off
+the three-season default because it is the only uniform window that can cover
+Sutter Health Park: the Athletics' home opened in 2025, and a window reaching
+back to 2024 can never hold it. Mixing a three-season board for 29 venues with a
+two-season row for one is exactly what the reader's uniform-window check
+refuses, so the whole board moved together. Any screen rendering these values
+must say which window they describe.
 
-## Verification against an independent rendering
+## Findings carried forward, and one that closed
 
-Eight values were checked against the Product Owner's screenshots of the rendered
-tables, captured before the pages were saved and therefore an independent witness to
-the derivation:
-
-```
-L Fenway Park      index_hr    =  82     L Coors Field     index_woba =  114
-L Fenway Park      n_pa        =  23125  L Coors Field     index_hr   =  116
-R Coors Field      index_woba  =  112    R T-Mobile Park   index_woba =   90
-L Tropicana Field  n_pa        =  13560  R Tropicana Field n_pa       =  17944
-```
-
-All eight match, re-verified from the committed bytes at commit time.
-
-## Two findings that belong in the reference data, not in a later ticket
-
-1. **Twenty-nine venues, not thirty — the Athletics have no row.** Both handedness
-   views omit them; the 2022-2024 window held Oakland Coliseum, it aged out, nothing
-   replaced it. **This is a gap to represent, not to fill**, and the reason it
-   carries is ***not yet observed***. The source did not fail: the leaderboard
-   answered completely and returned 29 venues. The Athletics moved to Sutter Health
-   Park in 2025, so a **2024-2026** three-season rolling value has not accumulated
-   the history the filter asks for. A value that a healthy source has not yet
-   produced is *not yet observed*; *source unavailable* asserts a failure that did
-   not happen. Nor is it *not applicable* — a park factor is a meaningful quantity
-   for this venue and will exist once the rolling window clears 2024. The state
-   renders as a defined absence rather than a blank cell, a zero, or a
-   league-average substitute. The reference data carries all thirty clubs with the
-   Athletics' park factor explicitly absent.
-2. **`n_pa` varies enough to matter** — 13,560 (Tropicana Field, LHB) to 31,517 at the
-   top. D-014 keeps evidence confidence beside the value, never fused into it: `n_pa`
-   is carried as a field of the park-factor value in the contract, so GMF-004 cannot
-   render a 13,560-PA factor identically to a 31,000-PA one without deciding to.
+1. **Thirty venues — the Athletics' gap is closed.** The superseded record's
+   finding 1 (twenty-nine venues, the Athletics' factor `NOT_YET_OBSERVED`) was
+   a property of the three-season window, not of the park: on the two-season
+   board Sutter Health Park carries `index_hr` **119 (LHB)** / **122 (RHB)**
+   over 13,794 / 19,510 PA. The absence machinery stays — a venue a future
+   snapshot does not cover is still represented, never filled.
+2. **`n_pa` varies enough to matter** — 6,995 (Tropicana Field, LHB) to 21,365
+   (Daikin Park, RHB). D-014 keeps evidence confidence beside the value, never
+   fused into it: `n_pa` is carried as a field of the park-factor value in the
+   contract, so no screen renders a 6,995-PA factor identically to a 21,365-PA
+   one without deciding to.
