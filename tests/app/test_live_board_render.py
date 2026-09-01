@@ -293,9 +293,20 @@ def test_sluggers_render_as_bubble_rows_with_more_buttons(_staged_app: SlateBoar
     assert 'class="gm-head"' in markup
     buttons = [button for button in tab.button if button.label == "More"]
     assert len(buttons) == 2  # the two A/S batters on the staged board
-    # D-146 (PO): the sort control renders with Grade as the default.
-    sorts = [radio for radio in at.radio if radio.key == "sluggers_sort"]
-    assert sorts and sorts[0].value == "Grade"
+    # D-168 (PO): the radio toggle is dead — every data column's header
+    # is a sort button, Tags and Weather excepted; Grade is the load order.
+    heads = {button.key for button in tab.button if button.key.startswith("sluggers_head_")}
+    assert heads == {
+        "sluggers_head_Batter",
+        "sluggers_head_HR",
+        "sluggers_head_Team",
+        "sluggers_head_Versus",
+        "sluggers_head_Park factor",
+        "sluggers_head_Form Score",
+        "sluggers_head_Grade",
+    }
+    grade_head = next(button for button in tab.button if button.key == "sluggers_head_Grade")
+    assert grade_head.label == "Grade ▼"
     buttons[0].click()
     at.run()
     assert not at.exception, [str(e.value) for e in at.exception]
@@ -355,12 +366,11 @@ def test_main_screen_is_the_shell_plus_the_live_board(_staged_app: SlateBoard) -
     assert not at.selectbox
     assert not at.multiselect
     # D-128 (PO): the only radios on the board are the Matchups tab's
-    # batter-window selector and the Sluggers sort (D-146, PO) — scope and
-    # row-order picks, never a ranking control.
+    # batter-window selectors — scope picks, never a ranking control. The
+    # Sluggers sort is a header tap now (D-168, PO), not a radio.
     assert {radio.key for radio in at.radio} <= {
         "matchups_view_mode",
         "matchups_window_unit",
-        "sluggers_sort",
     }
     markup = "\n".join(element.value for element in at.markdown)
     assert "gm-orb" in markup
@@ -493,12 +503,13 @@ def test_form_score_cell_reads_the_actual_graded_subtotal() -> None:
         assert text.endswith(" / 2")
 
 
-def test_sluggers_sort_highest_first_on_every_choice() -> None:
-    """D-146 (PO): the shortlist loads highest grades at the top and sorts
-    on grade, park factor or form — highest first on every choice. Grade:
-    S before A, the total score breaking ties; Park factor: the
-    batter-side HR factor, an uncovered park last; Form Score: the graded
-    form subtotal."""
+def test_sluggers_sort_loads_highest_first_and_flips() -> None:
+    """D-168 (PO): the shortlist loads highest grades at the top; a header
+    tap sorts by that column — metrics highest-first (the D-146 spirit),
+    text A-to-Z — and the second tap flips the direction. Grade: S before
+    A, the total score breaking ties; Park factor: the batter-side HR
+    factor, an uncovered park last in both directions; Form Score: the
+    graded form subtotal."""
     import dataclasses
 
     import streamlit_app
@@ -538,14 +549,76 @@ def test_sluggers_sort_highest_first_on_every_choice() -> None:
     assert grades(streamlit_app._sorted_slugger_rows(pair, "Grade")) == [Grade.S, Grade.A]
     assert grades(streamlit_app._sorted_slugger_rows(pair, "Park factor")) == [Grade.A, Grade.S]
     assert grades(streamlit_app._sorted_slugger_rows(pair, "Form Score")) == [Grade.A, Grade.S]
-    # An uncovered park sorts last regardless of grade.
+    # The second tap flips the direction.
+    assert grades(streamlit_app._sorted_slugger_rows(pair, "Grade", ascending=True)) == [
+        Grade.A,
+        Grade.S,
+    ]
+    assert grades(streamlit_app._sorted_slugger_rows(pair, "Park factor", ascending=True)) == [
+        Grade.S,
+        Grade.A,
+    ]
+    assert grades(streamlit_app._sorted_slugger_rows(pair, "Form Score", ascending=True)) == [
+        Grade.S,
+        Grade.A,
+    ]
+    # Text columns load A-to-Z and flip to Z-to-A.
+    names = [row.card.full_name for row in pair]
+    assert [
+        row.card.full_name
+        for row in streamlit_app._sorted_slugger_rows(pair, "Batter", ascending=True)
+    ] == sorted(names, key=str.lower)
+    assert [
+        row.card.full_name
+        for row in streamlit_app._sorted_slugger_rows(pair, "Batter", ascending=False)
+    ] == sorted(names, key=str.lower, reverse=True)
+    # An uncovered park sorts last in both directions, regardless of grade.
     uncovered = a_row._replace(factor_value=None)  # type: ignore[attr-defined]
     parked = streamlit_app._sorted_slugger_rows([s_row, uncovered], "Park factor")
     assert parked[-1] is uncovered
+    flipped = streamlit_app._sorted_slugger_rows([s_row, uncovered], "Park factor", ascending=True)
+    assert flipped[-1] is uncovered
     # A missing form subtotal sorts last on the form read.
     assert streamlit_app._sorted_slugger_rows(pair, "Bogus") == streamlit_app._sorted_slugger_rows(
         pair, "Grade"
     )
+
+
+def test_sluggers_header_tap_sorts_and_flips(_staged_app: SlateBoard) -> None:
+    """D-168 (PO): tapping a column header sorts the shortlist by it — a
+    metric highest-first, text A-to-Z — and tapping the active header
+    again flips the direction; the arrow follows the active sort. Tags
+    and Weather carry no sort button."""
+    at = AppTest.from_file(str(_APP_PATH), default_timeout=_TIMEOUT)
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+
+    def head(key: str) -> object:
+        return next(button for button in at.tabs[0].button if button.key == key)
+
+    head("sluggers_head_Park factor").click()
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert at.session_state["sluggers_sort_col"] == "Park factor"
+    assert at.session_state["sluggers_sort_asc"] is False
+    assert head("sluggers_head_Park factor").label == "Park factor ▼"
+
+    head("sluggers_head_Park factor").click()
+    at.run()
+    assert at.session_state["sluggers_sort_asc"] is True
+    assert head("sluggers_head_Park factor").label == "Park factor ▲"
+
+    head("sluggers_head_Batter").click()
+    at.run()
+    assert at.session_state["sluggers_sort_col"] == "Batter"
+    assert at.session_state["sluggers_sort_asc"] is True
+    assert head("sluggers_head_Batter").label == "Batter ▲"
+    # The unsorted columns (D-168, PO) never got buttons.
+    assert not [
+        button
+        for button in at.tabs[0].button
+        if button.key in {"sluggers_head_Tags", "sluggers_head_Weather"}
+    ]
 
 
 def test_money_tag_marks_a_batter_who_homered_with_the_date() -> None:

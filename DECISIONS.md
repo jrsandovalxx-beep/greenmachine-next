@@ -4409,3 +4409,20 @@ as always. The board's four tabs are untouched.
 Full gate green (3466 passed, 1 skipped — a new test drives the header
 button both ways and proves the parks table renders with Sutter covered),
 consistency check clean, all four showcase runners clean.
+
+## D-168 - Sluggers sorts from its column headers; the radio toggle is dead
+
+PO 2026-09-02: "remove toggle for sorting in sluggerspage. I want a sort
+arrow on all data columns found in tables except tags and weather." The
+D-146 radio row above the shortlist is gone. Every data column's header
+— Batter, HR, Team, Versus, Park factor, Form Score, Grade — is now a
+button that sorts the shortlist by that column; the arrow on the active
+header marks the direction and a second tap flips it. Metrics load
+highest-first (the D-146 spirit), text A-to-Z; a missing value sorts
+last in both directions, and grade-total-name breaks every tie. Tags and
+Weather carry no sort — their hoverable definition spans stay. The load
+order is unchanged: highest grades at the top.
+
+Full gate green (3467 passed, 1 skipped — a new AppTest drives the
+header taps and the flip, the unit test gains direction and text-column
+coverage), consistency check clean, all four showcase runners clean.
