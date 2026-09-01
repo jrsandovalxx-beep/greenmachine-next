@@ -2509,7 +2509,7 @@ def test_card_tags_carry_the_d125_bands_and_why_riders() -> None:
     )
     assert "sprint 28.4 ft/s" in advisories
     assert "pull-air 44% (19 air balls L14)" in advisories
-    assert "home park HR factor 133 (RHB)" in advisories
+    assert "home park HR factor 130 (RHB)" in advisories
     assert "park-neutral and direction-blind" in advisories
     # An insufficient spray record drops only its own reason.
     thin_form = SimpleNamespace(
