@@ -4320,3 +4320,30 @@ anchor (a game ten calendar days back still counts inside seven played
 games), the fallback reading exactly played dates 8-14 of 16, and the
 swing-weighted day-board combination excluding a day he didn't play),
 consistency check clean, all four showcase runners clean.
+
+## D-164 - The robbed-HR count anchors to the batter's last 7 played games too
+
+Directive (PO, 2026-08-31): "Change robbed HRS too." — spoken right after
+D-163 re-anchored the form windows to played games, and alongside the
+FanGraphs IAA fallback idea (investigated separately; FanGraphs publishes
+the metric but its bot protection blocks every datacenter probe, so the
+endpoint shape is unverifiable — reported back with a skip recommendation
+and awaiting the PO's call).
+
+The robbed count was the last surface still slicing the event record on a
+trailing calendar window (game_date >= as_of - 7 days). It now reads the
+batter's last 7 PLAYED game dates — literally the same date set as the
+form section's L7 window — so a player's week never slides on off-days
+and the two surfaces can never disagree about what "L7" means. The old
+ROBBED_HR_WINDOW_DAYS constant is renamed RECORD_FLOOR_DAYS: its remaining
+job is the programmer-error guard that the event record spans at least 7
+days, so the basis can never silently degrade to a partial span. Every
+caption and tooltip that said "last 7 days" now says "last 7 games
+played"; the card tag's "(L7)" needed no change because it now matches
+the form section's L7 exactly.
+
+Full gate green (3463 passed, 1 skipped — the rewritten test pins the
+eighth played game date outside the window even when it sits inside 7
+calendar days of the slate, and a new test pins an old 395 ft out still
+counting when he has only five played dates), consistency check clean,
+all four showcase runners clean.

@@ -121,9 +121,13 @@ PITCHING_LOG_LOOKBACK_DAYS = PITCHER_RECENT_WINDOW_DAYS
 # The robbed-HR column (PO 2026-08-24, replacing D-090's +350 ft column):
 # batted balls at or past this projected distance that STAYED IN THE PARK
 # (a ball that left was not robbed of anything), over the batter's last 7
-# days of kept events — homer-shaped contact the HR total hides.
+# PLAYED GAMES — the same date set as the form section's L7 window
+# (D-164, PO) — homer-shaped contact the HR total hides.
 ROBBED_HR_DISTANCE_FLOOR_FT = Decimal("375")
-ROBBED_HR_WINDOW_DAYS = 7
+# The record floor: the event record must always span at least this many
+# days so the robbed count's last-7-played-games basis can never silently
+# degrade to a partial span (D-128, PO).
+RECORD_FLOOR_DAYS = 7
 SEASON_WINDOW_MONTH = 3
 SEASON_WINDOW_DAY = 1
 SEASON_IDS_PER_REQUEST = 90
@@ -1097,15 +1101,17 @@ def _matchup_lines(
     return tuple(lines)
 
 
-def _robbed_hr_count(events: Sequence[PitchEvent], cutoff: str) -> int:
-    """Robbed HRs over the batter's kept events at or after ``cutoff`` —
-    projected 375+ feet and STAYED IN THE PARK (the play's result was not
-    a home run). A raw count, never a rate: one robbed ball a week is a
-    regular's pace, and zero is a real observation, not a cold streak."""
+def _robbed_hr_count(events: Sequence[PitchEvent], window_dates: frozenset[str]) -> int:
+    """Robbed HRs over the batter's kept events on ``window_dates`` — his
+    last 7 played games, the same date set as the form section's L7 window
+    (D-164, PO) — projected 375+ feet and STAYED IN THE PARK (the play's
+    result was not a home run). A raw count, never a rate: one robbed ball
+    a week is a regular's pace, and zero is a real observation, not a cold
+    streak."""
     return sum(
         1
         for event in events
-        if event.game_date >= cutoff
+        if event.game_date in window_dates
         and event.hit_distance is not None
         and event.hit_distance >= ROBBED_HR_DISTANCE_FLOOR_FT
         and event.event != "home_run"
@@ -1817,10 +1823,10 @@ def build_board(
     # Form slices its own last-7/last-14-GAMES windows out of it (D-163,
     # PO); a batter whose seventh game is older than the record gets a
     # partial window — the sample floors name the thinness.
-    if batter_window_days < ROBBED_HR_WINDOW_DAYS:
+    if batter_window_days < RECORD_FLOOR_DAYS:
         raise ValueError(
             f"the batter window ({batter_window_days} days) must at least "
-            f"cover the robbed-HR window ({ROBBED_HR_WINDOW_DAYS} days)"
+            f"cover the record floor ({RECORD_FLOOR_DAYS} days)"
         )
     record_days = max(batter_window_days, PITCHER_RECENT_WINDOW_DAYS)
     window_start = (as_of - timedelta(days=record_days)).date()
@@ -2129,16 +2135,14 @@ def build_board(
                     season_start=season_start,
                     capture=capture,
                 )
-                # The robbed count reads the batter's whole last-7-days
-                # record, not the mix scope — None when the event record
-                # itself failed. D-128 (PO): it rides BOTH grid lines, so
-                # the season view shows it too — always on the L7 basis,
-                # which the surface names.
+                # The robbed count reads the batter's whole event record on
+                # his last 7 played game dates — the same date set as the
+                # form section's L7 window (D-164, PO) — not the mix scope;
+                # None when the event record itself failed. D-128 (PO): it
+                # rides BOTH grid lines, so the season view shows it too —
+                # always on the L7 games basis, which the surface names.
                 robbed_count = (
-                    _robbed_hr_count(
-                        events_by_batter.get(player_id, ()),
-                        window_cutoffs[ROBBED_HR_WINDOW_DAYS],
-                    )
+                    _robbed_hr_count(events_by_batter.get(player_id, ()), short_dates)
                     if form_source_available
                     else None
                 )

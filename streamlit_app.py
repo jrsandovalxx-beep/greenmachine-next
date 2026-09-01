@@ -1637,7 +1637,7 @@ def _card_tag_lists(
     if card.batting_side is not None and throws is not None and card.batting_side != throws:
         boosters.append(f"platoon advantage: bats {card.batting_side} vs {throws}P")
     # Robbed (v2.2, aligned to D-113's column): 375+ ft balls that stayed
-    # in the park over the last 7 days — a raw count, never a rate.
+    # in the park over his last 7 games played — a raw count, never a rate.
     mix = card.mix_line
     if mix is not None and mix.robbed_hr_count:
         boosters.append(f"robbed: {mix.robbed_hr_count} at 375+ ft stayed in the park (L7)")
@@ -2953,7 +2953,7 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "against the starter's hand (+28 wOBA pts LHB vs RHP, +16 RHB vs "
         "LHP long-run — 2025 broke the RHB pattern for the first time in "
         "20+ years, so it stays a contact-quality signal); robbed counts "
-        "375+ ft balls that stayed in the park over the last 7 days. "
+        "375+ ft balls that stayed in the park over his last 7 games played. "
         "Contact-first is a veto: squared-up ≥ 35% of competitive swings "
         "with a sub-70 mph bat speed — a contact profile, not power. "
         "Actual over expected (wOBA-xwOBA ≥ ~.040) is context only — "
@@ -3409,9 +3409,10 @@ _MATCHUPS_HELP: dict[str, str] = {
     ),
     "Robbed HR": (
         "375+ ft balls that stayed in the park — a raw count, never a "
-        "rate. Always the last 7 days, even on the season view (D-128, "
-        "PO): the season sources publish no per-ball distances, so the "
-        "count keeps its event-record basis on both views."
+        "rate. Always his last 7 games played, even on the season view "
+        "(D-128 / D-164, PO): the season sources publish no per-ball "
+        "distances, so the count keeps its event-record basis on both "
+        "views."
     ),
     "Pull Air %": (
         "Savant's season published pulled-air share of ALL batted "
@@ -3668,7 +3669,7 @@ def _grid_line_cells(
             "HR": str(line.home_runs),
             # D-097's counting number, redefined by the PO 2026-08-24:
             # robbed HRs — 375+ ft balls that stayed in the park, last 7
-            # days — a raw count, never a rate.
+            # games played — a raw count, never a rate.
             "Robbed HR": (str(line.robbed_hr_count) if line.robbed_hr_count is not None else "—"),
         }
         styles = {}
@@ -4231,15 +4232,15 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
                             "Columns read the batter's season sources "
                             "(D-110's regression gaps moved to the "
                             "Sluggers tags, D-125) — except Robbed HR: "
-                            "always the last 7 days of his event record, "
-                            "on both views (D-128, PO)."
+                            "always the last 7 games played of his event "
+                            "record, on both views (D-128 / D-164, PO)."
                             if season_view
                             else (
                                 f"Columns read the batter's last {window_days} days "
                                 f"against {hand_text}, filtered to that "
                                 "mix's qualifying pitches (≥14% usage) — "
                                 "except Robbed HR: 375+ ft balls that "
-                                "stayed in the park, last 7 days."
+                                "stayed in the park, last 7 games played."
                                 if qualifying_only
                                 else (
                                     f"Columns read the batter's last {window_days} days "
@@ -4248,7 +4249,7 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
                                     "toggle above restricts to the "
                                     "qualifying mix) — except Robbed HR: "
                                     "375+ ft balls that stayed in the "
-                                    "park, last 7 days."
+                                    "park, last 7 games played."
                                 )
                             )
                         )
