@@ -1823,6 +1823,8 @@ font-size:.78rem;line-height:1.55;white-space:nowrap;cursor:help}
 .gm-grade{background:#427010;color:#eaffcf;border-radius:4px;padding:1px 8px;font-weight:700}
 .gm-dim{color:#7d8f84;font-style:italic}
 .gm-head{font-size:.78rem;color:#9fb3a6;font-weight:600;white-space:nowrap;cursor:help}
+[data-testid="stBaseButton-tertiary"]{font-size:.78rem;color:#9fb3a6;font-weight:600;
+white-space:nowrap;padding:0;min-height:0;line-height:1.55;justify-content:flex-start}
 </style>
 """
 
@@ -1944,18 +1946,34 @@ def _slugger_rows(board: SlateBoard) -> list[_SluggerRow]:
     return rows
 
 
-# D-146 (PO): the shortlist's sort choices — highest at the top on every
-# one. Grade is the default: S before A, the total score breaking ties.
-_SLUGGER_SORTS = ("Grade", "Park factor", "Form Score")
+# D-168 (PO): the shortlist sorts from its column headers — an arrow per
+# data column, Tags and Weather excepted. Grade stays the load order: S
+# before A, the total score breaking ties.
+_SLUGGER_SORTABLE = ("Batter", "HR", "Team", "Versus", "Park factor", "Form Score", "Grade")
+_SLUGGER_TEXT_SORTS = frozenset({"Batter", "Team", "Versus"})
 _SLUGGER_GRADE_RANK = {Grade.S: 0, Grade.A: 1, Grade.B: 2, Grade.C: 3, Grade.D: 4}
 
 
-def _sorted_slugger_rows(rows: list[_SluggerRow], sort: str) -> list[_SluggerRow]:
-    """D-146 (PO): order the shortlist — highest first on every choice.
-    Grade: S before A, then the total score. Park factor: the batter-side
-    HR factor, an uncovered park last. Form Score: the graded form
-    subtotal, a missing one last. Grade-then-name breaks every tie so the
-    order never wobbles between refreshes."""
+def _tap_sluggers_header(name: str) -> None:
+    """D-168 (PO): one tap sorts the shortlist by the column — metrics
+    highest-first, text A-to-Z; a second tap on the active header flips
+    the direction. The callback only sets state; the click's rerun reads
+    it before the rows render."""
+    if st.session_state.get("sluggers_sort_col") == name:
+        st.session_state["sluggers_sort_asc"] = not st.session_state.get("sluggers_sort_asc", False)
+    else:
+        st.session_state["sluggers_sort_col"] = name
+        st.session_state["sluggers_sort_asc"] = name in _SLUGGER_TEXT_SORTS
+
+
+def _sorted_slugger_rows(
+    rows: list[_SluggerRow], sort: str, ascending: bool = False
+) -> list[_SluggerRow]:
+    """D-168 (PO): order the shortlist by one column. Metrics load
+    highest-first (the D-146 spirit), text A-to-Z; ``ascending`` is the
+    second tap's flip. A missing value sorts last in both directions, and
+    grade-total-name breaks every tie so the order never wobbles between
+    refreshes."""
 
     def grade_rank(row: _SluggerRow) -> int:
         return _SLUGGER_GRADE_RANK.get(row.card.result.grade, 9)
@@ -1964,12 +1982,44 @@ def _sorted_slugger_rows(rows: list[_SluggerRow], sort: str) -> list[_SluggerRow
         result = row.card.result
         return result.total_score if isinstance(result, EvaluatedGradeResult) else Decimal(0)
 
+    if sort == "Batter":
+        ordered = sorted(
+            rows, key=lambda row: (row.card.full_name.lower(), grade_rank(row), -total(row))
+        )
+        return ordered if ascending else list(reversed(ordered))
+    if sort == "Team":
+        ordered = sorted(
+            rows,
+            key=lambda row: (row.card.team, grade_rank(row), -total(row), row.card.full_name),
+        )
+        return ordered if ascending else list(reversed(ordered))
+    if sort == "Versus":
+        ordered = sorted(
+            rows,
+            key=lambda row: (row.versus.lower(), grade_rank(row), -total(row), row.card.full_name),
+        )
+        return ordered if ascending else list(reversed(ordered))
+    if sort == "HR":
+        # The money tag: homered batters first either way — the latest date
+        # on the plain tap, the earliest on the flip; never-homered last.
+        return sorted(
+            rows,
+            key=lambda row: (
+                row.money_iso is not None if not ascending else row.money_iso is None,
+                row.money_iso or "",
+                grade_rank(row),
+                -total(row),
+                row.card.full_name,
+            ),
+            reverse=not ascending,
+        )
     if sort == "Park factor":
         return sorted(
             rows,
             key=lambda row: (
                 row.factor_value is None,
-                -(row.factor_value if row.factor_value is not None else Decimal(0)),
+                (row.factor_value if row.factor_value is not None else Decimal(0))
+                * (1 if ascending else -1),
                 grade_rank(row),
                 -total(row),
                 row.card.full_name,
@@ -1980,12 +2030,14 @@ def _sorted_slugger_rows(rows: list[_SluggerRow], sort: str) -> list[_SluggerRow
             rows,
             key=lambda row: (
                 _form_points(row.card.result) is None,
-                -(_form_points(row.card.result) or Decimal(0)),
+                (_form_points(row.card.result) or Decimal(0)) * (1 if ascending else -1),
                 grade_rank(row),
                 -total(row),
                 row.card.full_name,
             ),
         )
+    if sort == "Grade" and ascending:
+        return sorted(rows, key=lambda row: (-grade_rank(row), total(row), row.card.full_name))
     return sorted(rows, key=lambda row: (grade_rank(row), -total(row), row.card.full_name))
 
 
@@ -2991,27 +3043,22 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
         "≥ 8 mph. **Form Score** is his actual graded form subtotal out "
         "of the category max — 2 in v1, and the weights may change in a "
         "future version (D-132, PO; the D-124 placeholder dash is dead). "
-        "Hover any column header for its one-line definition."
+        "Tap a data column's header to sort by it — the arrow marks the "
+        "active sort and a second tap flips the direction; Tags and "
+        "Weather stay unsorted (D-168, PO). Hover any column header for "
+        "its one-line definition."
     )
     rows = _slugger_rows(board)
     if not rows:
         st.info(f"No batter grades A or S on the {board.official_date} slate.")
         return None
-    # D-146 (PO): the shortlist loads highest grades at the top and sorts
-    # on grade, park factor or form — highest first on every choice.
-    sort = st.radio(
-        "Sort by",
-        _SLUGGER_SORTS,
-        key="sluggers_sort",
-        horizontal=True,
-        help=(
-            "D-146 (PO). Grade — the default: S before A, the total score "
-            "breaking ties. Park factor: the batter-side HR factor, an "
-            "uncovered park last. Form Score: the graded form subtotal, a "
-            "missing one last."
-        ),
-    )
-    rows = _sorted_slugger_rows(rows, sort)
+    # D-168 (PO): the radio toggle is dead — sorting lives on the column
+    # headers, one arrow per data column (Tags and Weather excepted). The
+    # state is read before the rows render so a header tap's rerun lands
+    # already sorted; the load order stays highest grades at the top.
+    sort_col = str(st.session_state.get("sluggers_sort_col", "Grade"))
+    sort_asc = bool(st.session_state.get("sluggers_sort_asc", False))
+    rows = _sorted_slugger_rows(rows, sort_col, sort_asc)
     # D-126 (PO): the shortlist as bubble rows, not a data grid — the tag
     # columns became hoverable pills, and a More button per row replaces
     # the row-select box. Header cells carry the same one-line definitions
@@ -3019,8 +3066,24 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
     st.markdown(_SLUGGERS_CSS, unsafe_allow_html=True)
     header = st.columns(_SLUGGER_SPECS)
     for column, name in zip(header, _SLUGGER_HEADERS, strict=True):
-        if name:
-            definition = _SLUGGERS_HELP.get(name, "")
+        if not name:
+            continue
+        definition = _SLUGGERS_HELP.get(name, "")
+        if name in _SLUGGER_SORTABLE:
+            arrow = ""
+            if name == sort_col:
+                arrow = " ▲" if sort_asc else " ▼"
+            column.button(
+                f"{name}{arrow}",
+                key=f"sluggers_head_{name}",
+                type="tertiary",
+                help=definition or None,
+                on_click=_tap_sluggers_header,
+                args=(name,),
+            )
+        else:
+            # Tags and Weather carry no sort (D-168, PO) — the hoverable
+            # definition span stays.
             column.markdown(
                 f'<span class="gm-head" title="{html.escape(definition, quote=True)}">'
                 f"{html.escape(name)}</span>",
