@@ -249,6 +249,7 @@ def _staged_app(monkeypatch: pytest.MonkeyPatch) -> SlateBoard:
 
     import greenmachine.live.pipeline as pipeline
     from greenmachine.inputs import AbsenceReason, SnapshotField, WeatherForecast
+    from greenmachine.live.savant import BaseballSavant
     from greenmachine.weather.nws import SOURCE_ID, NwsWeatherAdapter
 
     board = _graded_board()
@@ -260,6 +261,15 @@ def _staged_app(monkeypatch: pytest.MonkeyPatch) -> SlateBoard:
         lambda self, venue, at=None: SnapshotField[WeatherForecast].absent(
             AbsenceReason.SOURCE_UNAVAILABLE, SOURCE_ID
         ),
+    )
+    # The detail dialog lazily fetches the batter's season pitch events
+    # (D-129); cut that seam at the adapter too — AppTest re-executes the
+    # script, so only a class-method patch on a normally-imported module
+    # reaches it. No events: the dialog reads its named absences.
+    monkeypatch.setattr(
+        BaseballSavant,
+        "fetch_player_pitch_events",
+        lambda self, **kwargs: [],
     )
     st.cache_data.clear()
     return board
@@ -619,6 +629,29 @@ def test_sluggers_header_tap_sorts_and_flips(_staged_app: SlateBoard) -> None:
         for button in at.tabs[0].button
         if button.key in {"sluggers_head_Tags", "sluggers_head_Weather"}
     ]
+
+
+def test_every_more_survives_a_more_tap(_staged_app: SlateBoard) -> None:
+    """D-169 (PO): tapping a More opens the batter detail AND leaves every
+    other More button in place — on the tapped tab and the others. The old
+    click-run guard skipped rendering every More after the tapped one."""
+    at = AppTest.from_file(str(_APP_PATH), default_timeout=_TIMEOUT)
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    before = [button for button in at.button if button.key.startswith("more_")]
+    assert before, "the board's More buttons rendered"
+    # Tap a Matchups-tab More (its key carries the game pk and side, so it
+    # splits into five parts against the Sluggers key's three).
+    matchups_more = [button for button in before if len(button.key.split("_")) == 5]
+    assert matchups_more, "the matchups grids rendered their More buttons"
+    matchups_more[0].click()
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    after = {button.key for button in at.button if button.key.startswith("more_")}
+    assert after == {button.key for button in before}
+    # ... and the detail did open.
+    opened = "\n".join(element.value for element in at.markdown)
+    assert "Batter detail" in opened or "recent form" in opened.lower()
 
 
 def test_money_tag_marks_a_batter_who_homered_with_the_date() -> None:

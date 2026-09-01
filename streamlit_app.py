@@ -176,6 +176,7 @@ from greenmachine.config.loader import load_config
 from greenmachine.config.schema import GreenMachineConfig
 from greenmachine.domain.enums import Category, Grade, SampleStatus
 from greenmachine.domain.grade_result import EvaluatedGradeResult, GradeResult
+from greenmachine.domain.values import PlayerId
 from greenmachine.fixtures import FixtureWeatherAdapter, grid_demo_snapshot, parks_demo_snapshot
 from greenmachine.grid import (
     DENSITY_ROWS,
@@ -2614,6 +2615,22 @@ def _game_of(board: SlateBoard, card: BatterCard) -> GameCard | None:
     return None
 
 
+def _queue_batter_detail(player_id: PlayerId) -> None:
+    """D-169 (PO): a More tap records its batter in session state. The
+    callback runs before the rerun, so every row's More renders on every
+    run — never skipped once a sibling is tapped."""
+    st.session_state["detail_player_id"] = player_id
+
+
+def _card_of(board: SlateBoard, player_id: PlayerId) -> BatterCard | None:
+    """The slate's card for one batter id — the detail dialog's subject."""
+    for game in board.games:
+        for card in (*game.away_batters, *game.home_batters):
+            if card.player_id == player_id:
+                return card
+    return None
+
+
 def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
     """The batter detail body (D-084): the 2D park with its live wind in
     field words (D-129), the expected starter's card and bubble tags
@@ -2965,7 +2982,7 @@ def _batter_detail_dialog(card: BatterCard, game: GameCard | None) -> None:
     _render_batter_detail(card, game)
 
 
-def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCard | None:
+def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> None:
     st.caption(
         "The shortlist (D-084): only batters graded A or S under the provisional "
         "v1 model (D-071). **Tags** are bubbles (D-126, PO — the For-HR and "
@@ -3089,7 +3106,6 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
                 f"{html.escape(name)}</span>",
                 unsafe_allow_html=True,
             )
-    selected: BatterCard | None = None
     form_max = _form_max_points(config)
     for row in rows:
         cells = st.columns(_SLUGGER_SPECS, vertical_alignment="center")
@@ -3127,11 +3143,16 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> BatterCar
             f'<span class="gm-grade">{row.card.result.grade.value}</span>',
             unsafe_allow_html=True,
         )
-        if cells[9].button("More", key=f"more_{board.official_date}_{row.card.player_id}"):
-            selected = row.card
-    if selected is None:
-        st.caption("More opens the batter's detail.")
-    return selected
+        # D-169 (PO): the tap is queued by callback — every row's More
+        # renders on every run, so opening one detail never vanishes the
+        # others.
+        cells[9].button(
+            "More",
+            key=f"more_{board.official_date}_{row.card.player_id}",
+            on_click=_queue_batter_detail,
+            args=(row.card.player_id,),
+        )
+    st.caption("More opens the batter's detail.")
 
 
 # Absence texts that appear in otherwise-plain cells on the Arms and Backtest
@@ -4103,7 +4124,7 @@ def _grid_row_html(columns: list[str], texts: dict[str, str], styles: dict[str, 
     return f'<table class="gm-grid">{_grid_colgroup(columns)}<tr>{cells}</tr></table>'
 
 
-def _render_matchups(board: SlateBoard) -> BatterCard | None:
+def _render_matchups(board: SlateBoard) -> None:
     window_days = _matchups_window_days()
     season_view = st.session_state.get("matchups_view_mode") != _MATCHUPS_RECENT_LABEL
     st.markdown(_MATCHUPS_GRID_CSS, unsafe_allow_html=True)
@@ -4219,7 +4240,6 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
                 else "."
             )
         )
-    selected: BatterCard | None = None
     for game in board.games:
         pitchers = " vs ".join(
             card.full_name if card else "TBD" for card in (game.away_pitcher, game.home_pitcher)
@@ -4366,15 +4386,19 @@ def _render_matchups(board: SlateBoard) -> BatterCard | None:
                         cells[0].markdown(
                             _grid_row_html(columns, texts, styles), unsafe_allow_html=True
                         )
-                        if selected is None and cells[1].button(
+                        # D-169 (PO): the tap is queued by callback — the
+                        # old ``selected is None`` guard skipped rendering
+                        # every More after the tapped one on the click run,
+                        # which is why the board lost its More buttons.
+                        cells[1].button(
                             "More",
                             key=(
                                 f"more_{board.official_date}_{game.game_pk}_"
                                 f"{label.lower()}_{card.player_id}"
                             ),
-                        ):
-                            selected = card
-    return selected
+                            on_click=_queue_batter_detail,
+                            args=(card.player_id,),
+                        )
 
 
 # v2.2 ratified temperature bands (2026-08-23), mirrored from the weather
@@ -4574,7 +4598,7 @@ def _render_conditions(board: SlateBoard) -> None:
             st.markdown(f"- {line}")
 
 
-def _render_tab(label: str, render: Callable[[], BatterCard | None]) -> BatterCard | None:
+def _render_tab(label: str, render: Callable[[], None]) -> None:
     """One tab's failure degrades to a named warning, never a blanked page.
 
     An exception escaping a tab renderer ends the whole Streamlit script run —
@@ -4582,17 +4606,15 @@ def _render_tab(label: str, render: Callable[[], BatterCard | None]) -> BatterCa
     deployed app when a NaN cell reached the highlight mapper (pandas stores a
     missing numeric as NaN, and ``Decimal('NaN') >= edge`` raises
     ``decimal.InvalidOperation``). Each view now stands or falls on its own
-    (D-075). The renderer's return — the batter selected on its grid, if any —
-    propagates so the board can open the one detail dialog per run.
+    (D-075).
     """
     try:
-        return render()
+        render()
     except Exception as exc:
         st.warning(
             f"The {label} view could not be rendered "
             f"({type(exc).__name__}). The remaining views are unaffected."
         )
-        return None
 
 
 def _open_batter_detail(card: BatterCard, game: GameCard | None) -> None:
@@ -4817,7 +4839,6 @@ def render_live_board() -> None:
         "on request (D-136/D-139)."
     )
     sluggers, arms, matchups, conditions = st.tabs(["Sluggers", "Arms", "Matchups", "Conditions"])
-    selected: BatterCard | None = None
     for label, container, render in (
         ("Sluggers", sluggers, lambda: _render_sluggers(board, production_config())),
         ("Arms", arms, lambda: _render_arms(board)),
@@ -4825,14 +4846,16 @@ def render_live_board() -> None:
         ("Conditions", conditions, lambda: _render_conditions(board)),
     ):
         with container:
-            choice = _render_tab(label, render)
-        if selected is None:
-            selected = choice
-    # One dialog per script run, opened after the tabs: Streamlit allows a
-    # single dialog call per run, and the grids' epoch keys guarantee at most
-    # one selection survives a dismiss.
-    if selected is not None:
-        _open_batter_detail(selected, _game_of(board, selected))
+            _render_tab(label, render)
+    # D-169 (PO): a More tap queues its batter in session state by
+    # callback, so every More on every tab renders on every run. The queue
+    # is popped once, after the tabs: Streamlit allows a single dialog
+    # call per run.
+    detail_id = st.session_state.pop("detail_player_id", None)
+    if detail_id is not None:
+        detail_card = _card_of(board, detail_id)
+        if detail_card is not None:
+            _open_batter_detail(detail_card, _game_of(board, detail_card))
     weather_failures = LIVE_WEATHER_DIAGNOSTICS.get(slate_date.isoformat(), [])
     if weather_failures:
         joined = "; ".join(weather_failures)
