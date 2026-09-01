@@ -2369,11 +2369,11 @@ def test_card_tags_carry_the_d125_bands_and_why_riders() -> None:
     # The band text rides the sample: 88 PA reads thin.
     _, boosters, _ = streamlit_app._card_tags(batter(season_gaps=gaps("-0.012", 88)), None)
     assert "(season, 88 PA · thin)" in boosters
-    # A suppressive home park (Oracle, LHB factor 73) attaches the rider.
+    # A suppressive home park (Oracle, LHB factor 77) attaches the rider.
     _, boosters, _ = streamlit_app._card_tags(
         batter(season_gaps=gaps("-0.012"), team="San Francisco Giants"), None
     )
-    assert "home park HR factor 73 (LHB) can hold the gap open" in boosters
+    assert "home park HR factor 77 (LHB) can hold the gap open" in boosters
     # A neutral home park or an unresolved side stays rider-free.
     _, boosters, _ = streamlit_app._card_tags(
         batter(season_gaps=gaps("-0.012"), team="New York Mets"), None
@@ -2403,7 +2403,7 @@ def test_card_tags_carry_the_d125_bands_and_why_riders() -> None:
     )
     assert "sprint 28.4 ft/s" in advisories
     assert "pull-air 44% (19 air balls L14)" in advisories
-    assert "home park HR factor 132 (RHB)" in advisories
+    assert "home park HR factor 133 (RHB)" in advisories
     assert "park-neutral and direction-blind" in advisories
     # An insufficient spray record drops only its own reason.
     thin_form = SimpleNamespace(

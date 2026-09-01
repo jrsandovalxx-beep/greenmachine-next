@@ -77,10 +77,11 @@ def test_precision_is_bounded_at_the_stated_three_places() -> None:
             assert -value.as_tuple().exponent <= MAX_DECIMAL_PLACES, venue.venue_id
 
 
-def test_the_venue_the_savant_export_skips_is_still_addressable() -> None:
-    """The Athletics have no park-factor row (provenance finding 1) and that gap
-    is represented, not filled — but they still play somewhere, and the weather
-    seam must be able to ask about it."""
-    athletics = next(venue for venue in PARK_VENUES if venue.savant_venue_id is None)
+def test_sutter_health_park_is_addressable_and_joined() -> None:
+    """The Athletics' venue always had to be addressable for the weather seam;
+    since D-166 it also carries its Savant join id (2529) like every other
+    club."""
+    athletics = next(venue for venue in PARK_VENUES if venue.team == "Athletics")
     assert athletics.venue_id == "sutter-health-park"
+    assert athletics.savant_venue_id == 2529
     assert MIN_LATITUDE <= athletics.latitude <= MAX_LATITUDE

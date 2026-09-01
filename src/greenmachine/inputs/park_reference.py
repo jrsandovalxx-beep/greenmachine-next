@@ -49,11 +49,10 @@ the join column to the pinned snapshot: its values are copied from the
 committed export's own rows — the file and its sha256 digest are pinned by
 data/SAVANT_PARK_FACTORS_PROVENANCE.md and by the snapshot test — never
 from memory: the original authoring deliberately declined to assert MLBAM
-ids from recall, and the join now binds against data. The Athletics carry
-``None``: the snapshot has no row for their venue (provenance finding 1 —
-the reason is *not yet observed*: the 2024-2026 rolling window has not
-accumulated Sutter Health Park history), and the gap is represented, never
-filled.
+ids from recall, and the join now binds against data. The Athletics carried
+``None`` until D-166 moved the snapshot to the 2025-2026 two-season window
+— the only uniform window that can cover Sutter Health Park (opened 2025);
+their venue now joins on Savant id 2529 like every other club.
 """
 
 from __future__ import annotations
@@ -81,7 +80,7 @@ PARK_VENUES: tuple[ParkVenue, ...] = (
         "Sutter Health Park",
         "Athletics",
         _OPEN,
-        savant_venue_id=None,
+        savant_venue_id=2529,
         latitude=Decimal("38.580"),
         longitude=Decimal("-121.513"),
     ),

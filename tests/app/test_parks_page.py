@@ -120,11 +120,11 @@ def test_the_three_roof_renderings_all_appear_on_the_page() -> None:
 def test_the_page_states_the_window_and_the_export_date() -> None:
     """The provenance record's standing requirement: a screen rendering these
     factors says which rolling window they describe — and this page also says
-    how old the export is, so it cannot imply fresher data than it holds."""
+    how old the snapshot is, so it cannot imply fresher data than it holds."""
     captions = " ".join(element.value for element in _run_app().caption)
-    assert "2024-2026" in captions
+    assert "2025-2026" in captions
     assert "rolling" in captions
-    assert "2026-08-06" in captions
+    assert "2026-09-01" in captions
 
 
 def test_the_page_names_the_fixture_binding_and_where_a_live_source_arrives() -> None:
@@ -133,13 +133,21 @@ def test_the_page_names_the_fixture_binding_and_where_a_live_source_arrives() ->
     assert "GMF-005" in captions
 
 
-def test_absent_factors_are_stated_in_words_somewhere_on_the_page() -> None:
-    """The authorized additive remedy: the Athletics' gap is readable, not left
-    to a cell the component renders as its own null."""
+def test_every_venue_shows_a_real_factor_since_d166() -> None:
+    """D-166 (PO): the two-season window covers Sutter Health Park, so the
+    absent-factors block is gone and the Athletics' venue reads the source's
+    own numbers — 119 (LHB) / 122 (RHB)."""
     at = _run_app()
     markdown = " ".join(element.value for element in at.markdown)
-    assert "Sutter Health Park" in markdown
-    assert "not yet observed" in markdown
+    # The factor-gap block is gone. (A blanket "not yet observed" check
+    # would misfire on the forecast column's fixture absences, which share
+    # the absence words but are not park factors.)
+    assert "Absent park factors" not in markdown
+    frame = _parks_element(at).value
+    sutter = frame[frame[VENUE_COLUMN] == "Sutter Health Park"]
+    assert len(sutter) == 1
+    assert float(sutter.iloc[0][LHB_FACTOR_COLUMN]) == 119.0
+    assert float(sutter.iloc[0][RHB_FACTOR_COLUMN]) == 122.0
 
 
 # --- §GMF-005: the binding, and the captions that must stay true ------------

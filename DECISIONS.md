@@ -4347,3 +4347,48 @@ eighth played game date outside the window even when it sits inside 7
 calendar days of the slate, and a new test pins an old 395 ft out still
 counting when he has only five played dates), consistency check clean,
 all four showcase runners clean.
+
+## D-165 - No FanGraphs fallback for the IAA read: the endpoint is unverifiable
+
+Directive (PO, 2026-08-31): "If IAA% fails through there it can use
+Fangraphs" — investigated the same day, answered 2026-09-01: "Skip
+fangraphs then."
+
+The investigation's finding: FanGraphs does publish Ideal Attack Angle on
+its leaderboards (added in 2026), so the fallback idea was sound — but the
+whole site sits behind Cloudflare bot protection that blocked every probe
+(browser UA included), so the endpoint's shape (field names, player ids,
+per-day date support) could not be verified. Wiring a parser blind against
+an unseen payload would be invented code; the recommendation was to skip,
+and the PO ratified it. The IAA read keeps its single source (Savant's
+bat-tracking board); a Savant outage is a named absence on the surface,
+not a silent fallthrough to a second source nobody can verify.
+
+## D-166 - Park factors move to the 2025-2026 two-season window, closing the Sutter Health Park gap
+
+Found while continuing general improvements: Savant now publishes Sutter
+Health Park on its park-factor leaderboard — but only on windows that do
+not reach back to 2024 (the park opened in 2025). The pinned snapshot sat
+on the 2024-2026 three-season default, so every Athletics home game read
+"park factor not covered" on a home-run research dashboard whose most
+homer-friendly venue this year is Sutter (index_hr 119 LHB / 122 RHB).
+
+The whole board moved to the 2025-2026 two-season rolling window. Mixing
+windows — three-season rows for 29 venues, a two-season row for one — is
+exactly what the reader's uniform-window check refuses, so the window
+moved for all thirty venues together and every park's factor shifted
+slightly (Oracle LHB 73 to 77, Dodger Stadium RHB 132 to 133, and so on).
+The snapshot's acquisition moved with it: the D-057 hand export was a
+boundary the feature phase kept, the live product has read Savant
+programmatically every day since D-128, and asked which way to obtain the
+refresh the PO expressed no preference — so the builder pulled each
+bat-side page once from the leaderboard's embedded data payload and
+derived the CSV by the same deterministic rule the provenance record has
+always documented. The runtime posture is unchanged: no code path fetches
+park factors at runtime; the pinned, digest-verified file is the only
+input. The Athletics' reference venue now joins on Savant id 2529, which
+lights up tonight-venue factors, home-park x-gap riders, venue timezones,
+and wind orientation for their games through the existing joins.
+
+Full gate green (3465 passed, 1 skipped), consistency check clean, all
+four showcase runners clean.

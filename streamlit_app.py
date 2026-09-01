@@ -4783,7 +4783,7 @@ def render_parks_screen() -> None:
     """The §GMF-004 parks screen: thirty venues, factors per handedness.
 
     **Two provenances, stated apart.** The factor columns are the pinned Savant
-    export — real values, digest-verified on read, with the manual export date
+    snapshot — real values, digest-verified on read, with the acquisition date
     on screen so the page can never imply fresher data than it holds. The roof
     and forecast columns are fixture-bound: the weather seam exists as one
     adapter interface (criterion 3) and §GMF-005 is where a live source binds
@@ -4801,7 +4801,7 @@ def render_parks_screen() -> None:
     st.subheader("Parks")
     st.caption(
         f"{basis_statement()} A factor shows its plate-appearance sample beside "
-        "it — the pinned export spans 13,560 to 31,517 PA, so two factors are "
+        "it — the pinned snapshot spans 6,995 to 21,365 PA, so two factors are "
         "not equally well evidenced (D-014). Initial order is neutral — the "
         "venue's own name — and every ordering is yours to apply in the headers."
     )
