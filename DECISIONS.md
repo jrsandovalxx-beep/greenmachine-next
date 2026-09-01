@@ -4445,3 +4445,21 @@ clean run after the tap.
 Full gate green (3468 passed, 1 skipped — the new test taps a Matchups
 More and asserts every More key on the board survives), consistency
 check clean, all four showcase runners clean.
+
+## D-170 - The parks view leaves the product completely
+
+PO 2026-09-02: "REMOVE PARKS TAB COMPLETELY, THOSE DETAILS ARE IN
+CONDITIONS TAB." The D-167 wiring and everything beneath it is gone: the
+top-right Parks button and its view dispatch, the composition root's
+render_parks_screen with its parks-only helpers and imports, the
+greenmachine.parks view package, and the screen's tests and showcase
+runner. The header is back to D-095's single Backtest button beside the
+glossary. What stays is not the screen: the pinned Savant park-factor
+snapshot and its readers (the board, the Conditions tab and the home-park
+riders all grade on them), and the parks_demo fixture, which the weather
+seam's tests build snapshots from — both are data and test scaffolding,
+never the removed surface.
+
+Full gate green (3407 passed, 1 skipped — the screen's page, unit and
+swap tests left with it), consistency check clean, the three remaining
+showcase runners clean.

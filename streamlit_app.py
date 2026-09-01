@@ -1,25 +1,14 @@
-"""GreenMachine composition root — shell, batter grid, metrics screen, parks.
+"""GreenMachine composition root — shell, batter grid, metrics screen.
 
 Through GMR-004 this page was a shell with no product screens; GMF-002 added
 the first visible product surface (FEATURE_PHASE_PLAN §GMF-002), a batter grid
-rendering an ``InputSnapshot`` fixture, §GMF-003 added the metrics screen —
+rendering an ``InputSnapshot`` fixture, and §GMF-003 added the metrics screen —
 pitch types against seven metrics, each over its own named denominator — plus
-the selection-driven detail panel D-058 established, and §GMF-004 adds the
-parks screen: thirty venues with park factors per handedness beside venue
-type, the weather seam bound to a fixture, and D-055's roof states each
-rendering as its own. The page still renders the shell's deployment fields —
+the selection-driven detail panel D-058 established. (§GMF-004's parks screen
+left the product at the PO's word — D-170: those details read on the live
+board's Conditions tab.) The page still renders the shell's deployment fields —
 environment, version, commit — because the staging deployment is verified end
 to end through them.
-
-**The parks screen carries three provenances and says so.** Its factor columns
-render the pinned Savant manual export with its export date. Its forecast column
-is **live from api.weather.gov** in a deployed environment and fixture-bound
-locally — §GMF-005 bound the live adapter behind the §GMF-004 seam, and the
-discriminator is the environment, so a local render never becomes a network
-call. Its roof column stays **fixture-bound everywhere**: §GMF-005 gave weather
-a source and gave roof none, and a reader who saw weather go live would
-otherwise reasonably assume roof went with it. Real and fixture data share a
-table here, which is exactly why none of it is left to be inferred.
 
 **The live path exists in one place.** ``greenmachine.weather.transport`` is the
 only module in ``src`` that can open a connection, and every hop it makes — the
@@ -177,7 +166,7 @@ from greenmachine.config.schema import GreenMachineConfig
 from greenmachine.domain.enums import Category, Grade, SampleStatus
 from greenmachine.domain.grade_result import EvaluatedGradeResult, GradeResult
 from greenmachine.domain.values import PlayerId
-from greenmachine.fixtures import FixtureWeatherAdapter, grid_demo_snapshot, parks_demo_snapshot
+from greenmachine.fixtures import FixtureWeatherAdapter, grid_demo_snapshot
 from greenmachine.grid import (
     DENSITY_ROWS,
     METRIC_COLUMNS,
@@ -196,7 +185,7 @@ from greenmachine.grid import (
 from greenmachine.inputs import InputSnapshot, WeatherForecast, Window
 from greenmachine.inputs.contract import Handedness, ParkFactor, ParkVenue, VenueType
 from greenmachine.inputs.park_reference import PARK_VENUES
-from greenmachine.inputs.savant_park_factors import basis_statement, read_factors
+from greenmachine.inputs.savant_park_factors import read_factors
 from greenmachine.inputs.wind_receptiveness import WindReceptiveness, read_receptiveness
 from greenmachine.live.backtest import (
     BacktestRow,
@@ -226,17 +215,6 @@ from greenmachine.live.pipeline import (
 from greenmachine.live.savant import BaseballSavant, PitchEvent
 from greenmachine.live.transport import UrllibTransport as MlbTransport
 from greenmachine.live.wind import resolved_wind_mph, spray_field_bearing, wind_field_words
-from greenmachine.parks import ALL_COLUMNS as PARK_COLUMNS
-from greenmachine.parks import FACTOR_COLUMNS as PARK_FACTOR_COLUMNS
-from greenmachine.parks import (
-    VENUE_COLUMN,
-    factor_absence_notes,
-    forecast_suppression_notes,
-    unavailable_forecast_notes,
-)
-from greenmachine.parks import (
-    screen_frames as park_frames,
-)
 from greenmachine.shell import (
     BLOT_CSS,
     BLOT_HTML,
@@ -416,24 +394,6 @@ def weather_binding() -> tuple[object, bool]:
         return FixtureWeatherAdapter(), False
     contact = os.environ.get(CONTACT_ENV_VAR, "").strip() or DEFAULT_CONTACT
     return live_weather_adapter(contact), True
-
-
-def retrieval_statement(snapshot: InputSnapshot) -> str:
-    """When the forecasts on screen were obtained from their source.
-
-    A freshness bound stated only in code says nothing to the reader it exists
-    for. Because answers are cached, two rows can carry different ages, so the
-    span is reported rather than a single reassuring number.
-    """
-    obtained = sorted(
-        park.forecast.value.obtained_at for park in snapshot.parks if park.forecast.value
-    )
-    if not obtained:
-        return "No forecast on this page carries a retrieval time: none was obtained."
-    first, last = obtained[0], obtained[-1]
-    if first == last:
-        return f"Forecasts retrieved {first.isoformat()}."
-    return f"Forecasts retrieved between {first.isoformat()} and {last.isoformat()}."
 
 
 def render_grid() -> None:
@@ -4865,109 +4825,6 @@ def render_live_board() -> None:
         )
 
 
-def render_parks_screen() -> None:
-    """The §GMF-004 parks screen: thirty venues, factors per handedness.
-
-    **Two provenances, stated apart.** The factor columns are the pinned Savant
-    snapshot — real values, digest-verified on read, with the acquisition date
-    on screen so the page can never imply fresher data than it holds. The roof
-    and forecast columns are fixture-bound: the weather seam exists as one
-    adapter interface (criterion 3) and §GMF-005 is where a live source binds
-    behind it. Mixing the two silently would be the most expensive kind of
-    correct, so the captions name which is which.
-
-    No ranking and nothing pre-selected: rows open in the venue's own name
-    order, and sorting by a factor is the user's click in the header
-    (D-015/D-017). The ticket's name invites a target list; the product does
-    not compose one.
-    """
-    adapter, live = weather_binding()
-    snapshot = parks_demo_snapshot(adapter)
-    screen = park_frames(snapshot)
-    st.subheader("Parks")
-    st.caption(
-        f"{basis_statement()} A factor shows its plate-appearance sample beside "
-        "it — the pinned snapshot spans 6,995 to 21,365 PA, so two factors are "
-        "not equally well evidenced (D-014). Initial order is neutral — the "
-        "venue's own name — and every ordering is yours to apply in the headers."
-    )
-    environment = resolve_environment()
-    if live:
-        st.caption(
-            f"**Three provenances on this table, and they are not the same.** Park "
-            f"factors are the real pinned Savant export. Forecasts are **live from "
-            f"api.weather.gov** in this `{environment}` environment. Roof state is "
-            "still **fixture-bound** (OQ-4 values): §GMF-005 made weather live and "
-            "gave roof no source, so a roof reading here is a validation artifact "
-            "and not a measurement. "
-            f"{retrieval_statement(snapshot)} "
-            f"{getattr(adapter, 'freshness_statement', lambda: '')()}"
-        )
-    else:
-        st.caption(
-            "**Roof state and forecast are both fixture-bound** in this local "
-            "environment: the weather seam is one adapter interface (§GMF-004), "
-            "and the live NWS adapter (§GMF-005) binds only in a deployed "
-            "environment, so a local render never becomes a network call. "
-            "Their values are deliberately non-baseball (OQ-4). Park factors "
-            "above are the real pinned export; conditions here are not. "
-            f"{retrieval_statement(snapshot)}"
-        )
-    chosen = st.multiselect(
-        "Columns",
-        options=list(PARK_COLUMNS),
-        default=list(PARK_COLUMNS),
-        key="parks_columns",
-        help="The venue column always shows, so a selection stays readable.",
-    )
-    st.dataframe(
-        graded_styler(screen.data, screen.texts, screen.styles, PARK_FACTOR_COLUMNS),
-        column_order=visible_columns(tuple(chosen), VENUE_COLUMN, PARK_COLUMNS),
-        height=frame_height("Roomy", len(screen.data)),
-        hide_index=True,
-        key="parks",
-    )
-
-    for note in forecast_suppression_notes(snapshot):
-        st.markdown(f"- {note}")
-    unavailable = unavailable_forecast_notes(snapshot)
-    if unavailable:
-        st.markdown("**Forecast applies but the adapter had no value**")
-        for note in unavailable:
-            st.markdown(f"- {note}")
-        st.caption(
-            "The roof does not suppress these; the source did not supply them. "
-            "That is a fact about the adapter, not about the ballpark."
-        )
-
-    reasons = getattr(adapter, "diagnostics", dict)()
-    if reasons:
-        st.markdown("**Why a forecast could not be shown, per venue**")
-        by_name = {park.venue.venue_id: park.venue.name for park in snapshot.parks}
-        for venue_id, reason in sorted(reasons.items()):
-            st.markdown(f"- {by_name.get(venue_id, venue_id)} — {reason}")
-        st.caption(
-            "The contract records one reason — source unavailable — for a request "
-            "that timed out and for a venue the source does not cover. Those read "
-            "the same in the data and mean very different things to a person, so "
-            "the distinction is stated here rather than by adding a fourth absence "
-            "state to a contract that does not need one."
-        )
-
-    missing = factor_absence_notes(snapshot)
-    if missing:
-        st.markdown("**Absent park factors, in words**")
-        for note in missing:
-            st.markdown(f"- {note}")
-        st.caption(
-            "The component renders a null-data cell as its own `None` and drops "
-            "the display value carried for it, so an absent factor's reason is "
-            "stated here rather than left to a cell's background colour. The "
-            "export answered completely; these venues have no row in it yet, "
-            "and nothing is substituted for the gap."
-        )
-
-
 # --------------------------------------------------------------------------
 # D-095: the backtest view — past slates regraded vs. their outcomes
 # --------------------------------------------------------------------------
@@ -5234,9 +5091,7 @@ def main() -> None:
         )
     # D-095: the backtest is a separate view behind a top-right button, not a
     # tab on the dial — the dial is for reading a slate, this is for auditing
-    # the grades. D-167: the parks reference screen joins the same mechanism —
-    # thirty venues with their factors, roofs and forecasts are reference
-    # data, not a slate read.
+    # the grades.
     with action:
         st.markdown('<div style="height: 3.2rem"></div>', unsafe_allow_html=True)
         # st.rerun after the swap: the button itself is drawn from the view
@@ -5249,19 +5104,9 @@ def main() -> None:
                     st.session_state["view"] = "board"
                     st.rerun()
             else:
-                backtest_button, parks_button = st.columns(2)
-                with backtest_button:
-                    if st.button("Backtest", key="view_backtest"):
-                        st.session_state["view"] = "backtest"
-                        st.rerun()
-                with parks_button:
-                    if st.button(
-                        "Parks",
-                        key="view_parks",
-                        help="All thirty parks — HR factors, roof, forecast",
-                    ):
-                        st.session_state["view"] = "parks"
-                        st.rerun()
+                if st.button("Backtest", key="view_backtest"):
+                    st.session_state["view"] = "backtest"
+                    st.rerun()
         # D-117: the glossary sits beside the view button on both views — the
         # "?" opens the plain-language metric glossary in a dialog.
         with glossary_button:
@@ -5274,8 +5119,6 @@ def main() -> None:
     view = st.session_state.get("view")
     if view == "backtest":
         _render_backtest()
-    elif view == "parks":
-        render_parks_screen()
     else:
         render_live_board()
 
