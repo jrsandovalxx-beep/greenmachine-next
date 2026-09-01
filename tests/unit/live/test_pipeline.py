@@ -1431,12 +1431,12 @@ def test_the_batter_window_parameter_rewindows_the_grid_and_reaches() -> None:
     assert min(fetched) == date(2026, 5, 22)  # the pitcher reach still governs
 
 
-def test_the_batter_window_cannot_undercut_the_robbed_basis() -> None:
-    """D-128: the robbed count reads window_cutoffs[7], so a batter window
-    under seven days is a programmer error named loudly, never a KeyError."""
+def test_the_batter_window_cannot_undercut_the_record_floor() -> None:
+    """D-128/D-164: a batter window under the 7-day record floor is a
+    programmer error named loudly, never a partial robbed basis."""
     import pytest
 
-    with pytest.raises(ValueError, match="batter window"):
+    with pytest.raises(ValueError, match="record floor"):
         build_board(
             api=_FakeApi(),  # type: ignore[arg-type]
             savant=_FakeSavant(),  # type: ignore[arg-type]
@@ -1586,8 +1586,8 @@ def test_mix_falls_back_to_last_season_when_no_current_record() -> None:
 def test_robbed_hr_counts_375_plus_balls_that_stayed_in_the_park_over_l7() -> None:
     """PO 2026-08-24 (replacing D-090's +350 ft column): the robbed-HR
     count tallies projected-375+ ft balls that did not leave the park —
-    a home run was robbed of nothing — over the last 7 days of kept
-    events, a raw count and never a rate."""
+    a home run was robbed of nothing — over his last 7 played games
+    (D-164, PO), a raw count and never a rate."""
     base = {
         "pitch_type": "FF",
         "launch_speed": Decimal("100"),
@@ -1606,7 +1606,10 @@ def test_robbed_hr_counts_375_plus_balls_that_stayed_in_the_park_over_l7() -> No
             launch_speed=Decimal("105"),
             hc_y=Decimal("150"),
         ),
-        _window_event(  # 395 ft but eight-plus days old: outside the window
+        # Played-game filler: with these six dates plus the base events'
+        # 2026-08-19, his last-7 played set spans 08-13 through 08-19...
+        *(_window_event(game_date=f"2026-08-{day}", event="strikeout") for day in range(13, 19)),
+        _window_event(  # 395 ft on his EIGHTH played date: outside the window
             bb_type="fly_ball", hit_distance=Decimal("395"), game_date="2026-08-01", **base
         ),
         _window_event(  # no measured distance: never tallied
@@ -1623,6 +1626,33 @@ def test_robbed_hr_counts_375_plus_balls_that_stayed_in_the_park_over_l7() -> No
     line = board.games[0].away_batters[0].mix_line
     assert line is not None
     assert line.robbed_hr_count == 2
+
+
+def test_robbed_hr_anchors_to_played_games_not_the_calendar() -> None:
+    """D-164 (PO): with fewer than 7 played dates on record, an old 375+
+    ft out still counts — off-days never slide the window, and the window
+    reaches back as far as his seventh played game."""
+    base = {
+        "pitch_type": "FF",
+        "launch_speed": Decimal("100"),
+        "hc_y": Decimal("150"),
+        "event": "fly_out",
+    }
+    events = (
+        _window_event(bb_type="fly_ball", hit_distance=Decimal("380"), **base),  # robbed
+        _window_event(bb_type="fly_ball", hit_distance=Decimal("390"), **base),  # robbed
+        # Filler: his played set is 08-16..08-19 plus 08-01 below — five
+        # played dates, all inside his last-7 window.
+        *(_window_event(game_date=f"2026-08-{day}", event="strikeout") for day in range(16, 20)),
+        _window_event(  # 395 ft on his FIFTH played date: counts
+            bb_type="fly_ball", hit_distance=Decimal("395"), game_date="2026-08-01", **base
+        ),
+    )
+    board = _build(_FakeApi(), _FakeSavant(), events=events)
+    assert not isinstance(board, FetchFailure)
+    line = board.games[0].away_batters[0].mix_line
+    assert line is not None
+    assert line.robbed_hr_count == 3
 
 
 def test_the_window_line_carries_the_season_spray_board() -> None:
