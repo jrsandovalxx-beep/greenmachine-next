@@ -1,108 +1,93 @@
-# Provenance: `savant_park_factors_2023-2026.csv`
+# Provenance: `savant_park_factors_2024-2026.csv`
 
-Supersedes the 2026-09-01 two-season snapshot (`savant_park_factors_2025-2026.csv`,
-sha256 `c077ec83…`) per **D-171** (PO, 2026-09-01): "lets use years 2023 - 2026
-instead." Asked which fallback to use when the source turned out not to publish
-that window, the PO expressed **no preference**, so the builder's recommendation
-— a documented derivation from the source's own single-year boards — is what
-follows.
+Supersedes the 2026-09-01 derived four-season snapshot
+(`savant_park_factors_2023-2026.csv`, sha256 `67ca7512…`) per **D-172** (PO,
+2026-09-02): "Remove that completely and make it three years." The derived
+window is deleted — file, derivation rule, and every document that named it.
+**Every number in this file comes straight off a board Baseball Savant
+publishes; nothing is derived, blended, or filled.**
 
-## Why this window is derived, not pulled
+D-172 also records the standing rule, in the PO's words — "let's not build
+anything like that again without asking": when the source does not publish
+what was asked for, the builder stops and asks rather than deriving a
+substitute.
 
-Baseball Savant publishes only **one, two or three-year** rolling windows on
-this leaderboard: `rolling=1`, `rolling=2` and `rolling=3` answer with data;
-`rolling=4` answers with an empty payload (probed 2026-09-01). The four-season
-window the PO asked for does not exist on the source. The three-season board
-(2024-2026) is not an acceptable substitute: it still excludes Sutter Health
-Park, the gap D-166 closed. So the window is built from the source's own
-single-year boards, by the deterministic rule below, and pinned like every
-snapshot before it.
+## The window, and the one documented exception
 
-## Acquisition — eight scripted pulls, with the Product Owner's blessing
+The product window is Savant's **2024-2026 three-year rolling** board — the
+span Savant's `rolling=3` leaderboard publishes for 2026. That span and the
+handling of the one gap were put to the PO ("no preference" on both), so the
+builder's recommendations hold:
 
-Same posture as the superseded record (D-166): the live product reads Baseball
-Savant programmatically every day under D-128's source-of-truth directive; each
-single-year page was pulled once — same host, same headers the live app uses —
-and the embedded `var data = [...]` payload parsed. **No code path fetches this
+- **Twenty-nine venues** read the published three-year board.
+- **Sutter Health Park** (opened 2025) appears on no three-year board, so it
+  reads Savant's **published 2025-2026 two-year board** — the only window
+  Savant publishes for it. The Athletics keep real factors; no park goes
+  back to a gap.
+
+## Acquisition — four scripted pulls
+
+Same posture as every snapshot since D-166: the live product reads Baseball
+Savant programmatically every day under D-128's source-of-truth directive;
+each page was pulled once — same host, same headers the live app uses — and
+the embedded `var data = [...]` payload parsed. **No code path fetches this
 data at runtime**: the pinned file is the only input the reader accepts, and
 the digest gate stands.
 
-URL template (eight pulls — `year` ∈ {2023, 2024, 2025, 2026} × `batSide` ∈ {L, R}):
-`https://baseballsavant.mlb.com/leaderboard/statcast-park-factors?type=year&year={year}&batSide={side}&stat=index_wOBA&condition=All&rolling=1&parks=mlb`
+URL template (`rolling` ∈ {3, 2} × `batSide` ∈ {L, R}, `year=2026`):
+`https://baseballsavant.mlb.com/leaderboard/statcast-park-factors?type=year&year=2026&batSide={side}&stat=index_wOBA&condition=All&rolling={rolling}&parks=mlb`
 
 | Page | Bytes | sha256 |
 |---|---:|---|
-| 2023 L | 122,908 | `8ac37c4a3f4cfbefd6d7d977eae8057cc5a4364c0605ba171049b004a2256acf` |
-| 2023 R | 122,942 | `94473f740aa776fdda00c1bdc66dea18803c5a926b268745e0fb879313d3f2ea` |
-| 2024 L | 122,906 | `961fa6383146e38d957d6ec4f053ce0f054564f608830718083c4e8b587d5724` |
-| 2024 R | 122,947 | `63619dcbe2e1e96d116c673b11f43973f05abcdc4438bbab51ba7a4b8ee5df5a` |
-| 2025 L | 122,945 | `44bf3b6d72acbb9825fd2e4e9e0a06a2e6d68cc48a90d566734162fa82c04f57` |
-| 2025 R | 122,949 | `b6b521799d324c320fab4f915ebdcc362325a82f47ece511ebcb31b685c7f11c` |
-| 2026 L | 122,909 | `ffdfd8df9a590fc6446bf6c104f55a7ed68a68c71aafea63ddcf740b56bd3370` |
-| 2026 R | 122,930 | `6cc2aafdbe82c47469025d2dfd85b5fecae32ab1d6728a82555b98be996eac26` |
-| **derived CSV (this file's sibling)** | **7,506** | **`67ca75125fdeaab6db854267f85161969e855a6932983bb7f83f68033eecf5f4`** |
+| 2024-2026 L (rolling=3) | 119,068 | `b1f24ea377ef1e78db05ef0b4ac9d4077e368ba781fee2be1281a7f586b1e8ff` |
+| 2024-2026 R (rolling=3) | 119,084 | `86ca4dca6f643daff9fc018c085723ed29be5e4ab1b70fa0006c602f85a46c48` |
+| 2025-2026 L (rolling=2) | 119,671 | `27b996108a79967d1ae16a614be915fb89beb494a31aaf5d991ec3caa928712f` |
+| 2025-2026 R (rolling=2) | 119,681 | `173ad8355d446b7daa457504e3d8534e4cd2849f44916602e5ad88dcda5b1d56` |
+| **this CSV** | **7,457** | **`0cd621959fb47adebb008ac1a09f03d55b48474cead39fd9e91d1476ce16b7c7`** |
 
-**Pull date:** 2026-09-01.
+**Pull date:** 2026-09-02.
 
-## Derivation rule, stated so it can be re-run
+## Composition rule, stated so it can be re-run
 
-1. Parse the `var data = [...]` JSON payload from each of the eight pages;
-   assert every record's `key_bat_side` equals the page's side, and that all
-   records across all pages carry an identical key set (which is exactly the
-   superseded snapshot's 27-column set — the header is unchanged).
-2. The venue set is **the current thirty**: the venues on the 2026 board. Two
-   venues on older boards are not current and are excluded: Oakland Coliseum
-   (the Athletics' former home, 2023-2024) and George M. Steinbrenner Field
-   (the Rays' temporary 2025 home). A current venue blends only the seasons it
-   actually hosted: Sutter Health Park two (2025-2026), Tropicana Field three
-   (2023, 2024, 2026 — the Rays played 2025 in Steinbrenner), every other
-   venue all four.
-3. Per venue-side: every `index_*` column is the **plate-appearance-weighted
-   blend** of its single-year values — Σ(`index` × `n_pa`) ÷ Σ(`n_pa`),
-   rounded half-up to the integer the boards carry; `n_pa` is the sum of the
-   single-year samples. `name_display_club`, `main_team_id` and `venue_name`
-   are asserted constant across a venue's years and carried forward.
-4. Meta fields are the derived window's own descriptors, not any Savant page's
-   flags: `key_year` = 2026 (the window's end season),
-   `key_num_years_rolling` = 4, `key_is_year_rolling` = -1, `year_range` =
-   **2023-2026**.
-5. Sort by `(key_bat_side, int(venue_id))` — L block, then R block — and write
-   the CSV with columns in sorted key order, `\n` line terminator, header row
-   first.
-
-The blend does not claim to be the number Savant would publish for a
-four-year window — Savant computes its own rolling boards on pooled data by
-its own method, and on the two-season window the two can differ by a few
-points (Sutter RHB: 118 blended vs 122 on Savant's own 2025-2026 board). What
-this file guarantees instead is that every number is reproducible from the
-eight pinned page digests above by the rule in this section, with the method
-stated honestly wherever the window is named.
+1. Parse the `var data = [...]` JSON payload from each of the four pages;
+   assert every record's `key_bat_side` equals the page's side and that all
+   records carry the same 27-key set.
+2. Take all 58 rows of the two three-year boards (29 venues × 2 bat sides).
+3. Take exactly the Sutter Health Park rows (venue id `2529`, both bat
+   sides) from the two two-year boards.
+4. **No arithmetic on any value.** Every row is copied verbatim from its
+   board, meta flags included: three-year rows carry
+   `key_num_years_rolling=3`, `key_is_year_rolling=1`,
+   `year_range=2024-2026`; Sutter's rows carry `2`, `-1`, `2025-2026` —
+   exactly as Savant published them.
+5. Sort by `(key_bat_side, int(venue_id))` — L block, then R block — and
+   write the CSV with columns in sorted key order, `\n` line terminator,
+   header row first.
 
 ## Shape
 
-**60 data rows — 30 venues × 2 handedness.** 27 columns, identical to the
-superseded snapshot's. `index_hr` is the home-run park factor the product
-consumes; `index_woba` is the leaderboard's headline "Park Factor"; `n_pa` is
-the sample size behind each row. Window fields are internally consistent
-across all 60 rows (rule 4). Any screen rendering these values must say which
-window they describe.
+**60 data rows — 30 venues × 2 handedness.** 27 columns, identical to every
+snapshot before it. `index_hr` is the home-run park factor the product
+consumes; `index_woba` is the leaderboard's headline "Park Factor"; `n_pa`
+is the sample size behind each row. Any screen rendering these values must
+say which window they describe — including Sutter's two-season exception.
 
-## Findings carried forward, and the one the PO asked about
+## Findings carried forward
 
 1. **Thirty venues — the Athletics' gap stays closed.** Sutter Health Park
-   carries `index_hr` **119 (LHB)** / **118 (RHB)** over 13,438 / 19,288 PA —
-   the blend of its two played seasons. The absence machinery stays: a venue
-   a future snapshot does not cover is still represented, never filled.
-2. **The Rangers' factor is right, and the window was the question** (the PO's
-   "park factor for rangers seems wrong, verify"). Globe Life Field reads
-   **105 (LHB)** / **106 (RHB)** on this four-season window: it was a
-   hitter's park in 2023-2024 (126/138, then 109/101), flipped pitcher-friendly
-   in 2025 (80/81), and played neutral in 2026 (100/99). The superseded
-   two-season window's 89/87 was verified correct for *its* window — the
-   live two-season board showed the same 89 on the day this snapshot was
-   pulled.
-3. **`n_pa` varies enough to matter** — 13,438 (Sutter Health Park, LHB) to
-   44,096 (Daikin Park, RHB). D-014 keeps evidence confidence beside the
-   value, never fused into it: `n_pa` is carried as a field of the park-factor
-   value in the contract, so no screen renders a 13,438-PA factor identically
-   to a 44,096-PA one without deciding to.
+   carries `index_hr` **120 (LHB)** / **122 (RHB)** over 13,865 / 19,624 PA,
+   verbatim off the published two-season board. The absence machinery stays:
+   a venue a future snapshot does not cover is still represented, never
+   filled.
+2. **The Rangers' factor, three seasons deep** (the question that started
+   this thread). Globe Life Field reads **95 (LHB)** / **92 (RHB)** on the
+   2024-2026 window — pitcher-friendly across the three seasons (109/101 in
+   2024, 80/81 in 2025, 100/99 in 2026). The park's hitter-friendly 2023
+   (126/138) now sits outside the window, which is exactly what "stick to
+   three years" means. Prior readings for reference: 105/106 on the retired
+   derived four-season window, 89/87 on the two-season window before it.
+3. **`n_pa` varies enough to matter** — 13,865 (Sutter Health Park, LHB) to
+   32,992 (Daikin Park, RHB). D-014 keeps evidence confidence beside the
+   value, never fused into it: `n_pa` is carried as a field of the
+   park-factor value in the contract, so no screen renders a 13,865-PA
+   factor identically to a 32,992-PA one without deciding to.

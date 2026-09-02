@@ -52,7 +52,8 @@ from memory: the original authoring deliberately declined to assert MLBAM
 ids from recall, and the join now binds against data. The Athletics carried
 ``None`` until D-166 moved the snapshot to a window covering Sutter Health
 Park (opened 2025); their venue now joins on Savant id 2529 like every
-other club, on the 2023-2026 four-season window derived at D-171.
+other club, on Savant's published 2025-2026 two-season board — the only
+window Savant publishes for a venue opened in 2025 (D-172, PO).
 """
 
 from __future__ import annotations
