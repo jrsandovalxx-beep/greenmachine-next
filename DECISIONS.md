@@ -4492,3 +4492,33 @@ played seasons.
 
 Full gate green (3407 passed, 1 skipped), consistency check clean, all
 three showcase runners clean.
+
+## D-172 - Park factors move to Savant's published three-year window; nothing is derived without asking
+
+PO 2026-09-02: "Let's not build anything like that again without asking. I
+want to stick to three year rolling period. Remove that completely and
+make it three years, 26-23." Two directives in one. The standing rule
+first, recorded because it governs every future build: when the source
+does not publish what was asked for, the builder stops and asks — it does
+not derive a substitute. The D-171 derived four-season window is removed
+completely: file, derivation rule, and every document that named it. The
+window itself: "three years, 26-23" spans four seasons as written, and
+Savant publishes three-year boards for only two spans, so the PO was asked
+which — 2024-2026 (the current rolling board) or 2023-2025 — and how to
+handle the Athletics, whose park (opened 2025) appears on no three-year
+board. "No preference" on both, so the recommendations hold: the published
+2024-2026 three-year rolling board for the twenty-nine venues it covers,
+and Sutter Health Park on Savant's published 2025-2026 two-year board —
+the only window Savant publishes for it. Four scripted pulls, rows copied
+verbatim with Savant's own meta flags, pinned and digest-gated like every
+snapshot before it: no arithmetic, no runtime fetch. Globe Life Field
+reads 95 (LHB) / 92 (RHB) on the three-season window — pitcher-friendly
+across 2024-2026, with the park's hitter-friendly 2023 now outside it;
+Sutter reads 120/122 straight off the published two-season board. The PO
+also opened the weighing-and-grading phase ("let's get started on the
+weighing and grading system"): it begins with a review of the current
+weights and a plain-language proposal before any code changes, per the
+same ask-first rule.
+
+Full gate green (3407 passed, 1 skipped), consistency check clean, all
+three showcase runners clean.

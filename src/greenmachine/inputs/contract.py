@@ -244,8 +244,9 @@ class SnapshotField(Generic[T]):
 @dataclass(frozen=True)
 class ManualExportProvenance:
     """D-053/D-057: the provenance record of a pinned snapshot's single
-    acquisition act — a manual export, the D-166 scripted pull, or the
-    D-171 scripted pull-and-derive — never a runtime fetch."""
+    acquisition act — a manual export or a scripted pull (D-166, D-172)
+    — never a runtime fetch, and per D-172's standing rule never a
+    derivation the source itself does not publish."""
 
     source_url: str
     export_date: date
@@ -854,12 +855,12 @@ class ParkFactor:
 
     ``plate_appearances`` is the sample behind the factor (``n_pa`` in the
     pinned snapshot) — the D-014 evidence axis carried as a field of the
-    value, not decoration, so a screen cannot render a 13,438-PA factor
-    identically to a 44,096-PA one without deciding to. The pinned snapshot
-    is the 2023-2026 four-season window (D-171, PO), derived at acquisition
-    from Savant's four single-year boards — Savant publishes no four-year
-    window — and covering Sutter Health Park on its two played seasons; a
-    screen rendering these values states which window they describe.
+    value, not decoration, so a screen cannot render a 13,865-PA factor
+    identically to a 32,992-PA one without deciding to. The pinned snapshot
+    is the 2024-2026 three-season window (D-172, PO) exactly as Savant
+    publishes it, with Sutter Health Park on its published 2025-2026
+    two-season board; a screen rendering these values states which window
+    they describe.
     """
 
     factor: Decimal

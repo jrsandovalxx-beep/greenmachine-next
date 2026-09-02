@@ -15,15 +15,16 @@ first code that reads it. Three properties hold by construction:
   itself from the D-057 hand export to a scripted pull of the leaderboard's
   embedded data payload — the same Savant host the live app reads daily.
 - **Gaps are represented, never filled.** All thirty venues have rows: the
-  snapshot is the 2023-2026 four-season window (D-171, PO), which covers
-  Sutter Health Park (opened 2025) on its two played seasons. Savant
-  publishes no four-year window — only one, two or three rolling years — so
-  each venue-side factor is the plate-appearance-weighted blend of its
-  single-year boards, pulled once and derived by the deterministic rule the
-  provenance record documents. A venue a future snapshot does not cover
-  still comes back absent with ``NOT_YET_OBSERVED``: ``SOURCE_UNAVAILABLE``
-  would assert a failure that did not happen, and a league-average
-  substitute would invent one.
+  snapshot is Savant's published 2024-2026 three-year rolling board
+  (D-172, PO) for the twenty-nine venues that board covers, plus Sutter
+  Health Park on Savant's published 2025-2026 two-year board — the only
+  window Savant publishes for a venue opened in 2025. D-172 retired
+  the D-171 derived window at the PO's word and set the standing rule:
+  where the source does not publish what was asked for, the builder stops
+  and asks rather than deriving it. A venue a future snapshot does not
+  cover still comes back absent with ``NOT_YET_OBSERVED``:
+  ``SOURCE_UNAVAILABLE`` would assert a failure that did not happen, and a
+  league-average substitute would invent one.
 
 ``index_hr`` is the column this product consumes — the home-run park factor —
 not ``index_woba``, the leaderboard's headline number. The two sit adjacent in
@@ -53,24 +54,31 @@ from greenmachine.inputs.errors import InputContractError
 
 SOURCE_ID = "savant-park-factors"
 
-PINNED_SHA256 = "67ca75125fdeaab6db854267f85161969e855a6932983bb7f83f68033eecf5f4"
-PINNED_BYTES = 7506
+PINNED_SHA256 = "0cd621959fb47adebb008ac1a09f03d55b48474cead39fd9e91d1476ce16b7c7"
+PINNED_BYTES = 7457
 EXPECTED_ROWS = 60
 EXPECTED_VENUES = 30
 
 FACTOR_COLUMN = "index_hr"
 SAMPLE_COLUMN = "n_pa"
 
+# D-172 (PO): the one exception to the three-year window — Sutter Health
+# Park opened in 2025, so Savant's published three-year board does not
+# list it; its rows come from Savant's published two-year board.
+SUTTER_WINDOW_LABEL = "2025-2026"
+SUTTER_SAVANT_VENUE_ID = "2529"
+
 _SIDES = {"L": Handedness.LEFT, "R": Handedness.RIGHT}
 
 PROVENANCE = ManualExportProvenance(
     source_url=(
-        # The D-171 acquisition is eight scripted pulls — the four single-year
-        # boards per bat side — blended by the rule the provenance record
-        # documents; the leaderboard page stands here as the documented origin.
+        # The D-172 acquisition is four scripted pulls — Savant's published
+        # three-year board per bat side, plus its published two-year board
+        # per bat side for Sutter Health Park; the leaderboard page stands
+        # here as the documented origin. Nothing is derived.
         "https://baseballsavant.mlb.com/leaderboard/statcast-park-factors"
     ),
-    export_date=date(2026, 9, 1),
+    export_date=date(2026, 9, 2),
     row_count=EXPECTED_ROWS,
     sha256=PINNED_SHA256,
 )
@@ -80,10 +88,10 @@ SOURCE = SourceRecord(
     kind=SourceKind.MANUAL_EXPORT,
     description=(
         "Savant per-handedness park factors, index_hr, "
-        "2023-2026 four-season window - derived from the four single-year "
-        "boards, plate-appearance-weighted per venue-side (D-171, PO: "
-        "Savant publishes no four-year window), pulled once, pinned and "
-        "never fetched at runtime"
+        "2024-2026 three-season window - Savant's published rolling "
+        "boards (D-172, PO), with Sutter Health Park on its published "
+        "2025-2026 two-season board, pulled once, pinned and never "
+        "fetched at runtime"
     ),
     provenance=PROVENANCE,
 )
@@ -94,7 +102,7 @@ def snapshot_path() -> Path:
     return (
         Path(__file__).resolve().parents[3]
         / "data"
-        / "savant_park_factors_2023-2026.csv"  # the §GMF-001 criterion 4 pin
+        / "savant_park_factors_2024-2026.csv"  # the §GMF-001 criterion 4 pin
     )
 
 
@@ -125,9 +133,11 @@ def read_factors(path: Path | None = None) -> dict[int, dict[Handedness, ParkFac
     """Every pinned row as ``ParkFactor`` values, keyed by Savant venue id.
 
     The shape the provenance record declares is enforced here, not assumed:
-    60 rows, 30 venues, both bat sides for every venue, and one uniform
-    window across the file. A snapshot that half-matched would otherwise
-    render as a screen half-full of plausible numbers.
+    60 rows, 30 venues, both bat sides for every venue, and exactly the two
+    published windows D-172 documents — the three-year board everywhere,
+    Sutter Health Park alone on its two-year board. A snapshot that
+    half-matched would otherwise render as a screen half-full of plausible
+    numbers.
     """
     text = _verified_text(path if path is not None else snapshot_path())
     rows = list(csv.DictReader(text.splitlines()))
@@ -135,10 +145,19 @@ def read_factors(path: Path | None = None) -> dict[int, dict[Handedness, ParkFac
         raise InputContractError(f"pinned snapshot has {len(rows)} rows, expected {EXPECTED_ROWS}")
 
     windows = {row["year_range"] for row in rows}
-    if windows != {window_label()}:
+    if not windows <= {window_label(), SUTTER_WINDOW_LABEL}:
         raise InputContractError(
-            f"pinned snapshot mixes windows {sorted(windows)}; a single rolling "
-            "window is what makes one factor comparable to the next"
+            f"pinned snapshot carries windows {sorted(windows)}; the D-172 shape is "
+            f"the published {window_label()} three-year board everywhere and "
+            f"Sutter Health Park on its published {SUTTER_WINDOW_LABEL} two-year "
+            "board — the only window Savant publishes for a venue opened in 2025"
+        )
+    two_year_venues = {row["venue_id"] for row in rows if row["year_range"] == SUTTER_WINDOW_LABEL}
+    if two_year_venues != {SUTTER_SAVANT_VENUE_ID}:
+        raise InputContractError(
+            f"pinned snapshot puts venues {sorted(two_year_venues)} on the "
+            f"{SUTTER_WINDOW_LABEL} two-year board; only Sutter Health Park "
+            f"({SUTTER_SAVANT_VENUE_ID}) belongs there"
         )
 
     factors: dict[int, dict[Handedness, ParkFactor]] = {}
@@ -173,7 +192,7 @@ def read_factors(path: Path | None = None) -> dict[int, dict[Handedness, ParkFac
 
 def window_label() -> str:
     """The window these factors describe, as the snapshot itself labels it."""
-    return "2023-2026"
+    return "2024-2026"
 
 
 def basis_statement() -> str:
@@ -185,10 +204,12 @@ def basis_statement() -> str:
     window they describe, and this is where that promise is kept.
     """
     return (
-        f"Savant home-run park factors ({FACTOR_COLUMN}), {window_label()} four-season "
-        f"window, 100 = neutral. Derived from Baseball Savant's single-year boards "
-        f"pulled on {PROVENANCE.export_date.isoformat()} — Savant publishes no "
-        "four-year window — pinned in the repository and never fetched at runtime."
+        f"Savant home-run park factors ({FACTOR_COLUMN}), {window_label()} three-season "
+        f"rolling window, 100 = neutral. Pulled from Baseball Savant's published "
+        f"boards on {PROVENANCE.export_date.isoformat()} — Sutter Health Park "
+        f"(opened 2025) reads its published {SUTTER_WINDOW_LABEL} two-season board, "
+        "the only window Savant publishes for it — pinned in the repository and "
+        "never fetched at runtime."
     )
 
 
