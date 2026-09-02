@@ -32,7 +32,6 @@ def _form(**overrides: FormValue) -> FormSection:
         barrel_pct=overrides.get("barrel_pct", sufficient),
         exit_velocity=overrides.get("exit_velocity", sufficient),
         hard_hit_pct=overrides.get("hard_hit_pct", sufficient),
-        sweet_spot_pct=overrides.get("sweet_spot_pct", sufficient),
         pull_air_pct=overrides.get("pull_air_pct", sufficient),
         attack_angle_degrees=overrides.get("attack_angle_degrees", sufficient),
         ideal_attack_angle_pct=overrides.get("ideal_attack_angle_pct", sufficient),

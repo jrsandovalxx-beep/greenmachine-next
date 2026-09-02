@@ -24,8 +24,6 @@ from greenmachine.live.savant import BatTrackingRow, PitchEvent
 AIR_BALL_TYPES = frozenset({"fly_ball", "line_drive", "popup"})
 BARREL_CLASSIFICATION = 6  # launch_speed_angle band the source labels as barrel
 HARD_HIT_THRESHOLD_MPH = Decimal("95")
-_SWEET_SPOT_LOW = Decimal("8")
-_SWEET_SPOT_HIGH = Decimal("32")
 
 # Spray-angle geometry: the source's hit-coordinate frame places home plate
 # here; pull is signed by batter side, mirroring the public spray charts.
@@ -90,7 +88,6 @@ class FormMetrics:
     barrel_pct: Decimal | None  # per batted ball, percent scale
     exit_velocity_avg: Decimal | None
     hard_hit_pct: Decimal | None  # per batted ball, percent scale
-    sweet_spot_pct: Decimal | None  # per batted ball, percent scale
     air_balls: int
     pull_air_balls: int
     pull_air_pct: Decimal | None  # per air ball, percent scale
@@ -215,12 +212,6 @@ def aggregate_form(events: tuple[PitchEvent, ...]) -> FormMetrics:
     barrels = sum(1 for event in bbe if event.launch_speed_angle == BARREL_CLASSIFICATION)
     speeds = [event.launch_speed for event in bbe if event.launch_speed is not None]
     hard_hits = sum(1 for speed in speeds if speed >= HARD_HIT_THRESHOLD_MPH)
-    sweet_spots = sum(
-        1
-        for event in bbe
-        if event.launch_angle is not None
-        and _SWEET_SPOT_LOW <= event.launch_angle <= _SWEET_SPOT_HIGH
-    )
     # is_pull_air is False for every unmeasurable contact, so counting pulls
     # over the measurable denominator is the same count with the numerator and
     # denominator visibly drawn from one list.
@@ -252,7 +243,6 @@ def aggregate_form(events: tuple[PitchEvent, ...]) -> FormMetrics:
         barrel_pct=_pct(barrels, len(bbe)),
         exit_velocity_avg=ev_avg,
         hard_hit_pct=_pct(hard_hits, len(bbe)),
-        sweet_spot_pct=_pct(sweet_spots, len(bbe)),
         air_balls=len(measurable_air),
         pull_air_balls=pulls,
         pull_air_pct=_pct(pulls, len(measurable_air)),
@@ -283,13 +273,13 @@ class FormSection:
 
     xwOBA left the popup under D-102 — it stays on the Matchups main
     tables, whose grid lines carry it. SP-1 (D-109) amended the D-068 set:
-    Oppo Air % mirrors Pull Air % over the identical denominator, and
-    SwSp% — computed and graded from the start — is displayed at last."""
+    Oppo Air % mirrors Pull Air % over the identical denominator. SwSp%
+    graded from the start until D-174 (PO) retired it: the season-long
+    threshold review found it carries almost no home-run signal."""
 
     barrel_pct: FormValue
     exit_velocity: FormValue
     hard_hit_pct: FormValue
-    sweet_spot_pct: FormValue
     pull_air_pct: FormValue
     attack_angle_degrees: FormValue
     ideal_attack_angle_pct: FormValue
@@ -437,13 +427,6 @@ def resolve_form_section(
             recent.hard_hit_pct,
             recent.batted_ball_events,
             extended.hard_hit_pct,
-            extended.batted_ball_events,
-            MIN_BBE_FORM,
-        ),
-        sweet_spot_pct=_pick(
-            recent.sweet_spot_pct,
-            recent.batted_ball_events,
-            extended.sweet_spot_pct,
             extended.batted_ball_events,
             MIN_BBE_FORM,
         ),

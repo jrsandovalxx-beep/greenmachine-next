@@ -60,13 +60,13 @@ def drop_line(containing: str) -> str:
 # Anchors into the valid fixture, named so a test reads as intent rather than
 # as a string literal.
 FUZZY_DISABLED = "  enabled: false"
-TOTAL_MAX = '  total_max_points: "12"'
+TOTAL_MAX = '  total_max_points: "11.3"'
 POWER_CATEGORY = """    - category: power_profile
       max_points: "2.7"
       components: [exit_velocity, barrel_pct, hard_hit_pct]"""
 GRADE_D = '    - { grade: D, lower: "0",   upper: "3.3", terminal: false }'
 GRADE_C = '    - { grade: C, lower: "3.3", upper: "5.1", terminal: false }'
-GRADE_S = '    - { grade: S, lower: "9.4", upper: "12",  terminal: true }'
+GRADE_S = '    - { grade: S, lower: "9.4", upper: "11.3",  terminal: true }'
 
 # exit_velocity's RECENT_7D bucket set — the workhorse for bucket invariants.
 EV_BUCKETS = """              - { lower: "0",    upper: "62.4", points: "0" }

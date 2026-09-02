@@ -1,6 +1,6 @@
 """Snapshot builders for GM-041 engine tests.
 
-Builds frozen RECENT_7D snapshots covering exactly the eleven components of
+Builds frozen RECENT_7D snapshots covering exactly the ten components of
 ``config/nonproduction/gm041_engine_synthetic.yaml``, with per-test
 control over values, missing components, insufficient samples, absent
 observations, and the attack-angle measurement. Values default to the middle
@@ -34,7 +34,6 @@ _DEFAULTS: dict[ComponentId, tuple[str, str, SampleType, int, int]] = {
     ComponentId.HARD_HIT_PCT: ("60", "percent", SampleType.BATTED_BALL_EVENTS, 5, 2),
     ComponentId.PITCH_MIX_PRESSURE: ("60", "index", SampleType.PITCHES, 5, 2),
     ComponentId.PUT_AWAY_PITCH_EXPLOITATION: ("60", "index", SampleType.PITCHES, 5, 2),
-    ComponentId.SWEET_SPOT_PCT: ("30", "percent", SampleType.BATTED_BALL_EVENTS, 5, 2),
     ComponentId.ATTACK_ANGLE_QUALITY: ("55", "percent", SampleType.SWINGS, 5, 2),
     ComponentId.BAT_SPEED: ("75", "mph", SampleType.SWINGS, 5, 2),
     ComponentId.PULL_PCT_AIR_BALLS: ("33", "percent", SampleType.AIR_BALLS, 5, 2),
@@ -43,9 +42,9 @@ _DEFAULTS: dict[ComponentId, tuple[str, str, SampleType, int, int]] = {
 }
 
 # With every default value, the synthetic fixture awards:
-# power 1.1+0.45+0.8=2.35 · matchup 1.6+1.5=3.1 · form 0.7+0.8+0.6=2.1 ·
-# pull 2.2 · environment 1+0.8=1.8 → total 11.55 → grade S.
-DEFAULT_TOTAL = "11.55"
+# power 1.1+0.45+0.8=2.35 · matchup 1.6+1.5=3.1 · form 0.8+0.6=1.4 ·
+# pull 2.2 · environment 1+0.8=1.8 → total 10.85 → grade S.
+DEFAULT_TOTAL = "10.85"
 
 
 def engine_snapshot(
@@ -58,7 +57,7 @@ def engine_snapshot(
     minimum_overrides: Mapping[ComponentId, int] | None = None,
     sample_type_overrides: Mapping[ComponentId, SampleType] | None = None,
 ) -> InputSnapshot:
-    """A frozen snapshot over the eleven GM-041 fixture components.
+    """A frozen snapshot over the ten GM-041 fixture components.
 
     ``values`` overrides observed values; ``missing`` turns components into
     typed missing observations; ``insufficient`` drops a component's sample

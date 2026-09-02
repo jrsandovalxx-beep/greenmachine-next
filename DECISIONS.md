@@ -4535,3 +4535,35 @@ Park's 2025-2026 two-season exception. No numbers change.
 
 Full gate green (3408 passed, 1 skipped), consistency check clean, all
 three showcase runners clean.
+
+## D-174 - Sweet-Spot % retired from the grading model
+
+PO 2026-09-02: "Remove sweet spot. Continue." The weighing-and-grading
+phase opened with an evidence review of the provisional thresholds:
+season-long curves over the 381 batters with 150+ plate appearances,
+each component's value against home-run rate (league baseline 3.12%
+HR/PA). Sweet-Spot % was nearly flat — above 32% the lift over the
+league baseline was about +4%, against +50% to +73% for the components
+that actually separate home-run hitters. A component that does not
+predict home runs has no business scoring them, so the PO ordered it
+out ahead of the threshold retune rather than re-bucketed.
+
+The model drops to ten components and 11.3 points: the Form category
+slims to attack-angle quality and bat speed (1.3 of 11.3), the S
+cutoff's top edge moves from 12 to 11.3, and every other cutoff and
+bucket is unchanged. The enum, both synthetic fixtures, the pipeline's
+form section, the Savant row parser, and the app surfaces follow; the
+glossary keeps the name, marked retired, so old records still read.
+Every expected total in the engine suite was re-derived by hand from
+the bucket tables, not copied from engine output. The pull-power
+synthetic fixture shed its spare tenth (2.4 to 2.3) so the fixture
+keeps summing to its own total — a fixture-only rebalance, no
+production weight moved.
+
+This is step one of the approved order: thresholds and cliff edges
+next, then the missing-equals-zero policy, then grades as
+probabilities. The Pull-into-Form category merge stays on hold per
+the PO.
+
+Full gate green (3408 passed, 1 skipped), consistency check clean, all
+three showcase runners clean.

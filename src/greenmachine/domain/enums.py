@@ -82,10 +82,12 @@ _CATEGORY_DISPLAY_NAMES: dict[Category, str] = {
 
 
 class ComponentId(Enum):
-    """The eleven scored components (``MODEL_SPEC.md`` §2, ``GLOSSARY.md`` §1).
+    """The ten scored components (``MODEL_SPEC.md`` §2, ``GLOSSARY.md`` §1).
 
     The retired Form metrics — Chase Rate, Zone Contact %, Whiff Rate — are
-    deliberately absent and must never be reintroduced. ``attack_angle_quality``
+    deliberately absent and must never be reintroduced. Sweet-Spot % joined
+    them at D-174 (PO): the season-long threshold review found it carries
+    almost no home-run signal. ``attack_angle_quality``
     is the scored component; its two Savant/proxy *measurements* live in
     :class:`MeasurementId`, never here.
     """
@@ -95,7 +97,6 @@ class ComponentId(Enum):
     HARD_HIT_PCT = "hard_hit_pct"
     PITCH_MIX_PRESSURE = "pitch_mix_pressure"
     PUT_AWAY_PITCH_EXPLOITATION = "put_away_pitch_exploitation"
-    SWEET_SPOT_PCT = "sweet_spot_pct"
     ATTACK_ANGLE_QUALITY = "attack_angle_quality"
     BAT_SPEED = "bat_speed"
     PULL_PCT_AIR_BALLS = "pull_pct_air_balls"

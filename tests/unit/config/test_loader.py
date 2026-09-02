@@ -32,7 +32,7 @@ from greenmachine.config import (
 def test_the_valid_fixture_loads() -> None:
     config = load_config(VALID_PATH)
 
-    assert len(config.components) == 11
+    assert len(config.components) == 10
     assert len(config.allocations.categories) == 5
     assert config.fuzzy_scoring.enabled is False
 
@@ -48,7 +48,7 @@ def test_load_config_text_performs_no_file_io() -> None:
     """The text entry point works with a path that does not exist."""
     config = load_config_text(valid_text(), file_path="not/a/real/file.yaml")
 
-    assert len(config.components) == 11
+    assert len(config.components) == 10
 
 
 def test_a_missing_file_is_a_parse_error() -> None:
@@ -144,7 +144,7 @@ def test_a_parse_failure_records_the_file() -> None:
 
 
 def test_a_schema_failure_records_the_key_path() -> None:
-    text = mutate('  total_max_points: "12"', "  total_max_points: 12.0")
+    text = mutate('  total_max_points: "11.3"', "  total_max_points: 12.0")
 
     with pytest.raises(ConfigSchemaError) as caught:
         load_config_text(text, file_path="synthetic.yaml")
@@ -179,7 +179,7 @@ def test_a_component_failure_records_the_metric_and_profile() -> None:
 
 
 def test_the_original_exception_is_preserved_as_cause() -> None:
-    text = mutate('  total_max_points: "12"', "  total_max_points: 12.0")
+    text = mutate('  total_max_points: "11.3"', "  total_max_points: 12.0")
 
     with pytest.raises(ConfigSchemaError) as caught:
         load_config_text(text)
@@ -194,7 +194,7 @@ def test_no_raw_pydantic_or_yaml_exception_escapes() -> None:
     from pydantic import ValidationError
 
     cases = [
-        mutate('  total_max_points: "12"', "  total_max_points: 12.0"),
+        mutate('  total_max_points: "11.3"', "  total_max_points: 12.0"),
         mutate(FUZZY_DISABLED, "  enabled: true"),
         "allocations: { categories: [",
     ]
@@ -215,7 +215,7 @@ def test_no_raw_pydantic_or_yaml_exception_escapes() -> None:
         ("root schema_version", "schema_version: 1\n", ""),
         ("root specification_version", 'specification_version: "v6.3"\n', ""),
         ("root fuzzy policy", "fuzzy_scoring:\n  enabled: false\n", ""),
-        ("allocations total", '  total_max_points: "12"\n', ""),
+        ("allocations total", '  total_max_points: "11.3"\n', ""),
         ("category max_points", '      max_points: "2.7"\n', ""),
         ("component sample_type", "    sample_type: air_balls\n", ""),
         ("component direction", "    direction: lower_is_better\n", ""),
@@ -237,7 +237,7 @@ def test_a_missing_required_key_is_refused(label: str, old: str, new: str) -> No
 
 def test_a_missing_key_names_where_it_belongs() -> None:
     with pytest.raises(ConfigSchemaError) as caught:
-        load_config_text(drop_line('  total_max_points: "12"'))
+        load_config_text(drop_line('  total_max_points: "11.3"'))
 
     assert caught.value.context.key_path == ("allocations", "total_max_points")
 
@@ -253,8 +253,8 @@ def test_a_missing_key_names_where_it_belongs() -> None:
         ("root", "schema_version: 1", "schema_version: 1\nsurprise_root: 1"),
         (
             "allocations",
-            '  total_max_points: "12"',
-            '  total_max_points: "12"\n  surprise_alloc: 1',
+            '  total_max_points: "11.3"',
+            '  total_max_points: "11.3"\n  surprise_alloc: 1',
         ),
         (
             "category",

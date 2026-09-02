@@ -180,7 +180,7 @@ def test_every_scoring_numeric_is_a_decimal(config: GreenMachineConfig) -> None:
 def test_fractional_allocations_survive_exactly(config: GreenMachineConfig) -> None:
     total = sum((entry.max_points for entry in config.allocations.categories), Decimal(0))
 
-    assert total == Decimal("12")
+    assert total == Decimal("11.3")
     assert config.allocations.categories[0].max_points == Decimal("2.7")
 
 

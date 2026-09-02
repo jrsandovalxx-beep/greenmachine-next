@@ -147,7 +147,7 @@ def test_the_context_isolation_holds_in_a_fresh_subprocess() -> None:
 def test_swapping_s_and_d_is_rejected() -> None:
     """S in the lowest interval, D in the highest — tiles [0,12] but backwards."""
     text = mutate(GRADE_D, '    - { grade: S, lower: "0",   upper: "3.3", terminal: false }')
-    text = text.replace(GRADE_S, '    - { grade: D, lower: "9.4", upper: "12",  terminal: true }')
+    text = text.replace(GRADE_S, '    - { grade: D, lower: "9.4", upper: "11.3",  terminal: true }')
     error = reject_semantic(text)
 
     assert "ascending score order" in str(error)
@@ -170,7 +170,7 @@ def test_a_grade_permutation_is_rejected() -> None:
 
 
 def test_d_in_the_highest_interval_is_rejected() -> None:
-    text = mutate(GRADE_S, '    - { grade: D, lower: "9.4", upper: "12",  terminal: true }')
+    text = mutate(GRADE_S, '    - { grade: D, lower: "9.4", upper: "11.3",  terminal: true }')
     text = text.replace(GRADE_D, '    - { grade: S, lower: "0",   upper: "3.3", terminal: false }')
     error = reject_semantic(text)
 
@@ -204,7 +204,7 @@ RAW_EXCEPTIONS = (
         ("unhashable list key", "? [a, b]\n: value\n"),
         ("unhashable mapping key", "? {a: 1}\n: value\n"),
         ("malformed yaml", "allocations: { categories: [\n"),
-        ("yaml float numeric", mutate('  total_max_points: "12"', "  total_max_points: 12.0")),
+        ("yaml float numeric", mutate('  total_max_points: "11.3"', "  total_max_points: 11.3")),
         ("missing key", mutate("schema_version: 1\n", "")),
         ("fuzzy enabled", mutate("  enabled: false", "  enabled: true")),
         (
@@ -320,7 +320,9 @@ def test_a_missing_key_inside_a_union_is_also_normalized() -> None:
 
 
 def test_a_duplicate_key_parse_error_identifies_the_key_and_file() -> None:
-    text = mutate('  total_max_points: "12"', '  total_max_points: "12"\n  total_max_points: "9"')
+    text = mutate(
+        '  total_max_points: "11.3"', '  total_max_points: "11.3"\n  total_max_points: "9"'
+    )
 
     with pytest.raises(ConfigParseError) as caught:
         load_config_text(text, file_path="synthetic.yaml")

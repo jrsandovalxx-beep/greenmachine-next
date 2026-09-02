@@ -125,7 +125,7 @@ not grouped during MVP.
 
 | Field | Value |
 |---|---|
-| Display name | Sweet Spot % |
+| Display name | Sweet Spot % — **retired at D-174 (PO, 2026-09-02): the season-long threshold review found it carries almost no home-run signal** |
 | Component identifier | `sweet_spot_pct` |
 | Category | Form |
 | Baseball meaning | Share of batted balls hit in the launch-angle band Statcast defines as the sweet spot; a contact-quality indicator |
@@ -418,7 +418,7 @@ be added, renamed, reordered, or removed on one side only. Definitions of what e
 |---|---|
 | `WindowProfile` | `RECENT_7D`, `LONG_TERM_2Y` |
 | `Category` | `power_profile`, `pitcher_matchup`, `form`, `pull_power`, `environment` |
-| `ComponentId` | `exit_velocity`, `barrel_pct`, `hard_hit_pct`, `pitch_mix_pressure`, `put_away_pitch_exploitation`, `sweet_spot_pct`, `attack_angle_quality`, `bat_speed`, `pull_pct_air_balls`, `park`, `weather` |
+| `ComponentId` | `exit_velocity`, `barrel_pct`, `hard_hit_pct`, `pitch_mix_pressure`, `put_away_pitch_exploitation`, `attack_angle_quality`, `bat_speed`, `pull_pct_air_balls`, `park`, `weather` |
 | `MeasurementId` | `ideal_attack_angle_pct`, `attack_angle_threshold_proxy` |
 | `ValidationInputId` | `woba_window`, `relief_vulnerability`, `bullpen_notes`, `sample_warnings`, `coverage_warnings`, `fallback_status` |
 | `SampleType` | `batted_ball_events`, `swings`, `air_balls`, `plate_appearances`, `pitches`, `games` |

@@ -146,7 +146,6 @@ class _OutageSavant:
                 hard_hit_share=Decimal("0.5"),
                 barrel_count=30,
                 barrel_share=Decimal("0.1"),
-                sweet_spot_share=Decimal("0.33"),
                 avg_launch_angle=Decimal("16.4"),
             )
         }
@@ -515,16 +514,16 @@ def test_shortlist_keeps_only_a_and_s_as_bubble_rows() -> None:
 def test_form_score_cell_reads_the_actual_graded_subtotal() -> None:
     """D-132 (PO): the shortlist's Form Score carries the batter's actual
     graded form subtotal out of the category max from the production config
-    (2 in v1) — the D-124 placeholder dash is dead, never an invented
-    number."""
+    (1.3 in v1 after D-174 retired sweet_spot_pct) — the D-124 placeholder
+    dash is dead, never an invented number."""
     import streamlit_app
 
     form_max = streamlit_app._form_max_points(streamlit_app.production_config())
-    assert form_max == Decimal("2")
+    assert form_max == Decimal("1.3")
     for row in streamlit_app._slugger_rows(_graded_board()):
         text = streamlit_app._form_score_text(row.card.result, form_max)
         assert text is not None
-        assert text.endswith(" / 2")
+        assert text.endswith(" / 1.3")
 
 
 def test_sluggers_sort_loads_highest_first_and_flips() -> None:

@@ -47,7 +47,7 @@ __all__ = ["TOTAL_MAX_POINTS", "validate_semantics"]
 # Structural constants from the specification, not tunable thresholds.
 # MODEL_SPEC §2 fixes the total at 12 points and §14 fixes the score domain at
 # [0, 12]; §19 invariant 5 requires category maximums to sum exactly to it.
-TOTAL_MAX_POINTS = decimal_from("12")
+TOTAL_MAX_POINTS = decimal_from("11.3")  # D-174 (PO): sweet_spot_pct retired, ten remain
 SCORE_DOMAIN_MIN = decimal_from("0")
 
 # The Grade vocabulary in ascending score order (MODEL_SPEC §14). This is the

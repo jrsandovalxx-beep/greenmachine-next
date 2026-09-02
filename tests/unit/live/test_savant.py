@@ -110,7 +110,6 @@ def test_statcast_board_normalizes_percents_to_fractions() -> None:
     assert row.exit_velocity_avg == Decimal("91.5")
     assert row.hard_hit_share == Decimal("0.5")  # derived from count over attempts
     assert row.barrel_share == Decimal("0.1")
-    assert row.sweet_spot_share == Decimal("0.333")
     assert row.avg_launch_angle == Decimal("16.4")
 
 

@@ -47,7 +47,6 @@ SHOWCASE_FORM = FormSection(
     barrel_pct=FormValue(value=Decimal("18.2"), sample=22, window_games=7, sufficient=True),
     exit_velocity=FormValue(value=Decimal("91.4"), sample=22, window_games=7, sufficient=True),
     hard_hit_pct=FormValue(value=Decimal("49.5"), sample=22, window_games=7, sufficient=True),
-    sweet_spot_pct=FormValue(value=Decimal("36.4"), sample=22, window_games=7, sufficient=True),
     pull_air_pct=FormValue(value=Decimal("41.7"), sample=18, window_games=14, sufficient=True),
     attack_angle_degrees=FormValue(
         value=Decimal("13.1"), sample=40, window_games=7, sufficient=True

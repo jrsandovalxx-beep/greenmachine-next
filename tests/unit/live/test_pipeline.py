@@ -88,7 +88,6 @@ def _statcast_row(player_id: int) -> StatcastBatterRow:
         hard_hit_share=Decimal("0.5"),
         barrel_count=30,
         barrel_share=Decimal("0.1"),
-        sweet_spot_share=Decimal("0.33"),
         avg_launch_angle=Decimal("16.4"),
     )
 
@@ -606,7 +605,7 @@ def test_a_full_events_outage_marks_form_components_unavailable() -> None:
     assert not isinstance(board, FetchFailure)
     batter = board.games[0].away_batters[0]
     missing = {obs.component_id: obs.missing_reason for obs in batter.result.missing_observations}
-    assert missing[ComponentId.SWEET_SPOT_PCT] is MissingReason.SOURCE_UNAVAILABLE
+    assert missing[ComponentId.ATTACK_ANGLE_QUALITY] is MissingReason.SOURCE_UNAVAILABLE
     assert missing[ComponentId.PULL_PCT_AIR_BALLS] is MissingReason.SOURCE_UNAVAILABLE
 
 
@@ -616,11 +615,13 @@ def test_below_floor_samples_still_score_with_the_advisory_status() -> None:
     batter = board.games[0].away_batters[0]
     assert isinstance(batter.result, EvaluatedGradeResult)
     present = {obs.component_id: obs for obs in batter.result.present_observations}
-    sweet_spot = present[ComponentId.SWEET_SPOT_PCT]
-    assert sweet_spot.sample_count == 3
-    assert sweet_spot.sample_status is SampleStatus.INSUFFICIENT
+    pull = present[ComponentId.PULL_PCT_AIR_BALLS]
+    assert pull.sample_count == 3
+    assert pull.sample_status is SampleStatus.INSUFFICIENT
     score = next(
-        s for s in batter.result.component_scores if s.component_id is ComponentId.SWEET_SPOT_PCT
+        s
+        for s in batter.result.component_scores
+        if s.component_id is ComponentId.PULL_PCT_AIR_BALLS
     )
     assert score.points_awarded >= 0  # scored, not zeroed by absence
 

@@ -123,7 +123,6 @@ class StatcastBatterRow:
     hard_hit_share: Decimal
     barrel_count: int
     barrel_share: Decimal
-    sweet_spot_share: Decimal
     avg_launch_angle: Decimal
 
 
@@ -455,7 +454,6 @@ class BaseballSavant:
                 hard_hit_share=(Decimal(ev95) / Decimal(attempts) if attempts else Decimal(0)),
                 barrel_count=barrels,
                 barrel_share=_percent(row.get("brl_percent"), context),
-                sweet_spot_share=_percent(row.get("anglesweetspotpercent"), context),
                 avg_launch_angle=_decimal(row.get("avg_hit_angle"), context),
             )
 

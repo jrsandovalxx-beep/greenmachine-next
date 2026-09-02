@@ -150,7 +150,7 @@ def test_component_maxima_that_do_not_sum_to_the_category_maximum_are_rejected()
     assert error.context.key_path[:2] == ("allocations", "categories")
 
 
-def test_category_maxima_that_do_not_sum_to_twelve_are_rejected() -> None:
+def test_category_maxima_that_do_not_sum_to_the_total_are_rejected() -> None:
     """Changing one category and its components keeps the inner sum but breaks the total."""
     text = mutate('      max_points: "2.7"', '      max_points: "2.6"')
     text = text.replace(
@@ -164,16 +164,16 @@ def test_category_maxima_that_do_not_sum_to_twelve_are_rejected() -> None:
 
 
 def test_a_wrong_total_max_points_is_rejected() -> None:
-    error = reject(mutate('  total_max_points: "12"', '  total_max_points: "11"'))
+    error = reject(mutate('  total_max_points: "11.3"', '  total_max_points: "11"'))
 
-    assert "total_max_points must be 12" in str(error)
+    assert "total_max_points must be 11.3" in str(error)
     assert error.context.key_path == ("allocations", "total_max_points")
 
 
 def test_a_duplicate_category_is_rejected() -> None:
     error = reject(
         mutate(
-            '    - category: pull_power\n      max_points: "2.4"\n'
+            '    - category: pull_power\n      max_points: "2.3"\n'
             "      components: [pull_pct_air_balls]",
             '    - category: power_profile\n      max_points: "2.4"\n'
             "      components: [pull_pct_air_balls]",
@@ -278,15 +278,15 @@ def test_a_grade_table_that_does_not_start_at_zero_is_rejected() -> None:
     assert "must start at 0" in str(error)
 
 
-def test_a_grade_table_that_does_not_end_at_twelve_is_rejected() -> None:
+def test_a_grade_table_that_does_not_end_at_the_total_is_rejected() -> None:
     error = reject(mutate(GRADE_S, '    - { grade: S, lower: "9.4", upper: "11", terminal: true }'))
 
-    assert "must end at 12" in str(error)
+    assert "must end at 11.3" in str(error)
 
 
 def test_a_missing_terminal_grade_is_rejected() -> None:
     error = reject(
-        mutate(GRADE_S, '    - { grade: S, lower: "9.4", upper: "12",  terminal: false }')
+        mutate(GRADE_S, '    - { grade: S, lower: "9.4", upper: "11.3",  terminal: false }')
     )
 
     assert "terminal" in str(error)
@@ -479,13 +479,13 @@ def test_a_non_boolean_fuzzy_flag_is_refused() -> None:
 @pytest.mark.parametrize(
     ("label", "old", "new"),
     [
-        ("yaml float", '  total_max_points: "12"', "  total_max_points: 12.0"),
-        ("yaml integer", '  total_max_points: "12"', "  total_max_points: 12"),
-        ("boolean", '  total_max_points: "12"', "  total_max_points: true"),
-        ("malformed string", '  total_max_points: "12"', '  total_max_points: "abc"'),
-        ("NaN", '  total_max_points: "12"', '  total_max_points: "NaN"'),
-        ("Infinity", '  total_max_points: "12"', '  total_max_points: "Infinity"'),
-        ("empty string", '  total_max_points: "12"', '  total_max_points: ""'),
+        ("yaml float", '  total_max_points: "11.3"', "  total_max_points: 12.0"),
+        ("yaml integer", '  total_max_points: "11.3"', "  total_max_points: 12"),
+        ("boolean", '  total_max_points: "11.3"', "  total_max_points: true"),
+        ("malformed string", '  total_max_points: "11.3"', '  total_max_points: "abc"'),
+        ("NaN", '  total_max_points: "11.3"', '  total_max_points: "NaN"'),
+        ("Infinity", '  total_max_points: "11.3"', '  total_max_points: "Infinity"'),
+        ("empty string", '  total_max_points: "11.3"', '  total_max_points: ""'),
     ],
 )
 def test_scoring_numerics_must_be_quoted_decimal_strings(label: str, old: str, new: str) -> None:
