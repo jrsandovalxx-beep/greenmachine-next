@@ -4522,3 +4522,16 @@ same ask-first rule.
 
 Full gate green (3407 passed, 1 skipped), consistency check clean, all
 three showcase runners clean.
+
+## D-173 - The Conditions tab states the factor window
+
+Builder follow-through to D-172, 2026-09-02. The provenance record's
+standing requirement — any screen rendering the park factors says which
+window they describe — lost its surface when D-170 removed the Parks view,
+whose caption carried the statement. The Conditions tab renders the
+factors now, so it carries the statement: the same basis sentence the pin
+keeps, naming the published 2024-2026 three-season board and Sutter Health
+Park's 2025-2026 two-season exception. No numbers change.
+
+Full gate green (3408 passed, 1 skipped), consistency check clean, all
+three showcase runners clean.

@@ -325,6 +325,20 @@ def test_sluggers_render_as_bubble_rows_with_more_buttons(_staged_app: SlateBoar
     assert "Batter detail" in opened or "recent form" in opened.lower()
 
 
+def test_the_conditions_caption_states_the_factor_window(_staged_app: SlateBoard) -> None:
+    """D-172 (PO): the Conditions tab renders the pinned park factors, so it
+    states the window they describe — the published 2024-2026 three-season
+    board, with Sutter Health Park's 2025-2026 two-season exception named —
+    the provenance record's standing requirement on every surface."""
+    at = AppTest.from_file(str(_APP_PATH), default_timeout=_TIMEOUT)
+    at.run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    captions = " ".join(element.value for element in at.tabs[3].caption)
+    assert "2024-2026" in captions
+    assert "three-season" in captions
+    assert "2025-2026" in captions  # the Sutter exception is named
+
+
 def _display_values(element: object) -> pd.DataFrame:
     """A Styler-backed dataframe's shown text, from the Arrow display payload.
 
