@@ -185,7 +185,7 @@ from greenmachine.grid import (
 from greenmachine.inputs import InputSnapshot, WeatherForecast, Window
 from greenmachine.inputs.contract import Handedness, ParkFactor, ParkVenue, VenueType
 from greenmachine.inputs.park_reference import PARK_VENUES
-from greenmachine.inputs.savant_park_factors import read_factors
+from greenmachine.inputs.savant_park_factors import basis_statement, read_factors
 from greenmachine.inputs.wind_receptiveness import WindReceptiveness, read_receptiveness
 from greenmachine.live.backtest import (
     BacktestRow,
@@ -4426,7 +4426,10 @@ def _wind_effect_css(receptiveness: WindReceptiveness | None, resolved: Decimal 
 
 def _render_conditions(board: SlateBoard) -> None:
     st.caption(
-        "Parks and conditions. A park factor carries its plate-appearance "
+        # D-172 (PO): the tab rendering the factors states the window they
+        # describe — the provenance record's standing requirement, kept by
+        # the same statement the pin carries.
+        basis_statement() + " Parks and conditions. A park factor carries its plate-appearance "
         "sample beside it (D-014). Temperature bands (v2.2, ratified "
         "2026-08-23): <45°F → 0 (cold suppression) · 45-64 → 0.25 · "
         "65-74 → 0.5 · 75-84 → 1 · 85-89 → 1.25 · ≥90°F humidity-supported "
