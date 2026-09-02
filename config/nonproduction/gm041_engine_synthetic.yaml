@@ -17,7 +17,7 @@ fuzzy_scoring:
   enabled: false
 
 allocations:
-  total_max_points: "12"
+  total_max_points: "11.3"
 
   categories:
     - category: power_profile
@@ -27,8 +27,8 @@ allocations:
       max_points: "3.1"
       components: [pitch_mix_pressure, put_away_pitch_exploitation]
     - category: form
-      max_points: "2.1"
-      components: [sweet_spot_pct, attack_angle_quality, bat_speed]
+      max_points: "1.4"
+      components: [attack_angle_quality, bat_speed]
     - category: pull_power
       max_points: "2.2"
       components: [pull_pct_air_balls]
@@ -41,7 +41,7 @@ allocations:
     - { grade: C, lower: "3.7", upper: "5.9", terminal: false }
     - { grade: B, lower: "5.9", upper: "8.1", terminal: false }
     - { grade: A, lower: "8.1", upper: "9.8", terminal: false }
-    - { grade: S, lower: "9.8", upper: "12", terminal: true }
+    - { grade: S, lower: "9.8", upper: "11.3", terminal: true }
 
 components:
   - component_id: exit_velocity
@@ -195,34 +195,6 @@ components:
               - { lower: "0", upper: "50", points: "0" }
               - { lower: "50", upper: "100", points: "1.5" }
 
-  - component_id: sweet_spot_pct
-    scoring_method: bucketed
-    direction: higher_is_better
-    max_points: "0.7"
-    sample_type: batted_ball_events
-    missing_data:
-      policy: record_missing
-      reasons: [NO_EVENTS_IN_WINDOW, TRACKING_UNAVAILABLE, INVALID_SOURCE_VALUE, SOURCE_UNAVAILABLE]
-    applicable_profiles: [RECENT_7D, LONG_TERM_2Y]
-    profiles:
-      - window_profile: RECENT_7D
-        minimum_sample_required: 2
-        scoring:
-          - method: bucketed
-            domain_min: "0"
-            domain_max: "100"
-            buckets:
-              - { lower: "0", upper: "28", points: "0" }
-              - { lower: "28", upper: "100", points: "0.7" }
-      - window_profile: LONG_TERM_2Y
-        minimum_sample_required: 13
-        scoring:
-          - method: bucketed
-            domain_min: "0"
-            domain_max: "100"
-            buckets:
-              - { lower: "0", upper: "28", points: "0" }
-              - { lower: "28", upper: "100", points: "0.7" }
 
   - component_id: attack_angle_quality
     scoring_method: bucketed

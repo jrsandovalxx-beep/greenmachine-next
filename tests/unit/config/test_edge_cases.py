@@ -67,8 +67,8 @@ def test_a_non_positive_category_maximum_is_rejected() -> None:
 
 
 def test_a_non_positive_component_maximum_is_rejected() -> None:
-    text = mutate('      max_points: "2.4"', '      max_points: "0"')
-    text = text.replace('    max_points: "2.4"', '    max_points: "0"', 1)
+    text = mutate('      max_points: "2.3"', '      max_points: "0"')
+    text = text.replace('    max_points: "2.3"', '    max_points: "0"', 1)
     error = reject(text)
 
     assert "greater than 0" in str(error)

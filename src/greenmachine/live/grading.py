@@ -580,7 +580,6 @@ def build_batter_observations(
     # --- Form and pull power: event-derived recent windows (D-068) ---
     form = data.form
     form_specs: tuple[tuple[ComponentId, str, MissingReason, MeasurementId | None], ...] = (
-        (ComponentId.SWEET_SPOT_PCT, "percent", MissingReason.NO_EVENTS_IN_WINDOW, None),
         (ComponentId.PULL_PCT_AIR_BALLS, "percent", MissingReason.NO_EVENTS_IN_WINDOW, None),
         (
             ComponentId.ATTACK_ANGLE_QUALITY,
@@ -604,7 +603,6 @@ def build_batter_observations(
         ),
     )
     form_values: dict[ComponentId, FormValue | None] = {
-        ComponentId.SWEET_SPOT_PCT: form.sweet_spot_pct if form is not None else None,
         ComponentId.PULL_PCT_AIR_BALLS: form.pull_air_pct if form is not None else None,
         ComponentId.ATTACK_ANGLE_QUALITY: (
             form.ideal_attack_angle_pct if form is not None else None

@@ -77,7 +77,7 @@ def test_a_binary_predicate_all_of_preserves_a_discriminator_named_key(name: str
 
     assert caught.value.context.key_path == (
         "components",
-        "10",
+        "9",
         "profiles",
         "0",
         "scoring",
@@ -103,7 +103,7 @@ def test_a_binary_predicate_any_of_preserves_a_discriminator_named_key(name: str
 
     assert caught.value.context.key_path == (
         "components",
-        "10",
+        "9",
         "profiles",
         "0",
         "scoring",

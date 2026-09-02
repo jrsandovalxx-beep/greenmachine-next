@@ -134,16 +134,16 @@ def test_an_invalid_file_path_is_not_silently_stringified() -> None:
 def test_a_string_file_path_succeeds() -> None:
     config = load_config_text(valid_text(), file_path="fixture.yaml")
 
-    assert len(config.components) == 11
+    assert len(config.components) == 10
 
 
 def test_a_none_file_path_succeeds() -> None:
     config = load_config_text(valid_text(), file_path=None)
 
-    assert len(config.components) == 11
+    assert len(config.components) == 10
 
 
 def test_the_default_file_path_is_none() -> None:
     config = load_config_text(valid_text())
 
-    assert len(config.components) == 11
+    assert len(config.components) == 10

@@ -22,11 +22,13 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 CANONICAL = REPO_ROOT / "config" / "nonproduction" / "gm041_engine_synthetic.yaml"
 RETIRED = REPO_ROOT / "tests" / "fixtures" / "config" / "valid" / "gm041_engine_synthetic.yaml"
 
-# Captured from the file before the move and re-verified after it. A change to
-# either value means the relocation was not byte-faithful, or that somebody
-# edited a disclaimed non-production configuration without a ticket.
-EXPECTED_SOURCE_DIGEST = "51dac8cccfbba66d69a9dd6b744f4f077ecb1a37bdbaf7185242f0c224a5ece5"
-EXPECTED_CONFIG_HASH = "4502a00bc2f44deb9f79cae5f5439f49fe4e9dac3d2c7f169576013a9fc636a4"
+# Captured from the file before the move and re-verified after it, then
+# re-captured at D-174 (PO, 2026-09-02): sweet_spot_pct retired from the
+# fixture with the component itself. A change to either value means the
+# relocation was not byte-faithful, or that somebody edited a disclaimed
+# non-production configuration without a ticket.
+EXPECTED_SOURCE_DIGEST = "e46abf13f20c2f75e6041dd4980081bfa0a03279e85eab95c24659471babca32"
+EXPECTED_CONFIG_HASH = "84ea147b86ff541c435369b32d351b7c02fa247c2b04093894e1a322f5f94da3"
 EXPECTED_VERSION = "gm041-engine-synthetic-0"
 
 

@@ -172,9 +172,9 @@ def test_crlf_and_lf_produce_the_same_hash() -> None:
     assert _hash_of(crlf) == BASELINE
 
 
-@pytest.mark.parametrize("respelled", ['"12.0"', '"12.00"', '"12.000"'])
+@pytest.mark.parametrize("respelled", ['"11.30"', '"11.300"', '"11.3000"'])
 def test_equivalent_decimal_spellings_produce_the_same_hash(respelled: str) -> None:
-    text = mutate('total_max_points: "12"', f"total_max_points: {respelled}")
+    text = mutate('total_max_points: "11.3"', f"total_max_points: {respelled}")
 
     assert _hash_of(text) == BASELINE
 
@@ -234,18 +234,18 @@ def _component_allocation(data: dict) -> None:
 
 
 def _category_maximum(data: dict) -> None:
-    # Move 0.1 from pull_power to environment, keeping the total at 12 and each
-    # category's component sum consistent.
-    _category(data, "pull_power")["max_points"] = "2.3"
-    _category(data, "environment")["max_points"] = "1.8"
+    # Move 0.1 from pull_power to power_profile, keeping the total at 11.3 and
+    # each category's component sum consistent.
+    _category(data, "pull_power")["max_points"] = "2.2"
+    _category(data, "power_profile")["max_points"] = "2.8"
     pull = _component(data, "pull_pct_air_balls")
-    pull["max_points"] = "2.3"
+    pull["max_points"] = "2.2"
     for profile in pull["profiles"]:
-        profile["scoring"][0]["buckets"][-1]["points"] = "2.3"
-    weather = _component(data, "weather")
-    weather["max_points"] = "0.9"
-    for profile in weather["profiles"]:
-        profile["scoring"][0]["qualified_points"] = "0.9"
+        profile["scoring"][0]["buckets"][-1]["points"] = "2.2"
+    ev = _component(data, "exit_velocity")
+    ev["max_points"] = "1.0"
+    for profile in ev["profiles"]:
+        profile["scoring"][0]["buckets"][-1]["points"] = "1.0"
 
 
 def _grade_cutoff(data: dict) -> None:

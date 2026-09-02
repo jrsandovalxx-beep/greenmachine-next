@@ -68,22 +68,21 @@ def test_window_profile_display_names() -> None:
     assert WindowProfile.LONG_TERM_2Y.display_name == "Long-Term — Rolling 2 Years"
 
 
-def test_component_id_has_exactly_the_eleven_scored_components() -> None:
-    """MODEL_SPEC.md 2: eleven scored components, no more and no fewer."""
+def test_component_id_has_exactly_the_ten_scored_components() -> None:
+    """MODEL_SPEC.md 2, D-174: ten scored components, no more and no fewer."""
     assert values(ComponentId) == {
         "exit_velocity",
         "barrel_pct",
         "hard_hit_pct",
         "pitch_mix_pressure",
         "put_away_pitch_exploitation",
-        "sweet_spot_pct",
         "attack_angle_quality",
         "bat_speed",
         "pull_pct_air_balls",
         "park",
         "weather",
     }
-    assert len(ComponentId) == 11
+    assert len(ComponentId) == 10
 
 
 def test_measurement_id_holds_only_the_two_attack_angle_measurements() -> None:

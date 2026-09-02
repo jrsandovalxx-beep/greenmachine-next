@@ -67,7 +67,6 @@ ZEROING_VALUES = {
     ComponentId.HARD_HIT_PCT: "30",
     ComponentId.PITCH_MIX_PRESSURE: "40",
     ComponentId.PUT_AWAY_PITCH_EXPLOITATION: "40",
-    ComponentId.SWEET_SPOT_PCT: "20",
     ComponentId.ATTACK_ANGLE_QUALITY: "40",
     ComponentId.BAT_SPEED: "70",
     ComponentId.PULL_PCT_AIR_BALLS: "10",
@@ -106,18 +105,18 @@ def test_a_full_snapshot_evaluates_with_exact_arithmetic(
 ) -> None:
     result = score_snapshot(engine_snapshot(), config)
     assert isinstance(result, EvaluatedGradeResult)
-    assert result.total_score == Decimal("11.55")
+    assert result.total_score == Decimal("10.85")
     assert result.grade is Grade.S
 
     by_category = {score.category: score.points_awarded for score in result.category_scores}
     assert by_category == {
         Category.POWER_PROFILE: Decimal("2.35"),
         Category.PITCHER_MATCHUP: Decimal("3.1"),
-        Category.FORM: Decimal("2.1"),
+        Category.FORM: Decimal("1.4"),
         Category.PULL_POWER: Decimal("2.2"),
         Category.ENVIRONMENT: Decimal("1.8"),
     }
-    assert len(result.component_scores) == 11
+    assert len(result.component_scores) == 10
 
 
 def test_every_component_and_stage_appears_in_the_audit_derivation(
@@ -127,7 +126,7 @@ def test_every_component_and_stage_appears_in_the_audit_derivation(
     audited_components = {
         entry.component_id for entry in result.audit_derivation if entry.component_id
     }
-    assert audited_components == set(ZEROING_VALUES)  # all eleven components
+    assert audited_components == set(ZEROING_VALUES)  # all ten components
     stages = [entry.stage for entry in result.audit_derivation]
     for expected_stage in (
         "validation",
@@ -219,7 +218,7 @@ def test_record_missing_awards_an_explicit_zero_with_the_reason(
     )
     assert isinstance(result, EvaluatedGradeResult)
     assert _points(result, ComponentId.BAT_SPEED) == Decimal("0")
-    assert result.total_score == Decimal("10.95")  # 11.55 - 0.6
+    assert result.total_score == Decimal("10.25")  # 10.85 - 0.6
     entry = next(
         audit_entry
         for audit_entry in result.audit_derivation
@@ -278,7 +277,7 @@ def test_an_insufficient_sample_is_scored_and_warned_exactly_once(
     result = score_snapshot(engine_snapshot(insufficient={ComponentId.BARREL_PCT}), config)
     assert isinstance(result, EvaluatedGradeResult)
     assert _points(result, ComponentId.BARREL_PCT) == Decimal("0.45")  # still scored
-    assert result.total_score == Decimal("11.55")  # unchanged by the label
+    assert result.total_score == Decimal("10.85")  # unchanged by the label
     warnings = [
         finding
         for finding in result.validation_findings
@@ -316,7 +315,6 @@ def test_a_perfect_total_lands_in_the_inclusive_terminal_cutoff(
             ComponentId.HARD_HIT_PCT: "60",
             ComponentId.PITCH_MIX_PRESSURE: "60",
             ComponentId.PUT_AWAY_PITCH_EXPLOITATION: "60",
-            ComponentId.SWEET_SPOT_PCT: "30",
             ComponentId.ATTACK_ANGLE_QUALITY: "55",
             ComponentId.BAT_SPEED: "75",
             ComponentId.PULL_PCT_AIR_BALLS: "33",
@@ -325,7 +323,7 @@ def test_a_perfect_total_lands_in_the_inclusive_terminal_cutoff(
         }
     )
     result = score_snapshot(engine_snapshot(values=values), config)
-    assert result.total_score == Decimal("12.00")
+    assert result.total_score == Decimal("11.30")
     assert result.grade is Grade.S
 
 
@@ -344,7 +342,7 @@ def test_a_zeroed_category_still_grades_from_the_plain_arithmetic_total(
         ComponentId.HARD_HIT_PCT: "30",
     }
     result = score_snapshot(engine_snapshot(values=values), config)
-    assert result.total_score == Decimal("9.2")
+    assert result.total_score == Decimal("8.5")
     assert result.grade is Grade.A
 
 
@@ -357,15 +355,14 @@ def test_a_mid_range_combination_grades_from_its_exact_total(
             ComponentId.EXIT_VELOCITY: "95",
             ComponentId.BARREL_PCT: "8",
             ComponentId.HARD_HIT_PCT: "60",
-            ComponentId.SWEET_SPOT_PCT: "30",
             ComponentId.ATTACK_ANGLE_QUALITY: "55",
             ComponentId.PULL_PCT_AIR_BALLS: "20",
             ComponentId.PUT_AWAY_PITCH_EXPLOITATION: "60",
         }
     )
     result = score_snapshot(engine_snapshot(values=values), config)
-    assert result.total_score == Decimal("6.45")
-    assert result.grade is Grade.B
+    assert result.total_score == Decimal("5.75")
+    assert result.grade is Grade.C
 
 
 def test_a_near_floor_combination_grades_d(config: GreenMachineConfig) -> None:
@@ -836,7 +833,7 @@ def test_an_ambiguous_component_produces_no_partial_result(
 # leaked into the score and the tier. Independently measured on this same
 # synthetic snapshot before the fix:
 #
-#   normal context             -> 11.55  tier S
+#   normal context             -> 10.85  tier S
 #   precision 1, ROUND_DOWN    ->  7     tier B
 #   precision 2, ROUND_UP      -> 12     tier S
 #   precision 3, ROUND_FLOOR   -> 11.5   tier S
@@ -863,14 +860,14 @@ def _score_under(
     return result
 
 
-def test_the_normal_synthetic_result_is_exactly_11_55_and_tier_s(
+def test_the_normal_synthetic_result_is_exactly_10_85_and_tier_s(
     config: GreenMachineConfig,
 ) -> None:
     """The reference the hostile-context cases are compared against."""
     result = score_snapshot(engine_snapshot(), config)
 
     assert isinstance(result, EvaluatedGradeResult)
-    assert result.total_score == Decimal("11.55")
+    assert result.total_score == Decimal("10.85")
     assert result.grade is Grade.S
 
 
@@ -905,7 +902,7 @@ def test_a_hostile_caller_context_preserves_the_exact_total_and_tier(
     """The specific divergence the review measured, pinned by value."""
     hostile = _score_under(precision, rounding, engine_snapshot(), config)
 
-    assert hostile.total_score == Decimal("11.55")
+    assert hostile.total_score == Decimal("10.85")
     assert hostile.grade is Grade.S
 
 
