@@ -5064,6 +5064,23 @@ def main() -> None:
         sys._gm_cache_clear_pending = False  # type: ignore[attr-defined]
         st.cache_data.clear()
         st.cache_resource.clear()
+    # D-177: the once-per-epoch eviction (D-158/D-159) fired at the 8a24d11
+    # deploy yet the cache_resource Savant client kept the evicted module
+    # set's classes — the PicklingError's signature returned, and the epoch
+    # guard cannot refire within the epoch. Drift between the client's row
+    # classes and the module registry is impossible in a healthy process,
+    # so its presence always names stale state: clear both caches once and
+    # the render below rebuilds from the current modules.
+    _savant_client = live_mlb_adapters()[1]
+    _client_rows_with = _savant_client.fetch_pitch_arsenal.__func__.__globals__.get("PitchEvent")
+    _registry_rows_with = getattr(sys.modules.get("greenmachine.live.savant"), "PitchEvent", None)
+    if (
+        _client_rows_with is not None
+        and _registry_rows_with is not None
+        and _client_rows_with is not _registry_rows_with
+    ):
+        st.cache_data.clear()
+        st.cache_resource.clear()
     st.set_page_config(page_title="GreenMachine", layout="wide")
     bridge_secrets_into_environment()
     st.markdown(SHELL_CSS, unsafe_allow_html=True)

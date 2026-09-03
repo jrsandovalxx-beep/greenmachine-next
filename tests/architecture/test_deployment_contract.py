@@ -301,6 +301,30 @@ def test_the_entrypoint_evicts_a_preloaded_stale_bootstrap(tmp_path: Path) -> No
     assert "FRESH" in ran.stdout
 
 
+def test_main_clears_both_caches_on_savant_class_drift() -> None:
+    """D-177: the once-per-epoch eviction (D-158/D-159) fired at the
+    8a24d11 deploy, yet the cache_resource Savant client kept the evicted
+    module set's classes and the PicklingError returned — the epoch guard
+    cannot refire within the epoch, so a stale client had no remaining
+    healer. main() now compares the client's row classes against the
+    module registry on every run; drift is impossible in a healthy
+    process, so its presence always names stale state and both caches
+    clear, letting the render rebuild from the current modules."""
+    entrypoint = (REPO_ROOT / "streamlit_app.py").read_text(encoding="utf-8")
+    pending_clear_at = entrypoint.index('getattr(sys, "_gm_cache_clear_pending", False)')
+    # Anchor on the main()-block names — the D-150 failure surface's
+    # forensics probe reads the same identity pair earlier in the file.
+    drift_probe_at = entrypoint.index("_savant_client = live_mlb_adapters()[1]")
+    drift_registry_at = entrypoint.index("_registry_rows_with = getattr(")
+    assert pending_clear_at < drift_probe_at < drift_registry_at
+    drift_block = entrypoint[drift_probe_at:]
+    assert "fetch_pitch_arsenal.__func__.__globals__" in drift_block
+    assert 'sys.modules.get("greenmachine.live.savant")' in drift_block
+    assert "_client_rows_with is not _registry_rows_with" in drift_block
+    drift_clear_at = drift_block.index("st.cache_resource.clear()")
+    assert "st.cache_data.clear()" in drift_block[:drift_clear_at]
+
+
 def test_deployment_documentation_names_the_entrypoint_and_requirements() -> None:
     documentation = (REPO_ROOT / "docs" / "STREAMLIT_PROTOTYPE.md").read_text(encoding="utf-8")
     assert "entrypoint | `streamlit_app.py`" in documentation

@@ -4649,3 +4649,28 @@ max, category structure, sample minimums, and the Form score's 1.3
 ceiling. Both matchup components keep their provisional 50-cliffs
 pending the D-175 measurement run. Synthetic fixtures stay deliberately
 wrong-for-baseball; no production values were mirrored into them.
+
+## D-177 - A stale cache_resource client outlived the epoch eviction; main() now heals class drift
+
+2026-09-03: D-176 merged (8a24d11) and the live board failed with the
+PicklingError's exact signature — "not the same object as
+greenmachine.live.savant.PitchEvent". The D-150 failure surface's own
+forensics named it: the once-per-epoch eviction (D-158/D-159) had fired
+for the new commit and consumed its cache-clear, but the cache_resource
+Savant client still built rows with the evicted module set's classes
+(row-class identity probe: same=False), and the epoch guard cannot
+refire within the epoch. The D-176 content was not implicated — the
+deploy touched no live-pipeline code; the host's process simply outlived
+the deploy again (D-159's failure mode), one layer the eviction did not
+reach.
+
+The repair is deterministic rather than another lever pull: main() now
+compares the Savant client's row classes against the module registry on
+every run, right after the pending-clear block. Drift is impossible in a
+healthy process, so its presence always names stale state — both st
+caches clear and the render rebuilds the client from the current
+modules. No thresholds, components, or surfaces changed; the deployment
+contract suite gains the drift-check assertion.
+
+Full gate green (3408 passed, 1 skipped), consistency check clean, all
+three app runners clean.
