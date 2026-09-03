@@ -589,7 +589,7 @@ def _validate_buckets(
                     window_profile=window_profile,
                 )
         strongest, strongest_index = points[-1], len(points) - 1
-    else:
+    elif component.direction is Direction.LOWER_IS_BETTER:
         for index in range(len(points) - 1):
             if points[index] < points[index + 1]:
                 raise _fail(
@@ -602,6 +602,12 @@ def _validate_buckets(
                     window_profile=window_profile,
                 )
         strongest, strongest_index = points[0], 0
+    else:
+        # Direction.BAND (D-176, implementing D-175): mid-range values are
+        # best, so no monotonicity invariant holds; the strongest bucket is
+        # the richest one wherever it sits in the table.
+        richest = max(points)
+        strongest, strongest_index = richest, points.index(richest)
 
     if strongest != component.max_points:
         raise _fail(

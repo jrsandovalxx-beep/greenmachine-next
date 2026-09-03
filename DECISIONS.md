@@ -4618,3 +4618,34 @@ rulings:
 Unchanged: 11.3 total, D/C/B/A/S cutoffs at 4/6/8/10, every component
 max, category structure, sample minimums. Weights are deliberately not
 hand-tuned: the probability phase's logistic fit proposes them.
+
+## D-176 - The eight evidence ramp tables ship; a band direction enables the pull-air curve
+
+PO 2026-09-03, implementing D-175's approved tables ("Start the
+building"). All eight bucket tables in config/production/gm_hr_v1.yaml
+now read exactly as D-175 lists them: exit velocity ramps 0/.25/.45/.65/
+.8/.9/1.0 across the 86/88/89.5/91/92/93 edges; barrel 0/.25/.5/.7/.85/
+1.0 across 5/7/9/11/13; hard-hit 0/.25/.5/.7/.85/1.0 across 35/40/43/46/
+50; bat speed 0/.2/.4/.6 across 69/70.5/72; attack-angle ideal rate
+0/.2/.35/.5/.6/.7 across 38/42/46/52/58; venue factor 0/.15/.3/.55/.75/
+.9/1.0 across 95/100/105/110/115/120; weather 0/.2/.4/.55/.65/.8/.9/1.0
+across 50/56/62/72/80/85/90 (degrees F, cap stands); pull-air scores the
+band .5 <30 / 1.0 30-32 / 1.5 32-35 / 2.0 35-45 / 1.5 45-50 / 1.0 50-55
+/ .5 55-60 / .25 60+.
+
+One discovery changed the shape of the work, not the baseball: D-175
+called the change config-only on the belief that bucket tables are not
+required to be monotone, but the loader enforced a monotone-points
+invariant for both existing directions and would have failed the band
+table at load. The smallest faithful enabler shipped instead: the
+Direction vocabulary gains a third value, band, which skips the
+monotonicity check and requires only that the richest bucket awards the
+component max. pull_pct_air_balls carries direction: band with the
+direction label demoted to a comment note, exactly as D-175 ruled. The
+dormant attack-angle threshold-proxy block is untouched.
+
+Unchanged: 11.3 total, D/C/B/A/S cutoffs at 4/6/8/10, every component
+max, category structure, sample minimums, and the Form score's 1.3
+ceiling. Both matchup components keep their provisional 50-cliffs
+pending the D-175 measurement run. Synthetic fixtures stay deliberately
+wrong-for-baseball; no production values were mirrored into them.

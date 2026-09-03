@@ -59,9 +59,13 @@ components:
             domain_min: "0"
             domain_max: "130"
             buckets:
-              - { lower: "0", upper: "80", points: "0" }
-              - { lower: "80", upper: "90", points: "0.5" }
-              - { lower: "90", upper: "130", points: "1" }
+              - { lower: "0", upper: "86", points: "0" }
+              - { lower: "86", upper: "88", points: "0.25" }
+              - { lower: "88", upper: "89.5", points: "0.45" }
+              - { lower: "89.5", upper: "91", points: "0.65" }
+              - { lower: "91", upper: "92", points: "0.8" }
+              - { lower: "92", upper: "93", points: "0.9" }
+              - { lower: "93", upper: "130", points: "1" }
   - component_id: barrel_pct
     scoring_method: bucketed
     direction: higher_is_better
@@ -79,9 +83,12 @@ components:
             domain_min: "0"
             domain_max: "100"
             buckets:
-              - { lower: "0", upper: "7", points: "0" }
-              - { lower: "7", upper: "14", points: "0.5" }
-              - { lower: "14", upper: "100", points: "1" }
+              - { lower: "0", upper: "5", points: "0" }
+              - { lower: "5", upper: "7", points: "0.25" }
+              - { lower: "7", upper: "9", points: "0.5" }
+              - { lower: "9", upper: "11", points: "0.7" }
+              - { lower: "11", upper: "13", points: "0.85" }
+              - { lower: "13", upper: "100", points: "1" }
   - component_id: hard_hit_pct
     scoring_method: bucketed
     direction: higher_is_better
@@ -187,7 +194,9 @@ components:
             domain_min: "0"
             domain_max: "130"
             buckets:
-              - { lower: "0", upper: "72", points: "0" }
+              - { lower: "0", upper: "69", points: "0" }
+              - { lower: "69", upper: "70.5", points: "0.2" }
+              - { lower: "70.5", upper: "72", points: "0.4" }
               - { lower: "72", upper: "130", points: "0.6" }
   - component_id: pull_pct_air_balls
     scoring_method: bucketed
@@ -226,9 +235,13 @@ components:
             domain_min: "0"
             domain_max: "200"
             buckets:
-              - { lower: "0", upper: "100", points: "0" }
-              - { lower: "100", upper: "110", points: "0.5" }
-              - { lower: "110", upper: "200", points: "1" }
+              - { lower: "0", upper: "95", points: "0" }
+              - { lower: "95", upper: "100", points: "0.15" }
+              - { lower: "100", upper: "105", points: "0.3" }
+              - { lower: "105", upper: "110", points: "0.55" }
+              - { lower: "110", upper: "115", points: "0.75" }
+              - { lower: "115", upper: "120", points: "0.9" }
+              - { lower: "120", upper: "200", points: "1" }
   - component_id: weather
     scoring_method: bucketed
     direction: higher_is_better
@@ -242,18 +255,19 @@ components:
       - window_profile: RECENT_7D
         minimum_sample_required: 1
         scoring:
-          # v2.2 ratified temperature bucket edges (2026-08-23), with the
-          # award capped at the component max per the PO's 2026-08-24 ruling
-          # ("cap for now") — the 85+ bands are labels only at this cap:
-          # <45 = cold suppression, 45-64, 65-74, 75-84 full, 85-89 and
-          # 90+ would read 1.25/1.5 uncapped.
+          # D-175 temperature ramp (degrees F, PO 2026-09-03), replacing the
+          # v2.2 edges: suppression below 50, flat-ish through 62-80, and a
+          # warm boost above 80. The award stays capped at the component max
+          # per the PO's 2026-08-24 ruling.
           - method: bucketed
             domain_min: "0"
             domain_max: "120"
             buckets:
-              - { lower: "0", upper: "45", points: "0" }
-              - { lower: "45", upper: "65", points: "0.25" }
-              - { lower: "65", upper: "75", points: "0.5" }
-              - { lower: "75", upper: "85", points: "1" }
-              - { lower: "85", upper: "90", points: "1" }
+              - { lower: "0", upper: "50", points: "0" }
+              - { lower: "50", upper: "56", points: "0.2" }
+              - { lower: "56", upper: "62", points: "0.4" }
+              - { lower: "62", upper: "72", points: "0.55" }
+              - { lower: "72", upper: "80", points: "0.65" }
+              - { lower: "80", upper: "85", points: "0.8" }
+              - { lower: "85", upper: "90", points: "0.9" }
               - { lower: "90", upper: "120", points: "1" }
