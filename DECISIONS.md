@@ -4719,3 +4719,23 @@ sample minimums (50 mix / 25 put-away pitches).
 New tests pin both derivations (weighting, scaling, skips, fallback).
 Full gate green (3417 passed, 1 skipped), consistency check clean, all
 three app runners clean.
+
+## D-179 - Matchup ISO domains run to 400: thin-sample values are reported, never clamped
+
+2026-09-03, a correctness fix on D-178's heels. ISO's ceiling is 4.000
+(a home run in every at-bat against the pitch), so on the "ISO x100"
+percent scale a thin-sample read can land anywhere in 0-400 — a batter
+with two homers in three at-bats against four-seamers carries ISO 300
+against the pitch. D-178's tables kept the inherited 0-100 domain, which
+made the engine reject exactly the small-sample bombs the matchup
+components exist to catch. Both matchup scoring domains now run 0-400
+with the approved bucket edges unchanged; the derivations report the
+value as measured and the config domain takes it — nothing clamps at
+either layer. The sample minimums (50 mix / 25 put-away pitches) still
+govern what counts as measured at all, and the step-4 shrinkage work
+will handle thin-sample trust; neither changes here.
+
+Unchanged: 11.3 total, cutoffs, component maxes, categories, every
+bucket edge D-178 shipped. New tests pin both derivations reporting
+values above 100 unclamped. Full gate green (3419 passed, 1 skipped),
+consistency check clean, all three app runners clean.

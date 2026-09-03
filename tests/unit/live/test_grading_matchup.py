@@ -150,3 +150,24 @@ def test_put_away_without_any_batter_line_is_missing() -> None:
     derived = derive_put_away_exploitation(matchup)
     assert derived.value is None
     assert derived.reason is MissingReason.NO_EVENTS_IN_WINDOW
+
+
+def test_thin_sample_iso_above_one_is_reported_not_clamped() -> None:
+    """D-179: ISO's ceiling is 4.000 (a homer in every at-bat against the
+    pitch), so the percent scale runs past 100 — the derivation reports the
+    value and the config domain (0-400) takes it; nothing clamps."""
+    matchup = _matchup(
+        (_pitch_row("FF", usage="0.6", put_away="0.4"),),
+        (_batter_line("FF", iso="3.0"),),
+    )
+    derived = derive_put_away_exploitation(matchup)
+    assert derived.value == Decimal("300")
+
+
+def test_mix_pressure_reports_weighted_iso_above_one() -> None:
+    matchup = _matchup(
+        (_pitch_row("FF", usage="0.6"),),
+        (_batter_line("FF", iso="1.4"),),
+    )
+    derived = derive_pitch_mix_pressure(matchup)
+    assert derived.value == Decimal("140")
