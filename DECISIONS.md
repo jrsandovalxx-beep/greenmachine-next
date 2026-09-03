@@ -4567,3 +4567,54 @@ the PO.
 
 Full gate green (3408 passed, 1 skipped), consistency check clean, all
 three showcase runners clean.
+
+## D-175 - Grading ramps approved; matchup definitions locked
+
+PO 2026-09-03, after the season-evidence review (381 hitters with 150+
+plate appearances, 106,979 batted balls, 2,059 games with weather; lifts
+are versus the 3.12% league HR/PA baseline). "Start the building." Five
+rulings:
+
+1. The eight evidence-based ramp tables are approved as proposed —
+   cliffs become multi-step ramps, config-only:
+   - exit_velocity (1.0): 0 <86 / .25 86-88 / .45 88-89.5 / .65 89.5-91 /
+     .8 91-92 / .9 92-93 / 1.0 93+
+   - barrel_pct (1.0): 0 <5 / .25 5-7 / .5 7-9 / .7 9-11 / .85 11-13 /
+     1.0 13+
+   - hard_hit_pct (1.0): 0 <35 / .25 35-40 / .5 40-43 / .7 43-46 /
+     .85 46-50 / 1.0 50+
+   - bat_speed (0.6): 0 <69 / .2 69-70.5 / .4 70.5-72 / .6 72+
+   - attack_angle_quality (0.7): 0 <38 / .2 38-42 / .35 42-46 /
+     .5 46-52 / .6 52-58 / .7 58+
+   - park (1.0): 0 <95 / .15 95-100 / .3 100-105 / .55 105-110 /
+     .75 110-115 / .9 115-120 / 1.0 120+
+   - weather (1.0, degrees F, cap stands): 0 <50 / .2 50-56 / .4 56-62 /
+     .55 62-72 / .65 72-80 / .8 80-85 / .9 85-90 / 1.0 90+
+2. pull_pct_air_balls (2.0) changes direction: the season curve is a
+   band (+61% at 35-38%, -33% at 60%+), so it scores .5 <30 / 1.0 30-32 /
+   1.5 32-35 / 2.0 35-45 / 1.5 45-50 / 1.0 50-55 / .5 55-60 / .25 60+.
+   Bucket tables are not required to be monotone, so this is config-only;
+   the direction label becomes a comment note.
+3. Attack angle keeps Savant's published 5-20 ideal band (the measured
+   productive band is ~10-26, peak 16-22 at +113%, but the published rate
+   is stable and correlated 0.34); no custom band, no pipeline change.
+4. Launch angle is display-only: bands tested (18-40 won at 0.320 vs
+   24-36's 0.319), but barrel % already grades that physics (0.792), so
+   season launch-angle numbers get evidence color bands (16-24 hot,
+   12-16 neutral, below 10 weak) and attack-angle ideal rate stays the
+   graded form metric. LA 18-40 share may be trialed as a fitted input at
+   the probability phase.
+5. Matchup definitions locked for measurement: pitch_mix_pressure stays
+   batter-centric — usage-weighted production vs the starter's real
+   per-side mix — with a light pitcher-quality buff measured as
+   candidates (slow-fastball edge, hittable-pitch usage, air-tendency
+   fit). put_away_pitch_exploitation becomes "performs well": production
+   (xwOBA/ISO) AND whiff suppression versus league on the starter's
+   highest put-away-share pitch (K% pitch as fallback). No transcript
+   thresholds exist — the curves find the edges. Starter-only scope;
+   relievers after fine-tuning. Both matchup components keep their
+   provisional 50-cliffs (0 / 1.5) until the measurement run speaks.
+
+Unchanged: 11.3 total, D/C/B/A/S cutoffs at 4/6/8/10, every component
+max, category structure, sample minimums. Weights are deliberately not
+hand-tuned: the probability phase's logistic fit proposes them.
