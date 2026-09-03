@@ -2097,6 +2097,7 @@ def build_board(
                                 pitches=pitch_line.pitches,
                                 expected_woba=pitch_line.expected_woba,
                                 whiff_share=pitch_line.whiff_share,
+                                iso=pitch_line.iso,
                             )
                             for pitch_line in _pitch_lines(mix_scope_events)
                         ),

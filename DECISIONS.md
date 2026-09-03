@@ -4674,3 +4674,48 @@ contract suite gains the drift-check assertion.
 
 Full gate green (3408 passed, 1 skipped), consistency check clean, all
 three app runners clean.
+
+## D-178 - Matchup components score production (ISO) against the pitch; suppression leg dropped on the evidence
+
+2026-09-03, the D-175 measurement run's payoff. The season pull (615,117
+regular-season pitches, March 25 through September 2) built the two
+matrices — batter x side x pitch type and pitcher x side x pitch type —
+and the league curves for candidates M1-M5 and P1-P3, then validated
+pair-level with no look-ahead (18,886 batter-starter pair-days, every
+metric computed from strictly-before-season-to-date data):
+
+- M1 (usage-weighted batter production vs the starter's real mix) is
+  strong and monotone at both levels: pair-day lifts run -34% under ISO
+  .10 to +83% at .30+, crossover ~.12. ISO beats xwOBA as the read
+  (sharper at the top: +165% vs +122% season-long).
+- M2 (slow-fastball edge) is real but interaction-sized: positive-edge
+  batters vs slow-FB starters (+24%). Kept as the D-175 light buff.
+- M3 (hittable-pitch usage) is flat under every construction. Dropped.
+- P (put-away): the D-175 "whiff suppression" leg measured BACKWARDS —
+  batters who rarely miss a pitch type homer less off it (-15% to -24%;
+  the high-whiff power group homers more, +27%) at both levels.
+  Production vs the put-away pitch is the real edge (+35% at ISO .25+).
+
+Presented to the PO 2026-09-03 with band proposals; the PO recorded no
+preference on either question, so the evidence-recommended set ships.
+
+What changed: pitch_mix_pressure is now the usage-weighted batter ISO
+against the qualifying mix (percent scale, ISO .180 reads "18") with
+buckets 0 <.10 / .4 .10-.15 / .7 .15-.20 / .9 .20-.25 / 1.1 .25-.30 /
+1.5 .30+. put_away_pitch_exploitation is the batter's ISO against the
+starter's top put-away-share pitch (K%-share pitch as the D-175
+fallback), buckets 0 <.10 / .4 .10-.15 / .7 .15-.20 / 1.0 .20-.25 /
+1.5 .25+. Both derivations report on the "ISO x100" unit; the sample
+count is now the batter-side pitch coverage. BatterPitchLine carries
+iso; PitchMixRow carries strikeout_share for the fallback. The two old
+league-relative reads (beats-league share, whiff suppression) are gone.
+
+Deliberately deferred: the approved +0.2 slow-fastball-edge buff needs a
+points-level bonus mechanism in the scoring engine (a value-level bump
+would misstate the displayed metric — never). That mechanism is the next
+build item. Unchanged: 11.3 total, cutoffs, component maxes, categories,
+sample minimums (50 mix / 25 put-away pitches).
+
+New tests pin both derivations (weighting, scaling, skips, fallback).
+Full gate green (3417 passed, 1 skipped), consistency check clean, all
+three app runners clean.
