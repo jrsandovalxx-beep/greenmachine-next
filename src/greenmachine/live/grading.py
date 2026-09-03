@@ -113,6 +113,10 @@ class PitchMixRow:
     pitches: int
     usage_share: Decimal
     put_away_share: Decimal | None
+    # D-178: the season board's strikeout share — the put-away derivation's
+    # fallback ranking when no row carries a put-away share (D-175's K%-pitch
+    # fallback). None on window-built rows: pitch events carry no K% counts.
+    strikeout_share: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -120,12 +124,16 @@ class BatterPitchLine:
     """The batter's per-pitch line against the starter's side over the
     matchup window (D-079/D-088) — the batter half of the matchup grade.
     Rates are None where their denominator is empty; the derivations skip a
-    pitch they cannot read rather than inventing a zero."""
+    pitch they cannot read rather than inventing a zero. ``iso`` (D-178) is
+    the graded matchup production read: season-long and pair-level
+    measurement both found ISO — not contact quality — carries the home-run
+    signal against a pitch type."""
 
     pitch_type: str
     pitches: int
     expected_woba: Decimal | None
     whiff_share: Decimal | None
+    iso: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -207,59 +215,68 @@ def _qualifying_pitcher_rows(matchup: MatchupInput) -> list[PitchMixRow]:
 
 
 def derive_pitch_mix_pressure(matchup: MatchupInput) -> DerivedMatchup:
-    """Usage-weighted share of qualifying pitches the batter hits above league."""
+    """Usage-weighted batter ISO against the starter's qualifying mix (D-178).
+
+    The D-175 measurement run (615,117 pitches; season-long cells and a
+    no-look-ahead pair-level check agree): the batter's production against
+    each pitch type, weighted by how much the starter actually throws it,
+    carries the matchup home-run signal — monotone from -34% below league
+    under ISO .10 to +83% at .30+. The value ships on the percent scale
+    (ISO .180 reads "18") so the bucket table stays on its 0-100 domain.
+    A pitch type unreadable on the batter's side leaves both sums.
+    """
     batter_by_pitch = {row.pitch_type: row for row in matchup.batter_rows}
     weight_total = Decimal(0)
-    weight_beaten = Decimal(0)
+    iso_weighted = Decimal(0)
     sample = 0
     for pitcher_row in _qualifying_pitcher_rows(matchup):
         batter_row = batter_by_pitch.get(pitcher_row.pitch_type)
-        league = matchup.league.get(pitcher_row.pitch_type)
-        if (
-            batter_row is None
-            or batter_row.expected_woba is None
-            or league is None
-            or league.plate_appearances <= 0
-        ):
-            continue  # a pitch type unreadable on either side leaves both sums
+        if batter_row is None or batter_row.iso is None:
+            continue
         weight_total += pitcher_row.usage_share
-        sample += pitcher_row.pitches
-        if batter_row.expected_woba >= league.expected_woba:
-            weight_beaten += pitcher_row.usage_share
+        iso_weighted += pitcher_row.usage_share * batter_row.iso
+        sample += batter_row.pitches
     if weight_total <= 0:
         return DerivedMatchup(value=None, sample=0, reason=MissingReason.NO_EVENTS_IN_WINDOW)
     return DerivedMatchup(
-        value=PERCENT * weight_beaten / weight_total,
+        value=PERCENT * iso_weighted / weight_total,
         sample=sample,
         reason=None,
     )
 
 
 def derive_put_away_exploitation(matchup: MatchupInput) -> DerivedMatchup:
-    """Whiff suppression vs league on the starter's best put-away pitch."""
+    """Batter ISO against the starter's put-away pitch (D-178).
+
+    D-175 locked "production AND whiff suppression"; the measurement run
+    found suppression points the wrong way for home runs — batters who
+    rarely miss a pitch type homer LESS off it (-15% to -24%) while the
+    high-whiff power group homers more (+27%) — so production alone grades
+    the exploitation (PO reviewed 2026-09-03, no preference recorded: the
+    evidence-recommended definition ships). The target pitch is the
+    starter's highest put-away-share type, his top strikeout-share type as
+    the D-175 fallback. The value is ISO on the percent scale.
+    """
     batter_by_pitch = {row.pitch_type: row for row in matchup.batter_rows}
+    qualifying = _qualifying_pitcher_rows(matchup)
     candidates = sorted(
-        (row for row in _qualifying_pitcher_rows(matchup) if row.put_away_share is not None),
+        (row for row in qualifying if row.put_away_share is not None),
         key=lambda row: row.put_away_share or Decimal(0),
         reverse=True,
     )
+    if not candidates:
+        candidates = sorted(
+            (row for row in qualifying if row.strikeout_share is not None),
+            key=lambda row: row.strikeout_share or Decimal(0),
+            reverse=True,
+        )
     for pitcher_row in candidates:
         batter_row = batter_by_pitch.get(pitcher_row.pitch_type)
-        league = matchup.league.get(pitcher_row.pitch_type)
-        if (
-            batter_row is None
-            or batter_row.whiff_share is None
-            or league is None
-            or league.pitches <= 0
-        ):
+        if batter_row is None or batter_row.iso is None:
             continue
-        if league.whiff_share <= 0:
-            continue
-        suppression = (league.whiff_share - batter_row.whiff_share) / league.whiff_share
-        clamped = max(Decimal(0), min(Decimal(1), suppression))
         return DerivedMatchup(
-            value=PERCENT * clamped,
-            sample=pitcher_row.pitches,
+            value=PERCENT * batter_row.iso,
+            sample=batter_row.pitches,
             reason=None,
         )
     return DerivedMatchup(value=None, sample=0, reason=MissingReason.NO_EVENTS_IN_WINDOW)
@@ -563,7 +580,9 @@ def build_batter_observations(
         observations[component_id] = _present(
             component_id=component_id,
             value=derived.value,
-            unit="percent",
+            # D-178: both matchup derivations now report the batter's ISO
+            # against the pitch on the percent scale (ISO .180 reads "18").
+            unit="ISO x100",
             sample_type=sample_type,
             sample=derived.sample,
             minimum=_profile_minimum(config, component_id),

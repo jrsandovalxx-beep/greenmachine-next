@@ -141,12 +141,20 @@ components:
       - window_profile: RECENT_7D
         minimum_sample_required: 25
         scoring:
+          # D-178 (2026-09-03): batter ISO against the starter's top
+          # put-away-share pitch (K%-pitch fallback), percent scale. The
+          # D-175 whiff-suppression leg measured backwards for home runs
+          # (-15% to -24% for the low-whiff group), so production alone
+          # grades the exploitation. Edges: -19% at .05-.10, +35% at .25+.
           - method: bucketed
             domain_min: "0"
             domain_max: "100"
             buckets:
-              - { lower: "0", upper: "50", points: "0" }
-              - { lower: "50", upper: "100", points: "1.5" }
+              - { lower: "0", upper: "10", points: "0" }
+              - { lower: "10", upper: "15", points: "0.4" }
+              - { lower: "15", upper: "20", points: "0.7" }
+              - { lower: "20", upper: "25", points: "1" }
+              - { lower: "25", upper: "100", points: "1.5" }
   - component_id: attack_angle_quality
     scoring_method: bucketed
     direction: higher_is_better
