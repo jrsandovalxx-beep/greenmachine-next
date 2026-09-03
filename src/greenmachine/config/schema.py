@@ -161,10 +161,16 @@ class ScoringMethod(Enum):
 
 
 class Direction(Enum):
-    """Which way is better for a component's values."""
+    """Which way is better for a component's values.
+
+    ``band`` (D-176, implementing D-175): mid-range values score best, so the
+    bucket table is deliberately non-monotone and the monotone-points invariant
+    does not apply.
+    """
 
     HIGHER_IS_BETTER = "higher_is_better"
     LOWER_IS_BETTER = "lower_is_better"
+    BAND = "band"
 
 
 MissingDataPolicy = Literal["not_evaluable", "record_missing"]
