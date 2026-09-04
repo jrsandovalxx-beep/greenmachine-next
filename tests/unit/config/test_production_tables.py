@@ -149,3 +149,34 @@ def test_the_slow_fastball_edge_bonus_is_wired_to_pitch_mix_pressure() -> None:
     assert [(b.bonus_id, str(b.points)) for b in component.bonuses] == [
         ("slow_fastball_edge", "0.2")
     ]
+
+
+# D-184: the ratified league-average priors and shrink strengths, measured
+# over the 381-batter 2026 season board, 15k+ floored pair-days, the pinned
+# park-factor cells, and 2,454 games of weather. String-compared like the
+# tables: a silent prior edit is a silent scoring change.
+APPROVED_PRIORS: dict[str, tuple[str, int | None]] = {
+    "exit_velocity": ("0.4", 15),
+    "barrel_pct": ("0.43", 15),
+    "hard_hit_pct": ("0.39", 15),
+    "pitch_mix_pressure": ("0.56", None),
+    "put_away_pitch_exploitation": ("0.61", None),
+    "attack_angle_quality": ("0.44", 25),
+    "bat_speed": ("0.25", 25),
+    "pull_pct_air_balls": ("1.14", 5),
+    "park": ("0.37", None),
+    "weather": ("0.67", None),
+}
+
+
+@pytest.mark.parametrize("component_id", sorted(APPROVED_PRIORS))
+def test_the_ratified_prior_and_shrink_strength_are_shipped_verbatim(
+    component_id: str,
+) -> None:
+    want_prior, want_strength = APPROVED_PRIORS[component_id]
+    config = load_config(PRODUCTION)
+    component = next(c for c in config.components if c.component_id.value == component_id)
+
+    assert component.prior_points is not None
+    assert str(component.prior_points) == want_prior
+    assert component.shrink_strength == want_strength

@@ -365,6 +365,14 @@ class ComponentConfig(_Frozen):
     applicable_profiles: tuple[WindowProfile, ...] = Field(min_length=1)
     profiles: tuple[ComponentProfileConfig, ...] = Field(min_length=1)
     bonuses: tuple[BonusRule, ...] = ()
+    # D-184: the ratified league-average award. It substitutes for a
+    # missing component outright (the missing=0 fix) and anchors the
+    # shrinkage of thin present samples when ``shrink_strength`` is set.
+    prior_points: ConfigDecimal | None = None
+    # D-184: the sample size at which a measured award carries half weight
+    # against the prior (award' = prior + n/(n+k) x (award - prior)). None
+    # turns shrinkage off; the windowed form components carry the L7 floor.
+    shrink_strength: StrictInt | None = None
 
 
 # --------------------------------------------------------------------------

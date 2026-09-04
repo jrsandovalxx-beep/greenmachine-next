@@ -46,6 +46,10 @@ components:
     scoring_method: bucketed
     direction: higher_is_better
     max_points: "1"
+    # D-184: league-average award measured over the 381-batter 2026 season
+    # board (0.397); substitutes when missing, anchors shrinkage at k=15 BBE.
+    prior_points: "0.4"
+    shrink_strength: 15
     sample_type: batted_ball_events
     missing_data:
       policy: record_missing
@@ -70,6 +74,9 @@ components:
     scoring_method: bucketed
     direction: higher_is_better
     max_points: "1"
+    # D-184: league-average award 0.434 (2026 season board, 381 batters).
+    prior_points: "0.43"
+    shrink_strength: 15
     sample_type: batted_ball_events
     missing_data:
       policy: record_missing
@@ -93,6 +100,9 @@ components:
     scoring_method: bucketed
     direction: higher_is_better
     max_points: "1"
+    # D-184: league-average award 0.392 (2026 season board, 381 batters).
+    prior_points: "0.39"
+    shrink_strength: 15
     sample_type: batted_ball_events
     missing_data:
       policy: record_missing
@@ -125,6 +135,9 @@ components:
     bonuses:
       - bonus_id: slow_fastball_edge
         points: "0.2"
+    # D-184: league-average award 0.559 over 15,145 floored pair-days. No
+    # shrinkage: the value is a season-cumulative ISO, already stable.
+    prior_points: "0.56"
     missing_data:
       policy: record_missing
       reasons: [EXPECTED_PITCHER_UNKNOWN, SOURCE_UNAVAILABLE, PLAYER_NOT_COVERED, NO_EVENTS_IN_WINDOW]
@@ -153,6 +166,9 @@ components:
     scoring_method: bucketed
     direction: higher_is_better
     max_points: "1.5"
+    # D-184: league-average award 0.613 over 12,464 floored pair-days. No
+    # shrinkage: the value is a season-cumulative ISO, already stable.
+    prior_points: "0.61"
     sample_type: pitches
     missing_data:
       policy: record_missing
@@ -182,6 +198,9 @@ components:
     scoring_method: bucketed
     direction: higher_is_better
     max_points: "0.7"
+    # D-184: league-average award 0.438 (2026 season board, 381 batters).
+    prior_points: "0.44"
+    shrink_strength: 25
     sample_type: swings
     missing_data:
       policy: record_missing
@@ -216,6 +235,9 @@ components:
     scoring_method: bucketed
     direction: higher_is_better
     max_points: "0.6"
+    # D-184: league-average award 0.249 (2026 season board, 381 batters).
+    prior_points: "0.25"
+    shrink_strength: 25
     sample_type: swings
     missing_data:
       policy: record_missing
@@ -240,6 +262,10 @@ components:
     # "band", not monotone; the label reads as a comment note.
     direction: band
     max_points: "2"
+    # D-184: league-average award 1.137 (381 batters, production spray
+    # convention). Shrinkage k=5 — the D-133 light L7 air-ball floor.
+    prior_points: "1.14"
+    shrink_strength: 5
     sample_type: air_balls
     missing_data:
       policy: record_missing
@@ -265,6 +291,8 @@ components:
     scoring_method: bucketed
     direction: higher_is_better
     max_points: "1"
+    # D-184: league-average award 0.370 over the 60 pinned venue-side cells.
+    prior_points: "0.37"
     sample_type: plate_appearances
     missing_data:
       policy: record_missing
@@ -289,6 +317,9 @@ components:
     scoring_method: bucketed
     direction: higher_is_better
     max_points: "1"
+    # D-184: league-average award 0.669 over 2,454 games (roofed venues at
+    # the 72F neutral per D-111's roof rule).
+    prior_points: "0.67"
     sample_type: games
     missing_data:
       policy: record_missing

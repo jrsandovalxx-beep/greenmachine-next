@@ -31,8 +31,11 @@ RETIRED = REPO_ROOT / "tests" / "fixtures" / "config" / "valid" / "gm041_engine_
 # `bonuses` field (empty on every synthetic component) — the source bytes
 # and therefore EXPECTED_SOURCE_DIGEST are unchanged; only the projection
 # shape moved, and with it the semantic hash.
+# Re-captured at D-184 (2026-09-05): the projection gained `prior_points`
+# and `shrink_strength` (both unset on the synthetic components) — again
+# the source bytes are unchanged and only the projection shape moved.
 EXPECTED_SOURCE_DIGEST = "e46abf13f20c2f75e6041dd4980081bfa0a03279e85eab95c24659471babca32"
-EXPECTED_CONFIG_HASH = "4c15c2507d0c0169d74033cee8f8647b4417f6da943b4e98c018318d7cbfd043"
+EXPECTED_CONFIG_HASH = "2c78ec1053183a44ebed0b9f49e377625f88c19fd470d450cd269b7ae3d3f675"
 EXPECTED_VERSION = "gm041-engine-synthetic-0"
 
 

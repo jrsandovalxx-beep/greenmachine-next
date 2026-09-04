@@ -373,6 +373,10 @@ def test_missing_cells_name_their_reason(_staged_app: SlateBoard) -> None:
     markup = "\n".join(element.value for element in at.tabs[0].markdown).lower()
     assert "missing:" in markup
     assert "source unavailable" in markup
+    # D-184: a row with an absence also says how much of the grade is
+    # measured — the missing components award the league-average prior now,
+    # so the completeness tag is what keeps that honest.
+    assert "of 10 measured · rest at league avg" in markup
 
 
 def test_main_screen_is_the_shell_plus_the_live_board(_staged_app: SlateBoard) -> None:

@@ -466,6 +466,36 @@ def _score_present(
             ),
             component_id=component.component_id,
         )
+        # D-184: a thin sample's award shrinks toward the ratified
+        # league-average prior — weight n/(n+k) on the measured award, the
+        # prior carrying the rest — so a handful of air balls cannot pay a
+        # full bucket. Bucket-resolution points only; a D-180 bonus rides
+        # on a measured qualifier and never shrinks.
+        if component.shrink_strength is not None and component.prior_points is not None:
+            sample = Decimal(observation.sample_count)
+            weight = sample / Decimal(observation.sample_count + component.shrink_strength)
+            shrunk = component.prior_points + weight * (points - component.prior_points)
+            if shrunk != points:
+                audit.add(
+                    stage="shrinkage",
+                    rule_reference=reference,
+                    input_summary=(
+                        f"bucket award {_plain(points)} on a sample of "
+                        f"{observation.sample_count} against prior "
+                        f"{_plain(component.prior_points)} at strength "
+                        f"{component.shrink_strength}"
+                    ),
+                    output_summary=(
+                        f"shrunk to {_plain(shrunk)} (measured weight {_plain(weight)})"
+                    ),
+                    explanation=(
+                        "a thin window leans on the league average in "
+                        "proportion to its evidence (D-184); the measured "
+                        "value itself is untouched — only the award moves"
+                    ),
+                    component_id=component.component_id,
+                )
+            points = shrunk
         # D-180: configured bonuses attach to measured qualifiers on the
         # observation — points-level, capped at the component max, so the
         # displayed metric stays the measured value (D-178) while the audit
@@ -573,27 +603,51 @@ def _handle_missing(
                 attempted_methods=(),
             ),
         )
-    audit.add(
-        stage="missing_recorded_zero",
-        rule_reference=reference,
-        input_summary=(f"missing with reason '{observation.missing_reason.value}'"),
-        output_summary=(
-            f"recorded 0 of {_plain(component.max_points)} points with the missing "
-            f"reason on the record"
-        ),
-        explanation=(
-            "the configured missing-data policy for this component is "
-            "'record_missing': the absence is visible and awards nothing "
-            "(MODEL_SPEC §8)"
-        ),
-        component_id=component.component_id,
-    )
+    # D-184: a configured prior substitutes the ratified league-average
+    # award for the zero — the absence stays visible on the record, but a
+    # component we cannot read no longer drags the grade below what a
+    # league-average contributor would earn.
+    substitute = component.prior_points
+    if substitute is not None:
+        audit.add(
+            stage="missing_substituted_prior",
+            rule_reference=reference,
+            input_summary=(f"missing with reason '{observation.missing_reason.value}'"),
+            output_summary=(
+                f"recorded the league-average prior {_plain(substitute)} of "
+                f"{_plain(component.max_points)} points with the missing reason "
+                f"on the record"
+            ),
+            explanation=(
+                "the configured missing-data policy for this component is "
+                "'record_missing' with a ratified league-average prior (D-184): "
+                "the absence is visible and awards the prior, not zero "
+                "(MODEL_SPEC §8)"
+            ),
+            component_id=component.component_id,
+        )
+    else:
+        audit.add(
+            stage="missing_recorded_zero",
+            rule_reference=reference,
+            input_summary=(f"missing with reason '{observation.missing_reason.value}'"),
+            output_summary=(
+                f"recorded 0 of {_plain(component.max_points)} points with the missing "
+                f"reason on the record"
+            ),
+            explanation=(
+                "the configured missing-data policy for this component is "
+                "'record_missing': the absence is visible and awards nothing "
+                "(MODEL_SPEC §8)"
+            ),
+            component_id=component.component_id,
+        )
     return _ComponentOutcome(
         component_id=component.component_id,
         score=ComponentScore(
             component_id=observation.component_id,
             measurement_id=observation.measurement_id,
-            points_awarded=_ZERO,
+            points_awarded=substitute if substitute is not None else _ZERO,
             bucket_hit=None,
         ),
         unavailable=None,
