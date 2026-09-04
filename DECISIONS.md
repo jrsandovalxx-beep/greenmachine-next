@@ -4804,3 +4804,32 @@ New tests pin the plateau (both hot edges, the weak line, the unfilled
 neutral and unnamed zones) and the registry guard now names LA's
 dedicated coverage. Full gate green (3451 passed, 1 skipped),
 consistency check clean, all three app runners clean.
+
+## D-182 - Cold-build fetches run through a bounded pool, never one-at-a-time
+
+2026-09-04, on the PO's "app is not loading — fix load times." The cold
+build's true cost surfaced the morning after the D-180/D-181 deploys:
+every process start owes the 91-day event window plus one season record
+per probable (D-143) and per slate batter (D-180) — over a hundred
+independent single-CSV reads, each generated server-side in seconds.
+Sequential, they summed past ten minutes; the board's splash simply
+outlasted any reasonable wait. A deploy restarts the process, so every
+ship charged this in full.
+
+The pipeline now runs the day-window fetch and both season-record loops
+through one bounded thread pool (six workers — a polite ceiling, well
+inside Savant's tolerance; the sequential loops were the only throttle).
+The transport opens one urllib request per call with no shared session,
+so the pool shares nothing but the network. Results are keyed and
+consumed in caller order: the event sequence, the diagnostics, and every
+degraded-component reason read exactly as the sequential loops produced
+them, and a fetch that raises (a broken contract, never a transport
+miss — those return FetchFailure) propagates exactly as before. No
+score, surface, threshold, or cache key changes; a warm process is
+untouched, and a cold one pays the slowest handful of fetches instead of
+the sum of all of them.
+
+New tests pin the pool contract: window order and failure naming under
+out-of-order completion, per-day slate filtering, one fetch per unique
+key, and raise-propagation. Full gate green (3456 passed, 1 skipped),
+consistency check clean, all three app runners clean.

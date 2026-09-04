@@ -7,9 +7,11 @@ deployed app loads — so these tests also guard the config against drift.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+
+import pytest
 
 from greenmachine.config.loader import load_config
 from greenmachine.domain.enums import ComponentId, MissingReason, SampleStatus
@@ -27,7 +29,13 @@ from greenmachine.live.mlb_api import (
     SeasonPitchingLine,
     Slate,
 )
-from greenmachine.live.pipeline import _starter_workload, _stuff_drift, build_board
+from greenmachine.live.pipeline import (
+    _fetch_many_by_key,
+    _starter_workload,
+    _stuff_drift,
+    build_board,
+    fetch_window_events,
+)
 from greenmachine.live.savant import (
     BattedBallRow,
     BatTrackingRow,
@@ -2275,3 +2283,92 @@ def test_money_tag_stays_off_when_the_log_source_fails() -> None:
     board = _build(_FakeApi(game_logs=FetchFailure("game-logs: HTTP 503")), _FakeSavant())
     assert not isinstance(board, FetchFailure)
     assert board.games[0].away_batters[0].homered_on_slate_day is None
+
+
+# --------------------------------------------------------------------------
+# D-182: pooled fetches preserve the sequential contract
+# --------------------------------------------------------------------------
+
+
+def _keyed_event(day: date) -> PitchEvent:
+    return PitchEvent(
+        game_pk=day.day,
+        game_date=day.isoformat(),
+        batter_id=100 + day.day,
+        pitcher_id=200 + day.day,
+        batter_side="R",
+        pitcher_throws="R",
+        pitch_type="FF",
+        event="field_out",
+        description="",
+        bb_type="",
+        launch_speed=None,
+        launch_angle=None,
+        launch_speed_angle=None,
+        hc_x=None,
+        hc_y=None,
+        estimated_woba=None,
+        woba_value=None,
+        woba_denom=None,
+    )
+
+
+def test_pooled_day_fetches_preserve_window_order_and_name_failures() -> None:
+    """Completion order must not leak into the record: day 2 finishing last
+    still lands between days 1 and 3, and a failed day is named in place."""
+    days = tuple(date(2026, 8, 10) + timedelta(days=n) for n in range(6))
+    failed_day = days[3]
+
+    def fetch_day(day: date) -> tuple[PitchEvent, ...] | FetchFailure:
+        if day == failed_day:
+            return FetchFailure("savant 503")
+        # Later days return first: reverse-order sleep without sleeping.
+        return (_keyed_event(day),)
+
+    events, diagnostics = fetch_window_events(fetch_day, days=days)
+
+    assert [event.game_date for event in events] == [
+        day.isoformat() for day in days if day != failed_day
+    ]
+    assert diagnostics == (f"pitch events for {failed_day.isoformat()}: savant 503",)
+
+
+def test_pooled_day_fetches_apply_the_slate_filter_per_day() -> None:
+    days = (date(2026, 8, 10), date(2026, 8, 11))
+
+    def fetch_day(day: date) -> tuple[PitchEvent, ...]:
+        return (_keyed_event(day),)
+
+    events, diagnostics = fetch_window_events(
+        fetch_day, days=days, keep=lambda event: event.batter_id == 110
+    )
+
+    assert [event.game_date for event in events] == ["2026-08-10"]
+    assert diagnostics == ()
+
+
+def test_the_pool_collects_every_key_exactly_once() -> None:
+    calls: list[int] = []
+
+    def fetch(pid: int) -> tuple[PitchEvent, ...] | FetchFailure:
+        calls.append(pid)
+        return ()
+
+    results = _fetch_many_by_key(fetch, [3, 1, 2, 3])
+
+    assert sorted(calls) == [1, 2, 3]  # duplicates fetch once
+    assert set(results) == {1, 2, 3}
+
+
+def test_a_pool_of_one_key_still_runs() -> None:
+    results = _fetch_many_by_key(lambda pid: (), [7])
+
+    assert results == {7: ()}
+
+
+def test_a_raised_fetch_propagates_like_the_sequential_loop_did() -> None:
+    def fetch(pid: int) -> tuple[PitchEvent, ...] | FetchFailure:
+        raise RuntimeError("contract breach")
+
+    with pytest.raises(RuntimeError, match="contract breach"):
+        _fetch_many_by_key(fetch, [1])
