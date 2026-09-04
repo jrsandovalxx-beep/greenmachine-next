@@ -2231,7 +2231,12 @@ def _form_score_text(result: GradeResult, form_max: Decimal) -> str | None:
     points = _form_points(result)
     if points is None:
         return None
-    return f"{format(points.normalize(), 'f')} / {format(form_max.normalize(), 'f')}"
+    # D-185: D-184's shrinkage prices thin samples at long decimals
+    # (0.630405…); the cell shows two places — display-only, the audit
+    # keeps the exact award. normalize() keeps clean values as they were
+    # ("1.3", never "1.30").
+    shown = points.quantize(Decimal("0.01")).normalize()
+    return f"{format(shown, 'f')} / {format(form_max.normalize(), 'f')}"
 
 
 def _form_section_frames(
