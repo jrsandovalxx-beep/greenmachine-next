@@ -793,6 +793,32 @@ def _day_events(day_iso: str, year: int, anchor: str) -> object:
     return _recent_day_events(day_iso, year)
 
 
+def _final_day_before(anchor: str) -> str:
+    """The last day the anchor treats as final (D-136): the day before it."""
+    return (date.fromisoformat(anchor) - timedelta(days=1)).isoformat()
+
+
+@st.cache_data(ttl=FINAL_DAY_EVENTS_TTL_SECONDS, show_spinner=False)
+def _batter_season_events_final(
+    player_id: int, end_iso: str
+) -> tuple[PitchEvent, ...] | FetchFailure:
+    """One batter's regular-season pitch record through a FINAL day
+    (D-180): the slow-fastball edge's batter leg. Because the end day is
+    final by construction, the record caches with the long TTL — one fetch
+    per batter per morning, never an intraday refetch. The FetchFailure
+    reaches the caller so the board build names its diagnostic instead of
+    inventing a split."""
+    _, savant = live_mlb_adapters()
+    year = int(end_iso[:4])
+    return savant.fetch_player_pitch_events(
+        year=year,
+        role="batter",
+        player_id=player_id,
+        start=f"{year}-03-01",
+        end=end_iso,
+    )
+
+
 @st.cache_data(ttl=DAY_EVENTS_TTL_SECONDS, show_spinner=False)
 def _season_pitch_events(
     player_id: int, role: str, slate_iso: str
@@ -900,6 +926,13 @@ def live_board(slate_iso: str, batter_window_days: int) -> SlateBoard | FetchFai
         # with the dialog's breakup read.
         return _season_pitch_events(pid, "pitcher", slate_iso)
 
+    def fetch_batter_season_events(pid: int) -> object:
+        # D-180: one batter's season pitch record through the last FINAL
+        # day — the slow-fastball edge's batter leg. Final days cache long
+        # (D-136), so the season-long read is fetched once per batter per
+        # morning and never refetched on an intraday rerun.
+        return _batter_season_events_final(pid, _final_day_before(anchor))
+
     weather_diagnostics: list[str] = []
     board = build_board(
         api=_DayAnchoredMlbApi(api, anchor),  # type: ignore[arg-type]
@@ -914,6 +947,7 @@ def live_board(slate_iso: str, batter_window_days: int) -> SlateBoard | FetchFai
         wind_for=_wind_lookup(weather_diagnostics),  # type: ignore[arg-type]
         humidity_for=_humidity_lookup(weather_diagnostics),  # type: ignore[arg-type]
         fetch_pitcher_season_events=fetch_pitcher_season_events,  # type: ignore[arg-type]
+        fetch_batter_season_events=fetch_batter_season_events,  # type: ignore[arg-type]
     )
     LIVE_WEATHER_DIAGNOSTICS[slate_iso] = weather_diagnostics
     return board

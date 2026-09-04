@@ -516,3 +516,63 @@ def test_a_bucket_point_supplied_as_a_yaml_float_is_refused() -> None:
 
     with pytest.raises(ConfigSchemaError, match=r"YAML float"):
         load_config_text(text, file_path="synthetic.yaml")
+
+
+# --------------------------------------------------------------------------
+# D-180 bonus rules (points-level add-ons on measured qualifiers)
+# --------------------------------------------------------------------------
+
+_EV_COMPONENT_HEAD = """  - component_id: exit_velocity
+    scoring_method: bucketed
+    direction: higher_is_better
+    max_points: "0.9"
+"""
+_EV_BONUS = '    bonuses:\n      - { bonus_id: slow_fastball_edge, points: "0.2" }\n'
+
+
+def _ev_with_bonus(bonus_block: str) -> str:
+    return mutate(_EV_COMPONENT_HEAD, _EV_COMPONENT_HEAD + bonus_block)
+
+
+def test_a_valid_bonus_rule_loads() -> None:
+    config = load_config_text(_ev_with_bonus(_EV_BONUS), file_path="synthetic.yaml")
+    ev = next(c for c in config.components if c.component_id.value == "exit_velocity")
+    assert [(b.bonus_id, str(b.points)) for b in ev.bonuses] == [("slow_fastball_edge", "0.2")]
+
+
+def test_a_duplicate_bonus_id_is_rejected() -> None:
+    duplicate_block = (
+        "    bonuses:\n"
+        '      - { bonus_id: slow_fastball_edge, points: "0.2" }\n'
+        '      - { bonus_id: slow_fastball_edge, points: "0.1" }\n'
+    )
+    error = reject(_ev_with_bonus(duplicate_block))
+
+    assert "bonus declared more than once" in str(error)
+    assert "slow_fastball_edge" in str(error)
+
+
+def test_zero_bonus_points_are_rejected() -> None:
+    error = reject(_ev_with_bonus(_EV_BONUS.replace('points: "0.2"', 'points: "0"')))
+
+    assert "bonus points must be positive" in str(error)
+
+
+def test_negative_bonus_points_are_rejected() -> None:
+    error = reject(_ev_with_bonus(_EV_BONUS.replace('points: "0.2"', 'points: "-0.2"')))
+
+    assert "bonus points must be positive" in str(error)
+
+
+def test_bonus_points_at_the_component_max_are_rejected() -> None:
+    error = reject(_ev_with_bonus(_EV_BONUS.replace('points: "0.2"', 'points: "0.9"')))
+
+    assert "must sit below the component max_points" in str(error)
+
+
+def test_an_empty_bonus_id_is_refused_by_the_schema() -> None:
+    with pytest.raises(ConfigSchemaError):
+        load_config_text(
+            _ev_with_bonus(_EV_BONUS.replace("slow_fastball_edge", "")),
+            file_path="synthetic.yaml",
+        )

@@ -11,9 +11,22 @@ pitch selection, and the K%-pitch fallback.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 
-from greenmachine.domain.enums import MissingReason
+import synthetic_records
+from gm041_engine_snapshots import engine_snapshot
+
+from greenmachine.config import load_config
+from greenmachine.domain import (
+    ComponentId,
+    MetricObservation,
+    MissingObservation,
+    MissingReason,
+)
+from greenmachine.evaluation import deserialize_record, serialize_record
+from greenmachine.live import grading
 from greenmachine.live.grading import (
     BatterPitchLine,
     MatchupInput,
@@ -21,6 +34,7 @@ from greenmachine.live.grading import (
     derive_pitch_mix_pressure,
     derive_put_away_exploitation,
 )
+from greenmachine.live.savant import PitchEvent
 
 
 def _pitch_row(
@@ -171,3 +185,215 @@ def test_mix_pressure_reports_weighted_iso_above_one() -> None:
     )
     derived = derive_pitch_mix_pressure(matchup)
     assert derived.value == Decimal("140")
+
+
+# --------------------------------------------------------------------------
+# D-180 slow-fastball edge: the trigger behind the pitch_mix_pressure bonus
+#
+# The measurement run locked the exact trigger (D-178): the batter's season
+# ISO against fastballs strictly under 92.5 mph minus his ISO against
+# fastballs at or over 94.5 mph, each band at a 15-PA floor, must clear
+# +.05 — and the starter's season fastball velocity must sit at or under
+# 92.5 over at least 25 fastballs. Both legs measure or the edge is None.
+# --------------------------------------------------------------------------
+
+_EDGE_FIXTURE = (
+    Path(__file__).resolve().parents[3] / "config" / "nonproduction" / "gm041_engine_synthetic.yaml"
+)
+
+
+def _fb_event(
+    event: str = "",
+    *,
+    release_speed: str | None = "91.0",
+    pitch_type: str = "FF",
+) -> PitchEvent:
+    return PitchEvent(
+        game_pk=1,
+        game_date="2026-08-20",
+        batter_id=101,
+        pitcher_id=201,
+        batter_side="R",
+        pitcher_throws="R",
+        pitch_type=pitch_type,
+        event=event,
+        description="",
+        bb_type="",
+        launch_speed=None,
+        launch_angle=None,
+        launch_speed_angle=None,
+        hc_x=None,
+        hc_y=None,
+        estimated_woba=None,
+        woba_value=None,
+        woba_denom=None,
+        release_speed=Decimal(release_speed) if release_speed is not None else None,
+    )
+
+
+def _band(outcomes: list[str], speed: str) -> list[PitchEvent]:
+    return [_fb_event(outcome, release_speed=speed) for outcome in outcomes]
+
+
+def _qualifying_batter_events() -> list[PitchEvent]:
+    # slow band ISO (12-3)/15 = .6; hard band ISO (4-1)/15 = .2; edge .4 > .05
+    slow = _band(["home_run"] * 3 + ["field_out"] * 12, "90.5")
+    hard = _band(["home_run"] + ["field_out"] * 14, "95.5")
+    return slow + hard
+
+
+def _starter_events(pitches: int = 25, speed: str = "91.0") -> list[PitchEvent]:
+    return [_fb_event(release_speed=speed) for _ in range(pitches)]
+
+
+def test_a_qualifying_edge_against_a_slow_starter_fires() -> None:
+    assert grading.derive_slow_fastball_edge(_qualifying_batter_events(), _starter_events()) is True
+
+
+def test_an_edge_below_the_trigger_does_not_fire() -> None:
+    flat = _band(["home_run"] * 3 + ["field_out"] * 12, "90.5") + _band(
+        ["home_run"] * 3 + ["field_out"] * 12, "95.5"
+    )
+    assert grading.derive_slow_fastball_edge(flat, _starter_events()) is False
+
+
+def test_a_thin_batter_band_leaves_the_edge_unread() -> None:
+    thin_slow = _band(["home_run"] * 3 + ["field_out"] * 11, "90.5")  # 14 PA, under the floor
+    hard = _band(["home_run"] + ["field_out"] * 14, "95.5")
+    assert grading.derive_slow_fastball_edge(thin_slow + hard, _starter_events()) is None
+
+
+def test_a_fast_starter_does_not_fire() -> None:
+    assert (
+        grading.derive_slow_fastball_edge(
+            _qualifying_batter_events(), _starter_events(speed="95.5")
+        )
+        is False
+    )
+
+
+def test_a_thin_starter_record_leaves_the_edge_unread() -> None:
+    assert (
+        grading.derive_slow_fastball_edge(_qualifying_batter_events(), _starter_events(24)) is None
+    )
+
+
+def test_a_starter_exactly_at_the_slow_edge_qualifies() -> None:
+    """The starter leg is at-or-under; the batter band edge is strict."""
+    assert (
+        grading.derive_slow_fastball_edge(
+            _qualifying_batter_events(), _starter_events(speed="92.5")
+        )
+        is True
+    )
+
+
+def test_pitches_without_a_recorded_speed_never_enter_either_leg() -> None:
+    batter = _band(["home_run"] * 3 + ["field_out"] * 12, "90.5")
+    batter += _band(["home_run"] + ["field_out"] * 14, "95.5")
+    batter = [  # strip every recorded speed — both bands empty out
+        _fb_event(event.event, release_speed=None) for event in batter
+    ]
+    assert grading.derive_slow_fastball_edge(batter, _starter_events()) is None
+    assert (
+        grading.derive_slow_fastball_edge(
+            _qualifying_batter_events(),
+            [_fb_event(release_speed=None) for _ in range(30)],
+        )
+        is None
+    )
+
+
+def test_non_fastball_pitch_types_are_ignored() -> None:
+    batter = _band(["home_run"] * 3 + ["field_out"] * 12, "88.0")
+    batter = [_fb_event(e.event, release_speed="88.0", pitch_type="SL") for e in batter]
+    starter = [_fb_event(release_speed="88.0", pitch_type="SL") for _ in range(30)]
+    assert grading.derive_slow_fastball_edge(batter, starter) is None
+
+
+def test_the_dead_zone_between_the_bands_counts_on_neither_side() -> None:
+    batter = _qualifying_batter_events() + _band(["field_out"] * 20, "93.5")
+    assert grading.derive_slow_fastball_edge(batter, _starter_events()) is True
+
+
+def test_the_slow_band_edge_is_strict_and_the_hard_edge_is_inclusive() -> None:
+    # 92.5 exactly is NOT slow; the slow band empties out and the edge is unread.
+    batter = _band(["home_run"] * 3 + ["field_out"] * 12, "92.5") + _band(
+        ["home_run"] + ["field_out"] * 14,
+        "94.5",  # 94.5 exactly IS hard
+    )
+    assert grading.derive_slow_fastball_edge(batter, _starter_events()) is None
+
+
+def test_the_measurement_at_bat_accounting_is_pinned() -> None:
+    """A sacrifice fly stays an at-bat; a walk and a sac bunt do not."""
+    events = _band(["home_run"] * 3 + ["field_out"] * 11 + ["sac_fly", "walk", "sac_bunt"], "90.5")
+    plate_appearances, iso = grading._band_iso(events)
+    assert plate_appearances == 17
+    assert iso == Decimal(9) / Decimal(15)  # AB = 17 - walk - sac_bunt; sac_fly stays
+
+    no_sac_fly = _band(["home_run"] * 3 + ["field_out"] * 11 + ["walk", "sac_bunt"], "90.5")
+    _, iso_without = grading._band_iso(no_sac_fly)
+    assert iso_without == Decimal(9) / Decimal(14)
+
+
+def _grading_input(edge: bool | None) -> grading.BatterGradingInput:
+    matchup = MatchupInput(
+        pitcher_rows=(_pitch_row("FF", usage="0.6"),),
+        batter_rows=(_batter_line("FF", iso="0.2"),),
+        league={},
+    )
+    return grading.BatterGradingInput(
+        game=synthetic_records.game_context(),
+        batter=synthetic_records.batter(),
+        pitcher=synthetic_records.pitcher(),
+        pitcher_throws="R",
+        bats="R",
+        tracking_sides=(),
+        statcast=None,
+        form=None,
+        tracking_rows_present=False,
+        matchup=matchup,
+        home_run_factor=None,
+        home_run_factor_plate_appearances=0,
+        venue_roofed=False,
+        temperature_fahrenheit=None,
+        slow_fastball_edge=edge,
+    )
+
+
+def _pmp_observation(edge: bool | None) -> MetricObservation | MissingObservation:
+    config = load_config(_EDGE_FIXTURE)
+    observations = grading.build_batter_observations(
+        _grading_input(edge),
+        config=config,
+        as_of=synthetic_records.AS_OF,
+        season_start=datetime(2026, 3, 1, tzinfo=UTC),
+        capture=synthetic_records.CAPTURE,
+    )
+    return next(
+        observation
+        for observation in observations
+        if observation.component_id is ComponentId.PITCH_MIX_PRESSURE
+    )
+
+
+def test_a_measured_edge_attaches_the_qualifier_to_pitch_mix_pressure() -> None:
+    observation = _pmp_observation(True)
+    assert isinstance(observation, MetricObservation)
+    assert observation.qualifiers == ("slow_fastball_edge",)
+
+
+def test_no_edge_means_no_qualifier() -> None:
+    for edge in (False, None):
+        observation = _pmp_observation(edge)
+        assert isinstance(observation, MetricObservation)
+        assert observation.qualifiers == ()
+
+
+def test_the_qualifier_survives_canonical_serialization() -> None:
+    """The qualifier must round-trip byte-exact — a record that loses it
+    would silently under-score on reload."""
+    snapshot = engine_snapshot(qualifiers={ComponentId.PITCH_MIX_PRESSURE: ("slow_fastball_edge",)})
+    restored = deserialize_record(serialize_record(snapshot))
+    assert restored == snapshot

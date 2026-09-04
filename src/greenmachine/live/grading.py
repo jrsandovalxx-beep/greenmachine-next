@@ -25,6 +25,7 @@ product questions Q15/Q16):
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -52,8 +53,13 @@ from greenmachine.domain.values import (
     SourceCaptureId,
 )
 from greenmachine.evaluation.serialization import freeze_input_snapshot
-from greenmachine.live.form import FormSection, FormValue
-from greenmachine.live.savant import PitchArsenalRow, StatcastBatterRow
+from greenmachine.live.form import (
+    HIT_BASES,
+    NON_PLATE_APPEARANCE_EVENTS,
+    FormSection,
+    FormValue,
+)
+from greenmachine.live.savant import PitchArsenalRow, PitchEvent, StatcastBatterRow
 from greenmachine.scoring.engine import score_snapshot
 
 QUALIFYING_USAGE_SHARE = Decimal("0.15")
@@ -66,6 +72,107 @@ ROOFED_VENUE_NEUTRAL_FAHRENHEIT = Decimal("72")
 RECENT_WINDOW_DAYS = 7
 FORM_FALLBACK_REACH_DAYS = 14
 PERCENT = Decimal(100)
+
+# D-180 — the slow-fastball edge, D-175's approved light buff on the mix
+# pressure grade (candidate M2; +24% in the no-look-ahead pair-day
+# validation). The trigger reproduces the measurement run exactly:
+# fastballs are the FF/SI/FC set, the slow band is strictly under the slow
+# edge and the hard band at or over the hard edge (rebuilt from the season
+# pitch record and matched to the run's matrices pitch-for-pitch), the
+# edge is slow-band ISO minus hard-band ISO on the run's PA accounting
+# (each band needs its PA floor), and the starter side is his season
+# fastball velocity at or under the slow-starter edge with a small pitch
+# floor against opening-day noise.
+FASTBALL_TYPES = frozenset({"FF", "SI", "FC"})
+SLOW_FASTBALL_BELOW = Decimal("92.5")
+HARD_FASTBALL_FROM = Decimal("94.5")
+SLOW_FB_BAND_MIN_PA = 15
+SLOW_FB_EDGE_TRIGGER = Decimal("0.05")
+SLOW_STARTER_FB_AT_OR_UNDER = Decimal("92.5")
+SLOW_STARTER_MIN_FB_PITCHES = 25
+SLOW_FASTBALL_EDGE_QUALIFIER = "slow_fastball_edge"
+
+# The measurement run's at-bat accounting: a sacrifice fly stays an at-bat
+# (a batted ball), a sacrifice bunt does not — the cells the trigger was
+# validated on were built exactly so.
+_SLOW_FB_NON_AT_BAT = frozenset(
+    {
+        "walk",
+        "intent_walk",
+        "hit_by_pitch",
+        "sac_bunt",
+        "sac_bunt_double_play",
+        "catcher_interf",
+    }
+)
+
+
+def _band_iso(events: Sequence[PitchEvent]) -> tuple[int, Decimal | None]:
+    """(plate appearances, ISO) for one fastball band on the measurement
+    run's accounting: a plate appearance is any PA-ending event; ISO is
+    (total bases - hits) / at-bats, None when the band has no at-bats."""
+    ending = [
+        event for event in events if event.event and event.event not in NON_PLATE_APPEARANCE_EVENTS
+    ]
+    at_bats = sum(1 for event in ending if event.event not in _SLOW_FB_NON_AT_BAT)
+    hits = sum(1 for event in ending if event.event in HIT_BASES)
+    bases = sum(HIT_BASES.get(event.event, 0) for event in ending)
+    iso = (Decimal(bases) - Decimal(hits)) / Decimal(at_bats) if at_bats else None
+    return len(ending), iso
+
+
+def _fastballs_with_speed(events: Sequence[PitchEvent]) -> list[tuple[PitchEvent, Decimal]]:
+    """Fastballs carrying a recorded speed, paired with it — a pitch with no
+    recorded speed never enters either leg of the edge derivation."""
+    out: list[tuple[PitchEvent, Decimal]] = []
+    for event in events:
+        if event.pitch_type not in FASTBALL_TYPES:
+            continue
+        speed = event.release_speed
+        if speed is None:
+            continue
+        out.append((event, speed))
+    return out
+
+
+def derive_slow_fastball_edge(
+    batter_events: Sequence[PitchEvent],
+    pitcher_events: Sequence[PitchEvent],
+) -> bool | None:
+    """Whether the D-180 slow-fastball-edge bonus trigger holds for this
+    batter against this starter — True only when both legs measure and
+    qualify, False when both measure and one fails, None when either side
+    is too thin to read (the bonus simply never attaches; nothing becomes
+    a named absence on the grade).
+
+    Batter leg: season ISO against fastballs strictly under the slow edge
+    minus season ISO against fastballs at or over the hard edge, each band
+    at its PA floor, the difference clearing the trigger. Starter leg:
+    season fastball velocity at or under the slow-starter edge over at
+    least the pitch floor. A pitch with no recorded speed never enters
+    either leg.
+    """
+    batter_fastballs = _fastballs_with_speed(batter_events)
+    slow_pa, slow_iso = _band_iso(
+        [event for event, speed in batter_fastballs if speed < SLOW_FASTBALL_BELOW]
+    )
+    hard_pa, hard_iso = _band_iso(
+        [event for event, speed in batter_fastballs if speed >= HARD_FASTBALL_FROM]
+    )
+    pitcher_speeds = [speed for _, speed in _fastballs_with_speed(pitcher_events)]
+    if (
+        slow_pa < SLOW_FB_BAND_MIN_PA
+        or hard_pa < SLOW_FB_BAND_MIN_PA
+        or slow_iso is None
+        or hard_iso is None
+        or len(pitcher_speeds) < SLOW_STARTER_MIN_FB_PITCHES
+    ):
+        return None
+    mean_velo = sum(pitcher_speeds, Decimal(0)) / Decimal(len(pitcher_speeds))
+    batter_qualifies = slow_iso - hard_iso > SLOW_FB_EDGE_TRIGGER
+    starter_qualifies = mean_velo <= SLOW_STARTER_FB_AT_OR_UNDER
+    return bool(batter_qualifies and starter_qualifies)
+
 
 _UNKNOWN_STARTER_NAME = "Expected starter not announced"
 
@@ -176,6 +283,10 @@ class BatterGradingInput:
     home_run_factor_plate_appearances: int
     venue_roofed: bool
     temperature_fahrenheit: Decimal | None
+    # D-180: the measured slow-fastball edge for this batter against this
+    # starter (None = either side too thin to read). Attaches the qualifier
+    # the pitch_mix_pressure bonus fires on; the displayed value never moves.
+    slow_fastball_edge: bool | None = None
 
 
 def league_baselines(
@@ -360,6 +471,7 @@ def _present(
     capture: SourceCaptureId,
     coverage_start: datetime,
     coverage_end: datetime,
+    qualifiers: tuple[str, ...] = (),
 ) -> MetricObservation:
     return MetricObservation(
         component_id=component_id,
@@ -380,6 +492,7 @@ def _present(
         source_as_of=as_of,
         retrieved_at=as_of,
         source_capture_id=capture,
+        qualifiers=qualifiers,
     )
 
 
@@ -594,6 +707,11 @@ def build_batter_observations(
             capture=capture,
             coverage_start=season_start,
             coverage_end=as_of,
+            qualifiers=(
+                (SLOW_FASTBALL_EDGE_QUALIFIER,)
+                if component_id is ComponentId.PITCH_MIX_PRESSURE and data.slow_fastball_edge
+                else ()
+            ),
         )
 
     # --- Form and pull power: event-derived recent windows (D-068) ---

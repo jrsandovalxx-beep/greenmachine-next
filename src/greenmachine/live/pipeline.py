@@ -56,6 +56,7 @@ from greenmachine.live.grading import (
     BatterPitchLine,
     MatchupInput,
     PitchMixRow,
+    derive_slow_fastball_edge,
     grade_batter,
     league_baselines,
     resolve_batting_side,
@@ -1596,6 +1597,8 @@ def build_board(
     humidity_for: Callable[[ParkVenue, datetime], Decimal | None] = lambda venue, at: None,
     fetch_pitcher_season_events: Callable[[int], tuple[PitchEvent, ...] | FetchFailure]
     | None = None,
+    fetch_batter_season_events: Callable[[int], tuple[PitchEvent, ...] | FetchFailure]
+    | None = None,
 ) -> SlateBoard | FetchFailure:
     """Assemble and grade the full slate. Only a slate-level failure is fatal."""
     diagnostics: list[str] = []
@@ -1736,6 +1739,24 @@ def build_board(
                 )
                 continue
             season_events_by_pitcher[pid] = fetched_season_events
+
+    # D-180: the batter half of the slow-fastball edge — each slate batter's
+    # season pitch record through the final day, one fetch per batter per
+    # day (the caller caches on the final day, so an intraday rerun never
+    # refetches). None when the build wires no fetcher — backtest boards
+    # skip it, a fetch per batter per backtest day would bury the range —
+    # and a failure names itself in diagnostics; the edge simply stays
+    # unmeasured for that batter and no bonus attaches.
+    season_events_by_batter: dict[int, tuple[PitchEvent, ...]] = {}
+    if fetch_batter_season_events is not None:
+        for bid in all_batter_ids:
+            fetched_batter_events = fetch_batter_season_events(bid)
+            if isinstance(fetched_batter_events, FetchFailure):
+                diagnostics.append(
+                    f"batter season pitch record ({bid}): {fetched_batter_events.reason}"
+                )
+                continue
+            season_events_by_batter[bid] = fetched_batter_events
 
     statcast_result = savant.fetch_statcast_batters(year=year)
     statcast: dict[int, StatcastBatterRow]
@@ -2108,6 +2129,17 @@ def build_board(
                     and pitcher_arsenal_available
                     else None
                 )
+                # D-180: the slow-fastball edge is measured only when both
+                # season records are on hand; an unwired fetcher or a named
+                # failure leaves it None and no bonus attaches.
+                slow_fastball_edge: bool | None = None
+                if pitcher_entity is not None:
+                    batter_season_events = season_events_by_batter.get(player_id)
+                    starter_season_events = season_events_by_pitcher.get(pitcher_id)
+                    if batter_season_events is not None and starter_season_events is not None:
+                        slow_fastball_edge = derive_slow_fastball_edge(
+                            batter_season_events, starter_season_events
+                        )
                 grading_input = BatterGradingInput(
                     game=game_context,
                     batter=Batter(
@@ -2128,6 +2160,7 @@ def build_board(
                     ),
                     venue_roofed=roofed,
                     temperature_fahrenheit=temperature,
+                    slow_fastball_edge=slow_fastball_edge,
                 )
                 result = grade_batter(
                     grading_input,

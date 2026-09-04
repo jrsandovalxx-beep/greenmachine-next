@@ -56,6 +56,7 @@ def engine_snapshot(
     aaq_measurement: MeasurementId = MeasurementId.IDEAL_ATTACK_ANGLE_PCT,
     minimum_overrides: Mapping[ComponentId, int] | None = None,
     sample_type_overrides: Mapping[ComponentId, SampleType] | None = None,
+    qualifiers: Mapping[ComponentId, tuple[str, ...]] | None = None,
 ) -> InputSnapshot:
     """A frozen snapshot over the ten GM-041 fixture components.
 
@@ -74,6 +75,7 @@ def engine_snapshot(
     missing = dict(missing or {})
     minimum_overrides = dict(minimum_overrides or {})
     sample_type_overrides = dict(sample_type_overrides or {})
+    qualifiers = dict(qualifiers or {})
     present_observations: list[MetricObservation] = []
     missing_observations: list[MissingObservation] = []
 
@@ -98,6 +100,7 @@ def engine_snapshot(
                 sample_count=sample_count,
                 minimum=minimum,
                 measurement_id=measurement,
+                qualifiers=qualifiers.get(component, ()),
             )
         )
 

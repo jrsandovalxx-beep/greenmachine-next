@@ -124,6 +124,7 @@ def metric_observation(
     sample_count: int,
     minimum: int,
     measurement_id: object = None,
+    qualifiers: tuple[str, ...] = (),
 ) -> MetricObservation:
     status = SampleStatus.SUFFICIENT if sample_count >= minimum else SampleStatus.INSUFFICIENT
     return MetricObservation(
@@ -146,6 +147,7 @@ def metric_observation(
         retrieved_at=RETRIEVED_AT,
         source_capture_id=CAPTURE,
         fallback_used=None,
+        qualifiers=qualifiers,
     )
 
 

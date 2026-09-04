@@ -4739,3 +4739,44 @@ Unchanged: 11.3 total, cutoffs, component maxes, categories, every
 bucket edge D-178 shipped. New tests pin both derivations reporting
 values above 100 unclamped. Full gate green (3419 passed, 1 skipped),
 consistency check clean, all three app runners clean.
+
+## D-180 - Slow-fastball-edge buff ships as a points-level bonus on measured qualifiers
+
+2026-09-04. D-178 measured the edge (+24% HR-rate lift in the validated
+cell) and named the mechanism: a points-level bonus in the scoring
+engine, never a value-level bump — the displayed metric stays the
+measured ISO. This ships it.
+
+Trigger (locked from the measurement run's surviving data): the batter's
+season ISO against fastballs strictly under 92.5 mph minus his ISO
+against fastballs at or over 94.5 mph clears +.05, each band at a 15-PA
+floor on the measurement run's accounting (sac flies are at-bats, walks
+and sac bunts are not); the starter's season fastball velocity sits at
+or under 92.5 over at least 25 fastballs. Both legs measure or the edge
+is simply unread (None) and nothing attaches; a pitch with no recorded
+speed never enters either leg.
+
+Mechanism: a component may now declare `bonuses` (id + points) in
+config — pitch_mix_pressure carries `slow_fastball_edge: +0.2`. An
+observation carries a sorted, duplicate-free `qualifiers` tuple; when a
+measured qualifier matches a configured bonus the engine adds the points
+on top of the bucket award, capped at the component max, with a
+`bonus_application` audit stage naming exactly what fired. Validation
+rejects duplicate bonus ids, non-positive points, and points at or over
+the component max (a bonus that large would hollow out the bucket
+table). The canonical record form gained `qualifiers` — stored fixtures
+and golden snapshots were migrated and re-frozen, and the synthetic
+fixture's semantic hash moved on the projection shape alone (source
+bytes unchanged).
+
+Wiring: the pitch search CSV carries release_speed with `all=true` (no
+URL change); the pipeline derives the edge from both season pitch
+records through a new optional batter-season fetcher, and the app caches
+it final-day-only (one fetch per batter per morning, never an intraday
+refetch). Backtest boards deliberately do not wire the fetcher — a fetch
+per batter per backtest day would bury the range — so historical boards
+score exactly as before.
+
+Unchanged: 11.3 total, cutoffs, component maxes, categories, bucket
+edges, sample minimums. Full gate green (3450 passed, 1 skipped),
+consistency check clean, all three app runners clean.

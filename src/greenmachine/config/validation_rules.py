@@ -391,6 +391,34 @@ def _validate_components(config: GreenMachineConfig, file_path: str | None) -> N
                 metric=metric,
             )
 
+        # D-180: bonuses are points-level add-ons on a measured qualifier —
+        # positive, below the component max (a bonus at or over the max
+        # would hollow out the bucket table), and unique per component.
+        bonus_ids = [bonus.bonus_id for bonus in component.bonuses]
+        if repeated := _duplicates(bonus_ids):
+            raise _fail(
+                f"bonus declared more than once: {repeated}",
+                file_path,
+                (*base, "bonuses"),
+                metric=metric,
+            )
+        for bonus_index, bonus in enumerate(component.bonuses):
+            if bonus.points <= 0:
+                raise _fail(
+                    f"bonus points must be positive, got {bonus.points}",
+                    file_path,
+                    (*base, "bonuses", str(bonus_index), "points"),
+                    metric=metric,
+                )
+            if bonus.points >= component.max_points:
+                raise _fail(
+                    f"bonus points ({bonus.points}) must sit below the component "
+                    f"max_points ({component.max_points})",
+                    file_path,
+                    (*base, "bonuses", str(bonus_index), "points"),
+                    metric=metric,
+                )
+
         for profile_index, profile in enumerate(component.profiles):
             _validate_profile(
                 component, profile_index, profile, file_path, (*base, "profiles"), metric
