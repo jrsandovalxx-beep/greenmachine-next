@@ -254,6 +254,10 @@ class PitchEvent:
     # board cannot split (its hand filter is inert, verified 2026-08-25).
     estimated_slg: Decimal | None = None
     estimated_ba: Decimal | None = None
+    # D-180: per-pitch release speed — the slow-fastball-edge derivation
+    # bands batter season ISO on it (the search CSV carries the column with
+    # all=true, so no URL change).
+    release_speed: Decimal | None = None
 
 
 def _decimal(raw: Any, context: str) -> Decimal:
@@ -336,6 +340,7 @@ def _parse_pitch_event(row: dict[str, str], context: str) -> PitchEvent:
         hit_distance=_decimal_or_none(row.get("hit_distance_sc")),
         estimated_slg=_decimal_or_none(row.get("estimated_slg_using_speedangle")),
         estimated_ba=_decimal_or_none(row.get("estimated_ba_using_speedangle")),
+        release_speed=_decimal_or_none(row.get("release_speed")),
     )
 
 

@@ -32,10 +32,12 @@ from ._guards import (
     ensure_finite_decimal,
     ensure_instance,
     ensure_measurement_matches_component,
+    ensure_no_duplicates,
     ensure_non_empty_text,
     ensure_non_negative_int,
     ensure_optional_instance,
     ensure_ordered,
+    ensure_tuple_of,
 )
 from .enums import (
     AcquisitionMethod,
@@ -94,6 +96,11 @@ class MetricObservation:
     retrieved_at: datetime
     source_capture_id: SourceCaptureId
     fallback_used: FallbackRecord | None = None
+    # D-180: bonus qualifiers measured alongside the value (e.g. the
+    # slow-fastball edge on a matchup read). A sorted, duplicate-free tuple
+    # so the canonical record form stays order-independent; empty for every
+    # component that carries no bonus.
+    qualifiers: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         ensure_measurement_matches_component(
@@ -132,6 +139,16 @@ class MetricObservation:
         fallback = ensure_optional_instance(
             self.fallback_used, FallbackRecord, "MetricObservation.fallback_used"
         )
+
+        qualifiers = ensure_tuple_of(self.qualifiers, str, "MetricObservation.qualifiers")
+        for qualifier in qualifiers:
+            ensure_non_empty_text(qualifier, "MetricObservation.qualifiers")
+        ensure_no_duplicates(qualifiers, "MetricObservation.qualifiers")
+        if tuple(sorted(qualifiers)) != qualifiers:
+            raise DomainValidationError(
+                "MetricObservation.qualifiers must be sorted so the canonical record "
+                "form is order-independent"
+            )
 
         expected_status = (
             SampleStatus.SUFFICIENT if sample_count >= minimum else SampleStatus.INSUFFICIENT

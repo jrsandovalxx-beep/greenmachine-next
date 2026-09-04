@@ -27,8 +27,12 @@ RETIRED = REPO_ROOT / "tests" / "fixtures" / "config" / "valid" / "gm041_engine_
 # fixture with the component itself. A change to either value means the
 # relocation was not byte-faithful, or that somebody edited a disclaimed
 # non-production configuration without a ticket.
+# Re-captured at D-180 (2026-09-04): the semantic projection gained the
+# `bonuses` field (empty on every synthetic component) — the source bytes
+# and therefore EXPECTED_SOURCE_DIGEST are unchanged; only the projection
+# shape moved, and with it the semantic hash.
 EXPECTED_SOURCE_DIGEST = "e46abf13f20c2f75e6041dd4980081bfa0a03279e85eab95c24659471babca32"
-EXPECTED_CONFIG_HASH = "84ea147b86ff541c435369b32d351b7c02fa247c2b04093894e1a322f5f94da3"
+EXPECTED_CONFIG_HASH = "4c15c2507d0c0169d74033cee8f8647b4417f6da943b4e98c018318d7cbfd043"
 EXPECTED_VERSION = "gm041-engine-synthetic-0"
 
 

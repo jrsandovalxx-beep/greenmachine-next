@@ -466,6 +466,37 @@ def _score_present(
             ),
             component_id=component.component_id,
         )
+        # D-180: configured bonuses attach to measured qualifiers on the
+        # observation — points-level, capped at the component max, so the
+        # displayed metric stays the measured value (D-178) while the audit
+        # names exactly what the bonus added.
+        awarded = {
+            bonus.bonus_id: bonus.points
+            for bonus in component.bonuses
+            if bonus.bonus_id in observation.qualifiers
+        }
+        if awarded:
+            bonus_total = sum(awarded.values(), Decimal("0"))
+            capped = min(points + bonus_total, component.max_points)
+            audit.add(
+                stage="bonus_application",
+                rule_reference=reference,
+                input_summary=(f"qualifiers {sorted(awarded)} measured on the observation"),
+                output_summary=(
+                    f"bonus of {_plain(bonus_total)} on top of {_plain(points)}"
+                    + (
+                        f", capped at the component max {_plain(component.max_points)}"
+                        if capped < points + bonus_total
+                        else ""
+                    )
+                ),
+                explanation=(
+                    "a bonus is a points-level ruling on a measured qualifier "
+                    "(D-180); the metric itself is never inflated"
+                ),
+                component_id=component.component_id,
+            )
+            points = capped
         return ComponentScore(
             component_id=component.component_id,
             measurement_id=observation.measurement_id,

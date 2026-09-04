@@ -92,6 +92,7 @@ def test_observation_carries_every_field_required_by_the_spec() -> None:
         "retrieved_at",
         "source_capture_id",
         "fallback_used",
+        "qualifiers",
     }
 
 
@@ -372,3 +373,41 @@ def test_observation_as_of_is_supplied_never_generated() -> None:
     observation = make_observation()
 
     assert observation.as_of == AS_OF
+
+
+# --------------------------------------------------------------------------
+# D-180 qualifiers — measured flags a scoring bonus can attach to
+# --------------------------------------------------------------------------
+
+
+def test_qualifiers_default_to_empty() -> None:
+    assert make_observation().qualifiers == ()
+
+
+def test_qualifiers_round_trip_as_a_sorted_tuple() -> None:
+    observation = make_observation(qualifiers=("alpha_flag", "beta_flag"))
+
+    assert observation.qualifiers == ("alpha_flag", "beta_flag")
+    assert isinstance(observation.qualifiers, tuple)
+
+
+def test_qualifiers_must_be_sorted() -> None:
+    """Canonical serialization reflects field order; unsorted qualifiers would
+    give two spellings of the same observation."""
+    with pytest.raises(DomainValidationError, match=r"sorted"):
+        make_observation(qualifiers=("beta_flag", "alpha_flag"))
+
+
+def test_qualifiers_reject_duplicates() -> None:
+    with pytest.raises(DomainValidationError, match=r"duplicate"):
+        make_observation(qualifiers=("alpha_flag", "alpha_flag"))
+
+
+def test_qualifiers_reject_blank_entries() -> None:
+    with pytest.raises(DomainValidationError):
+        make_observation(qualifiers=("",))
+
+
+def test_qualifiers_reject_non_string_entries() -> None:
+    with pytest.raises(DomainValidationError):
+        make_observation(qualifiers=(42,))  # type: ignore[arg-type]

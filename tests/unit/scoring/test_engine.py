@@ -936,3 +936,96 @@ def test_scoring_leaves_a_hostile_caller_context_exactly_as_it_found_it(
         assert decimal.getcontext().prec == 2
         assert decimal.getcontext().rounding == decimal.ROUND_UP
         assert dict(decimal.getcontext().traps) == traps_before
+
+
+# --------------------------------------------------------------------------
+# D-180 points-level bonuses on measured qualifiers
+# --------------------------------------------------------------------------
+
+_PMP_ANCHOR = """  - component_id: pitch_mix_pressure
+    scoring_method: bucketed
+    direction: higher_is_better
+    max_points: "1.6"
+"""
+_PMP_WITH_BONUS = """  - component_id: pitch_mix_pressure
+    scoring_method: bucketed
+    direction: higher_is_better
+    max_points: "1.6"
+    bonuses:
+      - { bonus_id: slow_fastball_edge, points: "0.2" }
+"""
+
+
+def _bonus_config() -> GreenMachineConfig:
+    return _variant(_PMP_ANCHOR, _PMP_WITH_BONUS)
+
+
+def test_a_configured_bonus_adds_points_on_a_measured_qualifier() -> None:
+    """Value 40 earns 0 from the buckets; the qualifier adds the 0.2 bonus."""
+    result = score_snapshot(
+        engine_snapshot(
+            values={ComponentId.PITCH_MIX_PRESSURE: "40"},
+            qualifiers={ComponentId.PITCH_MIX_PRESSURE: ("slow_fastball_edge",)},
+        ),
+        _bonus_config(),
+    )
+    assert isinstance(result, EvaluatedGradeResult)
+    assert _points(result, ComponentId.PITCH_MIX_PRESSURE) == Decimal("0.2")
+    assert result.total_score == Decimal("9.45")  # 10.85 - 1.6 + 0.2
+    bonus_entries = [
+        entry for entry in result.audit_derivation if entry.stage == "bonus_application"
+    ]
+    assert len(bonus_entries) == 1
+    assert "slow_fastball_edge" in bonus_entries[0].input_summary
+
+
+def test_a_bonus_is_capped_at_the_component_max() -> None:
+    """Value 60 already earns the 1.6 max; the bonus cannot push past it."""
+    result = score_snapshot(
+        engine_snapshot(
+            qualifiers={ComponentId.PITCH_MIX_PRESSURE: ("slow_fastball_edge",)},
+        ),
+        _bonus_config(),
+    )
+    assert isinstance(result, EvaluatedGradeResult)
+    assert _points(result, ComponentId.PITCH_MIX_PRESSURE) == Decimal("1.6")
+    assert result.total_score == Decimal("10.85")  # unchanged
+    assert any(entry.stage == "bonus_application" for entry in result.audit_derivation)
+
+
+def test_an_unconfigured_qualifier_earns_nothing() -> None:
+    result = score_snapshot(
+        engine_snapshot(
+            values={ComponentId.PITCH_MIX_PRESSURE: "40"},
+            qualifiers={ComponentId.PITCH_MIX_PRESSURE: ("not_a_configured_bonus",)},
+        ),
+        _bonus_config(),
+    )
+    assert isinstance(result, EvaluatedGradeResult)
+    assert _points(result, ComponentId.PITCH_MIX_PRESSURE) == Decimal("0")
+    assert result.total_score == Decimal("9.25")  # 10.85 - 1.6
+    assert not any(entry.stage == "bonus_application" for entry in result.audit_derivation)
+
+
+def test_no_qualifier_means_no_bonus_and_no_audit_stage() -> None:
+    result = score_snapshot(
+        engine_snapshot(values={ComponentId.PITCH_MIX_PRESSURE: "40"}),
+        _bonus_config(),
+    )
+    assert isinstance(result, EvaluatedGradeResult)
+    assert _points(result, ComponentId.PITCH_MIX_PRESSURE) == Decimal("0")
+    assert not any(entry.stage == "bonus_application" for entry in result.audit_derivation)
+
+
+def test_a_component_without_bonuses_ignores_qualifiers(config: GreenMachineConfig) -> None:
+    """The unmodified fixture declares no bonuses, so qualifiers are inert."""
+    result = score_snapshot(
+        engine_snapshot(
+            values={ComponentId.PITCH_MIX_PRESSURE: "40"},
+            qualifiers={ComponentId.PITCH_MIX_PRESSURE: ("slow_fastball_edge",)},
+        ),
+        config,
+    )
+    assert isinstance(result, EvaluatedGradeResult)
+    assert _points(result, ComponentId.PITCH_MIX_PRESSURE) == Decimal("0")
+    assert not any(entry.stage == "bonus_application" for entry in result.audit_derivation)

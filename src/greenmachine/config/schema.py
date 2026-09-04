@@ -338,6 +338,21 @@ class ComponentProfileConfig(_Frozen):
     scoring: tuple[AnyScoring, ...] = Field(min_length=1)
 
 
+class BonusRule(_Frozen):
+    """One points-level bonus a component can earn on a measured qualifier
+    (D-180).
+
+    The qualifier is a property of the observation (measured by the
+    pipeline, carried on ``MetricObservation.qualifiers``); the bonus adds
+    points on top of the bucket award, capped at the component max — a
+    value-level bump would misstate the displayed metric (D-178), so the
+    bonus lives at the points layer and the audit names it.
+    """
+
+    bonus_id: str = Field(min_length=1)
+    points: ConfigDecimal
+
+
 class ComponentConfig(_Frozen):
     """One scored component, with its profile-specific scoring definitions."""
 
@@ -349,6 +364,7 @@ class ComponentConfig(_Frozen):
     missing_data: MissingDataRule
     applicable_profiles: tuple[WindowProfile, ...] = Field(min_length=1)
     profiles: tuple[ComponentProfileConfig, ...] = Field(min_length=1)
+    bonuses: tuple[BonusRule, ...] = ()
 
 
 # --------------------------------------------------------------------------

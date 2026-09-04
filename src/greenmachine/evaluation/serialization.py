@@ -671,6 +671,7 @@ def _metric_observation(value: object, ctx: str) -> MetricObservation:
             "retrieved_at",
             "source_capture_id",
             "fallback_used",
+            "qualifiers",
         }
     )
     data = _object(value, keys, ctx)
@@ -712,6 +713,7 @@ def _metric_observation(value: object, ctx: str) -> MetricObservation:
         fallback_used=_optional(
             _fallback_record, _field(data, "fallback_used", ctx), f"{ctx}.fallback_used"
         ),
+        qualifiers=_tuple(_str, _field(data, "qualifiers", ctx), f"{ctx}.qualifiers"),
     )
 
 

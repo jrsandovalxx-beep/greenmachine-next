@@ -114,6 +114,14 @@ components:
     direction: higher_is_better
     max_points: "1.5"
     sample_type: pitches
+    # D-180 (PO-approved D-175 light buff): the measured slow-fastball
+    # edge — batter season ISO vs FB <92.5 clears his ISO vs FB 94.5+ by
+    # .05+ (15 PA per band) and the starter's season FB velocity is
+    # 92.5 or under — adds 0.2 points on top of the bucket award, capped
+    # at the component max. Pair-day validation: +24%.
+    bonuses:
+      - bonus_id: slow_fastball_edge
+        points: "0.2"
     missing_data:
       policy: record_missing
       reasons: [EXPECTED_PITCHER_UNKNOWN, SOURCE_UNAVAILABLE, PLAYER_NOT_COVERED, NO_EVENTS_IN_WINDOW]
