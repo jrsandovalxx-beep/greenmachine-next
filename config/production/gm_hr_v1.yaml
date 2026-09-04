@@ -106,9 +106,12 @@ components:
             domain_min: "0"
             domain_max: "100"
             buckets:
-              - { lower: "0", upper: "40", points: "0" }
-              - { lower: "40", upper: "55", points: "0.5" }
-              - { lower: "55", upper: "100", points: "1" }
+              - { lower: "0", upper: "35", points: "0" }
+              - { lower: "35", upper: "40", points: "0.25" }
+              - { lower: "40", upper: "43", points: "0.5" }
+              - { lower: "43", upper: "46", points: "0.7" }
+              - { lower: "46", upper: "50", points: "0.85" }
+              - { lower: "50", upper: "100", points: "1" }
   - component_id: pitch_mix_pressure
     scoring_method: bucketed
     direction: higher_is_better
@@ -193,8 +196,12 @@ components:
             domain_max: "100"
             measurement_id: ideal_attack_angle_pct
             buckets:
-              - { lower: "0", upper: "50", points: "0" }
-              - { lower: "50", upper: "100", points: "0.7" }
+              - { lower: "0", upper: "38", points: "0" }
+              - { lower: "38", upper: "42", points: "0.2" }
+              - { lower: "42", upper: "46", points: "0.35" }
+              - { lower: "46", upper: "52", points: "0.5" }
+              - { lower: "52", upper: "58", points: "0.6" }
+              - { lower: "58", upper: "100", points: "0.7" }
           # Schema requires one bucket set per measurement. The proxy block is
           # dormant: no proxy formula is implemented (Q21 open), so no
           # observation ever carries that measurement id.
@@ -228,7 +235,10 @@ components:
               - { lower: "72", upper: "130", points: "0.6" }
   - component_id: pull_pct_air_balls
     scoring_method: bucketed
-    direction: higher_is_better
+    # D-175 ruling 2 (D-183 ships what D-176's merge dropped): the season
+    # curve is a band — +61% at 35-38%, -33% at 60%+ — so the direction is
+    # "band", not monotone; the label reads as a comment note.
+    direction: band
     max_points: "2"
     sample_type: air_balls
     missing_data:
@@ -243,9 +253,14 @@ components:
             domain_min: "0"
             domain_max: "100"
             buckets:
-              - { lower: "0", upper: "18", points: "0" }
-              - { lower: "18", upper: "32", points: "1" }
-              - { lower: "32", upper: "100", points: "2" }
+              - { lower: "0", upper: "30", points: "0.5" }
+              - { lower: "30", upper: "32", points: "1" }
+              - { lower: "32", upper: "35", points: "1.5" }
+              - { lower: "35", upper: "45", points: "2" }
+              - { lower: "45", upper: "50", points: "1.5" }
+              - { lower: "50", upper: "55", points: "1" }
+              - { lower: "55", upper: "60", points: "0.5" }
+              - { lower: "60", upper: "100", points: "0.25" }
   - component_id: park
     scoring_method: bucketed
     direction: higher_is_better
