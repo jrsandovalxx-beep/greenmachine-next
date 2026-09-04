@@ -20,6 +20,7 @@ Judgment calls logged in D-073:
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -1318,6 +1319,7 @@ class _HasPlayerId(Protocol):
 
 
 _PlayerRow = TypeVar("_PlayerRow", bound=_HasPlayerId)
+_K = TypeVar("_K")
 
 
 def _by_player(rows: Iterable[_PlayerRow]) -> dict[int, tuple[_PlayerRow, ...]]:
@@ -1378,6 +1380,39 @@ def _fallback_order(
     return tuple(player_id for player_id, _ in ranked[:FALLBACK_LINEUP_SIZE])
 
 
+# D-182: the cold-build ceiling. A fresh process owes the window's day
+# feeds plus one season record per probable and per slate batter — over a
+# hundred independent single-CSV reads, each server-side generated in
+# seconds. Run one-at-a-time they sum past any reasonable wait; through a
+# small bounded pool a cold start pays the slowest handful, not the sum.
+# Six concurrent reads stays well inside Savant's tolerance — the
+# sequential loops were the only throttle. Results are keyed and consumed
+# in caller order, so output and diagnostics read exactly as the
+# sequential loops produced them.
+_PARALLEL_FETCH_WORKERS = 6
+
+
+def _fetch_many_by_key(
+    fetch: Callable[[_K], tuple[PitchEvent, ...] | FetchFailure],
+    keys: Iterable[_K],
+) -> dict[_K, tuple[PitchEvent, ...] | FetchFailure]:
+    """Run independent single-key fetches through a bounded pool (D-182).
+
+    Every fetch carries its own failure as a ``FetchFailure`` value, so a
+    raise inside the pool means a broken contract, exactly as a raise in
+    the old sequential loop did — it propagates rather than degrading
+    silently. Callers iterate the returned mapping in *their* key order, so
+    output and diagnostics read exactly as the sequential loops produced.
+    """
+    key_list = list(dict.fromkeys(keys))
+    with ThreadPoolExecutor(max_workers=_PARALLEL_FETCH_WORKERS) as pool:
+        future_by_key = {pool.submit(fetch, key): key for key in key_list}
+        results: dict[_K, tuple[PitchEvent, ...] | FetchFailure] = {}
+        for future in as_completed(future_by_key):
+            results[future_by_key[future]] = future.result()
+    return results
+
+
 def fetch_window_events(
     fetch_day: Callable[[date], tuple[PitchEvent, ...] | FetchFailure],
     *,
@@ -1389,11 +1424,16 @@ def fetch_window_events(
     ``keep`` trims each day to the events the board can use — the slate's
     batters and probables — so a long matchup window never swells memory with
     pitches involving players no surface reads.
+
+    The day fetches run through the D-182 pool; days are then consumed in
+    window order, so the event sequence and diagnostics read exactly as a
+    day-at-a-time loop produced them.
     """
+    fetched_by_day = _fetch_many_by_key(fetch_day, days)
     events: list[PitchEvent] = []
     diagnostics: list[str] = []
     for day in days:
-        fetched = fetch_day(day)
+        fetched = fetched_by_day[day]
         if isinstance(fetched, FetchFailure):
             diagnostics.append(f"pitch events for {day.isoformat()}: {fetched.reason}")
             continue
@@ -1731,8 +1771,9 @@ def build_board(
     # would bury the range), a failure names itself in diagnostics.
     season_events_by_pitcher: dict[int, tuple[PitchEvent, ...]] = {}
     if fetch_pitcher_season_events is not None:
+        pitcher_results = _fetch_many_by_key(fetch_pitcher_season_events, probable_ids)
         for pid in probable_ids:
-            fetched_season_events = fetch_pitcher_season_events(pid)
+            fetched_season_events = pitcher_results[pid]
             if isinstance(fetched_season_events, FetchFailure):
                 diagnostics.append(
                     f"pitcher season pitch record ({pid}): {fetched_season_events.reason}"
