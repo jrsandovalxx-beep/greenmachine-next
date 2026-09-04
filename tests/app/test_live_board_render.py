@@ -528,6 +528,10 @@ def test_form_score_cell_reads_the_actual_graded_subtotal() -> None:
         text = streamlit_app._form_score_text(row.card.result, form_max)
         assert text is not None
         assert text.endswith(" / 1.3")
+        # D-185: shrinkage (D-184) prices thin samples at long decimals;
+        # the cell never shows more than two places.
+        shown = text[: -len(" / 1.3")]
+        assert re.fullmatch(r"\d+(\.\d{1,2})?", shown), text
 
 
 def test_sluggers_sort_loads_highest_first_and_flips() -> None:

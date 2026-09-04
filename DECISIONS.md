@@ -4915,3 +4915,12 @@ shrinkage at two sample sizes, symmetric shrinkage from below the prior,
 prior-only configs leaving present awards alone, and shrinkage ordering
 before the bonus. Full gate green (3490 passed, 1 skipped), consistency
 check clean, all three app runners clean.
+
+## D-185 — The Form Score cell displays two decimal places under shrinkage
+
+D-184's shrinkage prices thin samples at exact long decimals (a 5-air-ball
+week can award 0.6304054054…), and the shortlist's Form Score cell rendered
+the full expansion. The cell now shows two places — "0.63 / 1.3" — with
+clean values unchanged ("1.3", never "1.30"). Display-only: the audit trail
+and every downstream computation keep the exact award. The live-board test
+pins the cell to at most two decimal places.
