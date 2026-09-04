@@ -4833,3 +4833,35 @@ New tests pin the pool contract: window order and failure naming under
 out-of-order completion, per-day slate filtering, one fetch per unique
 key, and raise-propagation. Full gate green (3456 passed, 1 skipped),
 consistency check clean, all three app runners clean.
+
+## D-183 — The three tables D-176's merge dropped ship; all approved production tables pinned verbatim
+
+D-176 approved eight bucket-table rewrites and shipped five. Its merge
+silently dropped three — hard_hit_pct's six-step ramp,
+attack_angle_quality's ideal-rate ramp, and pull_pct_air_balls' band
+table — while the D-176 entry claimed all eight were live. The old
+cliff tables stayed in production for a day. The gate had nothing that
+pinned the production tables themselves, so the drop passed green.
+
+Root cause of the silent pass: the semantic config hash covers the
+projection shape, not table contents, and no test compared the shipped
+tables against the approved numbers. The drop was caught by a
+league-average sanity check contradicting itself (pull-air mean
+1.995/2.0 versus sample percentages sitting in low buckets).
+
+This decision ships the three missing tables exactly as approved under
+D-175/D-176: hard_hit_pct buckets 0<35/0, 35-40/.25, 40-43/.5,
+43-46/.7, 46-50/.85, 50-100/1; attack_angle_quality's measured
+ideal_attack_angle_pct ramp 0<38/0, 38-42/.2, 42-46/.35, 46-52/.5,
+52-58/.6, 58-100/.7 (dormant proxy block untouched); pull_pct_air_balls
+as a band table 0-30/.5, 30-32/1, 32-35/1.5, 35-45/2, 45-50/1.5,
+50-55/1, 55-60/.5, 60-100/.25.
+
+The prevention is a new pin: tests/unit/config/test_production_tables.py
+compares all eight approved production tables, the attack-angle main +
+proxy concatenation, and the D-180 bonus wiring against the approved
+values verbatim (string-compared bounds and points), so any future
+silent table drop fails the gate instead of shipping.
+
+Full gate green (3466 passed, 1 skipped), consistency check clean, all
+three app runners clean.
