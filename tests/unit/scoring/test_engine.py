@@ -1029,3 +1029,128 @@ def test_a_component_without_bonuses_ignores_qualifiers(config: GreenMachineConf
     assert isinstance(result, EvaluatedGradeResult)
     assert _points(result, ComponentId.PITCH_MIX_PRESSURE) == Decimal("0")
     assert not any(entry.stage == "bonus_application" for entry in result.audit_derivation)
+
+
+# --------------------------------------------------------------------------
+# D-184 league-average priors: substitution for a missing component and
+# shrinkage of a thin present sample toward the prior
+# --------------------------------------------------------------------------
+
+_EV_ANCHOR = """  - component_id: exit_velocity
+    scoring_method: bucketed
+    direction: higher_is_better
+    max_points: "1.1"
+"""
+_EV_WITH_PRIOR = _EV_ANCHOR + '    prior_points: "0.4"\n'
+_EV_WITH_PRIOR_AND_SHRINK = _EV_WITH_PRIOR + "    shrink_strength: 15\n"
+
+
+def _prior_config() -> GreenMachineConfig:
+    return _variant(_EV_ANCHOR, _EV_WITH_PRIOR)
+
+
+def _shrink_config() -> GreenMachineConfig:
+    return _variant(_EV_ANCHOR, _EV_WITH_PRIOR_AND_SHRINK)
+
+
+def test_a_missing_component_awards_the_configured_prior() -> None:
+    """Exit velocity missing: the 1.1 the default value earned becomes the
+    0.4 prior, and the absence stays on the record."""
+    result = score_snapshot(
+        engine_snapshot(missing={ComponentId.EXIT_VELOCITY: MissingReason.NO_EVENTS_IN_WINDOW}),
+        _prior_config(),
+    )
+    assert isinstance(result, EvaluatedGradeResult)
+    assert _points(result, ComponentId.EXIT_VELOCITY) == Decimal("0.4")
+    assert result.total_score == Decimal("10.15")  # 10.85 - 1.1 + 0.4
+    assert any(entry.stage == "missing_substituted_prior" for entry in result.audit_derivation)
+    assert not any(entry.stage == "missing_recorded_zero" for entry in result.audit_derivation)
+    assert any(obs.component_id is ComponentId.EXIT_VELOCITY for obs in result.missing_observations)
+
+
+def test_a_missing_component_without_a_prior_still_awards_zero(
+    config: GreenMachineConfig,
+) -> None:
+    """The unmodified fixture declares no prior: the old missing=0 rule."""
+    result = score_snapshot(
+        engine_snapshot(missing={ComponentId.EXIT_VELOCITY: MissingReason.NO_EVENTS_IN_WINDOW}),
+        config,
+    )
+    assert isinstance(result, EvaluatedGradeResult)
+    assert _points(result, ComponentId.EXIT_VELOCITY) == Decimal("0")
+    assert any(entry.stage == "missing_recorded_zero" for entry in result.audit_derivation)
+
+
+def test_a_thin_sample_shrinks_toward_the_prior() -> None:
+    """Value 95 earns the full 1.1; at sample 5 of strength 15 the measured
+    award carries weight 5/20, so 0.4 + 0.25 x (1.1 - 0.4) = 0.575."""
+    result = score_snapshot(engine_snapshot(), _shrink_config())
+    assert isinstance(result, EvaluatedGradeResult)
+    assert _points(result, ComponentId.EXIT_VELOCITY) == Decimal("0.575")
+    assert result.total_score == Decimal("10.325")  # 10.85 - 1.1 + 0.575
+    shrink_entries = [entry for entry in result.audit_derivation if entry.stage == "shrinkage"]
+    assert len(shrink_entries) == 1
+    assert shrink_entries[0].component_id is ComponentId.EXIT_VELOCITY
+
+
+def test_the_thinnest_sample_leans_hardest_on_the_prior() -> None:
+    """Sample 1 of strength 15: weight 1/16, so 0.4 + 1/16 x 0.7 = 0.44375."""
+    result = score_snapshot(
+        engine_snapshot(insufficient={ComponentId.EXIT_VELOCITY}), _shrink_config()
+    )
+    assert isinstance(result, EvaluatedGradeResult)
+    assert _points(result, ComponentId.EXIT_VELOCITY) == Decimal("0.44375")
+    assert result.total_score == Decimal("10.19375")  # 10.85 - 1.1 + 0.44375
+
+
+def test_a_below_prior_award_shrinks_upward() -> None:
+    """Shrinkage is symmetric: value 0 earns nothing from the buckets, and
+    the prior pulls it up to 0.4 + 0.25 x (0 - 0.4) = 0.3."""
+    result = score_snapshot(
+        engine_snapshot(values={ComponentId.EXIT_VELOCITY: "0"}), _shrink_config()
+    )
+    assert isinstance(result, EvaluatedGradeResult)
+    assert _points(result, ComponentId.EXIT_VELOCITY) == Decimal("0.3")
+    assert result.total_score == Decimal("10.05")  # 10.85 - 1.1 + 0.3
+
+
+def test_a_prior_without_shrinkage_leaves_present_awards_alone() -> None:
+    """The prior alone never touches a measured award."""
+    result = score_snapshot(engine_snapshot(), _prior_config())
+    assert isinstance(result, EvaluatedGradeResult)
+    assert _points(result, ComponentId.EXIT_VELOCITY) == Decimal("1.1")
+    assert result.total_score == Decimal(DEFAULT_TOTAL)
+    assert not any(entry.stage == "shrinkage" for entry in result.audit_derivation)
+
+
+_PMP_WITH_PRIOR_SHRINK_BONUS = """  - component_id: pitch_mix_pressure
+    scoring_method: bucketed
+    direction: higher_is_better
+    max_points: "1.6"
+    prior_points: "0.5"
+    shrink_strength: 5
+    bonuses:
+      - { bonus_id: slow_fastball_edge, points: "0.2" }
+"""
+
+
+def test_shrinkage_applies_before_the_bonus() -> None:
+    """Value 40 earns 0 from the buckets; sample 5 of strength 5 halves the
+    distance to the 0.5 prior (0.25), then the D-180 bonus rides on top at
+    full strength (0.45). The bonus never shrinks: it marks a measured
+    season-level qualifier, not a thin window."""
+    result = score_snapshot(
+        engine_snapshot(
+            values={ComponentId.PITCH_MIX_PRESSURE: "40"},
+            qualifiers={ComponentId.PITCH_MIX_PRESSURE: ("slow_fastball_edge",)},
+        ),
+        _variant(_PMP_ANCHOR, _PMP_WITH_PRIOR_SHRINK_BONUS),
+    )
+    assert isinstance(result, EvaluatedGradeResult)
+    assert _points(result, ComponentId.PITCH_MIX_PRESSURE) == Decimal("0.45")
+    stages = [
+        entry.stage
+        for entry in result.audit_derivation
+        if entry.component_id is ComponentId.PITCH_MIX_PRESSURE
+    ]
+    assert stages.index("shrinkage") < stages.index("bonus_application")

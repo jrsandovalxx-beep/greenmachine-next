@@ -419,6 +419,42 @@ def _validate_components(config: GreenMachineConfig, file_path: str | None) -> N
                     metric=metric,
                 )
 
+        # D-184: the prior is the ratified league-average award — strictly
+        # inside (0, max_points), since a prior at either rail is a scoring
+        # decision, not a measurement. Shrinkage needs the prior to lean on
+        # and a positive strength; it never applies without both.
+        if component.prior_points is not None:
+            if component.prior_points <= 0:
+                raise _fail(
+                    f"prior_points must be positive, got {component.prior_points}",
+                    file_path,
+                    (*base, "prior_points"),
+                    metric=metric,
+                )
+            if component.prior_points >= component.max_points:
+                raise _fail(
+                    f"prior_points ({component.prior_points}) must sit below the "
+                    f"component max_points ({component.max_points})",
+                    file_path,
+                    (*base, "prior_points"),
+                    metric=metric,
+                )
+        if component.shrink_strength is not None:
+            if component.prior_points is None:
+                raise _fail(
+                    "shrink_strength requires prior_points — shrinkage leans on the prior",
+                    file_path,
+                    (*base, "shrink_strength"),
+                    metric=metric,
+                )
+            if component.shrink_strength <= 0:
+                raise _fail(
+                    f"shrink_strength must be positive, got {component.shrink_strength}",
+                    file_path,
+                    (*base, "shrink_strength"),
+                    metric=metric,
+                )
+
         for profile_index, profile in enumerate(component.profiles):
             _validate_profile(
                 component, profile_index, profile, file_path, (*base, "profiles"), metric

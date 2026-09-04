@@ -1536,6 +1536,12 @@ def _card_tag_lists(
         advisories.append(f"low sample: {insufficient}")
     if missing:
         advisories.append(f"missing: {missing}")
+        # D-184: missing components no longer score zero — they award the
+        # ratified league-average prior — so the row says how much of the
+        # grade is measured and how much rests on substitutes.
+        measured = len(card.result.present_observations)
+        total = measured + len(card.result.missing_observations)
+        advisories.append(f"{measured} of {total} measured · rest at league avg")
     if card.lineup_is_estimate:
         advisories.append("est. lineup")
     if card.order_position is not None:

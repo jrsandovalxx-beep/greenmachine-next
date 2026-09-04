@@ -4865,3 +4865,53 @@ silent table drop fails the gate instead of shipping.
 
 Full gate green (3466 passed, 1 skipped), consistency check clean, all
 three app runners clean.
+
+## D-184 — Missing components award the league-average prior; thin samples shrink toward it; rows state how much is measured
+
+The missing=0 fix (approved build-order item 4; numbers presented to the
+PO 2026-09-05, mechanism left to engineering with no preference recorded).
+
+The measurement behind the priors: 381 batters at 150+ PA on the 2026
+season board for the five board metrics, the season's batted-ball file
+under the production spray convention for pull-air, the pinned
+park-factor snapshot's sixty venue-side cells for park, 2,454 games for
+weather (roofed venues at the 72-degree neutral per the D-111 roof rule),
+and 15,145 / 12,464 floored pair-days for the two matchup components. The
+ratified priors (points): exit velocity 0.40, barrel 0.43, hard-hit 0.39,
+pitch mix 0.56, put-away 0.61, attack angle 0.44, bat speed 0.25,
+pull-air 1.14, park 0.37, weather 0.67 — a league-average-everything
+hitter grades 5.26 of 11.3, a C, which is where average should sit.
+
+Three mechanisms ship:
+
+1. Substitution: a component that records missing awards its configured
+   ``prior_points`` instead of zero. The absence stays on the record with
+   its reason; the audit stage is ``missing_substituted_prior``. The big
+   case this fixes: a starter not yet announced zeroed both matchup
+   components (3.0 of 11.3 points) and dragged the batter about two
+   letter grades low.
+2. Shrinkage: a present-but-thin windowed award moves toward the prior in
+   proportion to its evidence — weight n/(n+k) on the bucket award, the
+   prior carrying the rest. k is the component's own L7 floor (15 BBE for
+   exit velocity/barrel/hard-hit, 5 air balls for pull-air, 25 swings for
+   bat speed/attack angle). Only the six windowed form components carry
+   ``shrink_strength``; the matchup values are season-cumulative and
+   already stable, and park/weather are single readings. Shrinkage
+   applies to the bucket award only, before any D-180 bonus — a bonus
+   marks a measured season-level qualifier and never shrinks.
+3. Completeness: a shortlist row with any missing component carries a
+   "x of 10 measured · rest at league avg" tag, so a grade resting on
+   substitutes says so. Fully measured rows stay quiet.
+
+Config validation: a prior must sit strictly inside (0, max_points) —
+a prior at either rail is a scoring decision, not a measurement — and
+shrinkage requires a prior and a positive strength. The production pin
+test now pins all ten priors and six strengths verbatim alongside the
+bucket tables. The semantic config hash moved with the two new projection
+fields; the synthetic fixture is untouched and its source digest stands.
+
+New engine tests pin substitution (with and without a configured prior),
+shrinkage at two sample sizes, symmetric shrinkage from below the prior,
+prior-only configs leaving present awards alone, and shrinkage ordering
+before the bonus. Full gate green (3490 passed, 1 skipped), consistency
+check clean, all three app runners clean.

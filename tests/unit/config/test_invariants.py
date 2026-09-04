@@ -576,3 +576,55 @@ def test_an_empty_bonus_id_is_refused_by_the_schema() -> None:
             _ev_with_bonus(_EV_BONUS.replace("slow_fastball_edge", "")),
             file_path="synthetic.yaml",
         )
+
+
+# --------------------------------------------------------------------------
+# D-184 prior rules (league-average substitution + thin-sample shrinkage)
+# --------------------------------------------------------------------------
+
+_EV_PRIOR = '    prior_points: "0.4"\n'
+_EV_SHRINK = "    shrink_strength: 15\n"
+
+
+def test_a_valid_prior_and_shrink_strength_load() -> None:
+    config = load_config_text(_ev_with_bonus(_EV_PRIOR + _EV_SHRINK), file_path="synthetic.yaml")
+    ev = next(c for c in config.components if c.component_id.value == "exit_velocity")
+    assert str(ev.prior_points) == "0.4"
+    assert ev.shrink_strength == 15
+
+
+def test_a_prior_without_shrinkage_loads() -> None:
+    config = load_config_text(_ev_with_bonus(_EV_PRIOR), file_path="synthetic.yaml")
+    ev = next(c for c in config.components if c.component_id.value == "exit_velocity")
+    assert str(ev.prior_points) == "0.4"
+    assert ev.shrink_strength is None
+
+
+def test_zero_prior_points_are_rejected() -> None:
+    error = reject(_ev_with_bonus(_EV_PRIOR.replace('"0.4"', '"0"')))
+
+    assert "prior_points must be positive" in str(error)
+
+
+def test_negative_prior_points_are_rejected() -> None:
+    error = reject(_ev_with_bonus(_EV_PRIOR.replace('"0.4"', '"-0.1"')))
+
+    assert "prior_points must be positive" in str(error)
+
+
+def test_prior_points_at_the_component_max_are_rejected() -> None:
+    error = reject(_ev_with_bonus(_EV_PRIOR.replace('"0.4"', '"0.9"')))
+
+    assert "must sit below the component max_points" in str(error)
+
+
+def test_shrinkage_without_a_prior_is_rejected() -> None:
+    error = reject(_ev_with_bonus(_EV_SHRINK))
+
+    assert "shrink_strength requires prior_points" in str(error)
+
+
+def test_zero_shrink_strength_is_rejected() -> None:
+    error = reject(_ev_with_bonus(_EV_PRIOR + _EV_SHRINK.replace("15", "0")))
+
+    assert "shrink_strength must be positive" in str(error)
