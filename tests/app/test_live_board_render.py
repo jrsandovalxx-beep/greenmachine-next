@@ -1445,8 +1445,8 @@ def test_grid_line_cells_carry_no_gap_columns_on_either_view() -> None:
     columns = list(texts)
     assert columns.index("LA") == columns.index("EV ★") + 1
     assert texts["LA"] == "16.4°"
-    # D-127: an average carries no firing line, but it still wears its
-    # researched bucket — 16.4° lands the strong band (≥ 14.5).
+    # D-181: an average carries no firing line, but it still wears its
+    # evidence zone — 16.4° sits inside the hot 16-24° band.
     assert styles["LA"] == streamlit_app._BAND_G2_CSS
     assert "ISO" in texts and "xwOBA" in texts
     for gone in ("xISO-ISO", "xISO-ISO ★", "xwOBA-wOBA", "xwOBA-wOBA ★"):
@@ -1464,6 +1464,28 @@ def test_grid_line_cells_carry_no_gap_columns_on_either_view() -> None:
     texts, styles = streamlit_app._grid_line_cells(None, include_gaps=True)
     assert texts["AB"] == "no data available"
     assert styles["Oppo Air %"] == streamlit_app._REASON_CSS
+
+
+def test_season_la_wears_the_evidence_zones_not_the_six_band_scale() -> None:
+    """D-181 (PO): hot 16-24° green, weak below 10° red, neutral 12-16°
+    unfilled, and the zones the run never named (10-12°, above 24°)
+    unfilled — the old scale kept greening as angles rose past 24°."""
+    import streamlit_app
+
+    hot = {angle: streamlit_app._la_evidence_css(angle) for angle in (16.0, 20.0, 24.0)}
+    assert set(hot.values()) == {streamlit_app._BAND_G2_CSS}
+    assert streamlit_app._la_evidence_css(9.9) == streamlit_app._BAND_R2_CSS
+    for unfilled in (10.0, 11.4, 12.0, 14.9, 24.1, 28.0):
+        assert streamlit_app._la_evidence_css(unfilled) is None, unfilled
+
+    _, styles = streamlit_app._grid_line_cells(
+        _grid_line(avg_launch_angle=Decimal("24.8")), include_gaps=True
+    )
+    assert "LA" not in styles  # 24.8° — past the hot zone, no evidence color
+    _, styles = streamlit_app._grid_line_cells(
+        _grid_line(avg_launch_angle=Decimal("8.2")), include_gaps=True
+    )
+    assert styles["LA"] == streamlit_app._BAND_R2_CSS  # 8.2° — weak
 
 
 def test_band_css_walks_all_six_bands_in_both_directions() -> None:
@@ -1530,7 +1552,10 @@ def test_band_registries_cover_every_graded_table() -> None:
         "Straight Air %",  # a fit read (D-128) — no quality scale
         "Oppo Air %",  # the fit read — no quality scale, by decision
     }
-    assert rate_columns == set(streamlit_app._GRID_BANDS)
+    # D-181: LA left the six-band registry for the measurement run's
+    # evidence zones — it is still a graded rate cell, covered by
+    # _la_evidence_css and pinned by its own tests.
+    assert rate_columns == set(streamlit_app._GRID_BANDS) | {"LA"}
     season_columns = set(streamlit_app._ARMS_METRIC_COLUMNS) - {"PA", "BBE", "HR", "Air %"}
     assert season_columns <= set(streamlit_app._PITCHER_BANDS)
     recent_columns = set(streamlit_app._ARMS_RECENT_METRIC_COLUMNS) - {

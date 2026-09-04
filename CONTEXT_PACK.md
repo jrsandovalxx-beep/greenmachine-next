@@ -18,7 +18,7 @@ automated selection. Evidence confidence is displayed alongside, never fused int
 ## Current status
 
 - Active ticket: **NO ACTIVE TICKET — next phase pending planning** (per `tickets/ACTIVE.md`; the feature phase table GMF-001…GMF-009 is exhausted).
-- Decision count: **180** (D-001..D-180).
+- Decision count: **181** (D-001..D-181).
 - Plan (bootstrap, historical): REBUILD_PLAN v16, sha256 `c41b6abd5fbe64c0e9b468bea0c9a2ddb5f1b646780c017655f0295aa0b82ca2` — the pinned authority for
   GMN-000A … GMR-005; no longer the active ticket source.
 - Plan (active, feature phase): FEATURE_PHASE_PLAN v13, sha256 `87f76fade5fc33faa3c29d6d65dc57eece2150ce1c5857a1cc1b707e5802d2e5` — the pinned authority for

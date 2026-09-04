@@ -1090,7 +1090,6 @@ def _band_css(spec: _BandSpec, value: float) -> str | None:
 # caption says so.
 _GRID_BANDS: dict[str, _BandSpec] = {
     "EV": _BandSpec("high", 91, 90, 89, 88, 87, 85.5),
-    "LA": _BandSpec("high", 17, 14.5, 12.5, 10.5, 8.5, 6),
     "Barrel/PA %": _BandSpec("high", 0.09, 0.07, 0.058, 0.045, 0.032, 0.02, "pct"),
     "Hard-Hit %": _BandSpec("high", 0.52, 0.46, 0.42, 0.36, 0.32, 0.28, "pct"),
     "AVG": _BandSpec("high", 0.285, 0.265, 0.252, 0.235, 0.220, 0.205, "avg"),
@@ -1100,6 +1099,32 @@ _GRID_BANDS: dict[str, _BandSpec] = {
     "xwOBA": _BandSpec("high", 0.370, 0.345, 0.325, 0.300, 0.280, 0.260, "avg"),
     "K %": _BandSpec("low", 0.15, 0.185, 0.22, 0.26, 0.28, 0.30, "pct"),
 }
+
+# D-181 (PO, build order item 4): the batter's SEASON average launch angle
+# wears the measurement run's evidence zones, a plateau — not the generic
+# six-tier scale, which kept greening as angles rose past the evidence.
+# Hot 16-24° (both edges inclusive), neutral 12-16°, weak below 10°; the
+# run named no band for 10-12° or above 24°, so those cells stay unfilled.
+# Display only: barrel% already grades the contact physics, and LA itself
+# stays unstarred context (D-124).
+_LA_HOT_LOW = 16.0
+_LA_HOT_HIGH = 24.0
+_LA_NEUTRAL_LOW = 12.0
+_LA_WEAK_BELOW = 10.0
+_LA_EVIDENCE_ZONES = (
+    "hot 16-24° · neutral 12-16° · weak below 10° (10-12° and above 24° carry no evidence color)"
+)
+_LA_EVIDENCE_TEXT = f"LA — {_LA_EVIDENCE_ZONES} (D-181)"
+
+
+def _la_evidence_css(value: float) -> str | None:
+    """The season-LA evidence fill — None wherever the run named no zone."""
+    if _LA_HOT_LOW <= value <= _LA_HOT_HIGH:
+        return _BAND_G2_CSS
+    if value < _LA_WEAK_BELOW:
+        return _BAND_R2_CSS
+    return None
+
 
 # The pitcher scale (the Arms tab and the starter header cards) — read as
 # vulnerability: the greener the cell, the more forgiving the arm. League
@@ -3461,7 +3486,8 @@ _MATCHUPS_HELP: dict[str, str] = {
     "LA": (
         "Season average launch angle — context, not a firing line: v2.2 "
         "reads the share of contact above the 18° HR floor, never the average. "
-        f"Cell colors (researched 2025 baselines, D-127): {_band_scale_text(_GRID_BANDS['LA'])}."
+        f"Cell colors (the measurement run's evidence zones, D-181): "
+        f"{_LA_EVIDENCE_ZONES}."
     ),
     "Barrel/PA %": (
         "Barrels per plate appearance over the scope. "
@@ -3634,7 +3660,8 @@ _CONDITIONS_HELP: dict[str, str] = {
 # D-127's caption fragments, built once from the registries so a moved
 # edge can never drift from its printed line (D-079).
 _GRID_SCALE_TEXT = "; ".join(
-    f"{name} — {_band_scale_text(spec)}" for name, spec in _GRID_BANDS.items()
+    [f"{name} — {_band_scale_text(spec)}" for name, spec in _GRID_BANDS.items()]
+    + [_LA_EVIDENCE_TEXT]
 )
 _PITCHER_SCALE_TEXT = "; ".join(
     f"{name} — {_band_scale_text(spec)}" for name, spec in _PITCHER_BANDS.items()
@@ -3789,9 +3816,9 @@ def _grid_line_cells(
             styles["LA"] = _REASON_CSS
         else:
             texts = _insert_after(texts, "EV", {"LA": f"{float(launch_angle):.1f}°"})
-            # D-127: an average carries no firing line, but it still wears
-            # its researched bucket (the edges print in the caption).
-            css = _band_css(_GRID_BANDS["LA"], float(launch_angle))
+            # D-181: the measurement run's evidence zones (hot 16-24°,
+            # weak below 10°) — the edges print in the caption and hover.
+            css = _la_evidence_css(float(launch_angle))
             if css is not None:
                 styles.setdefault("LA", css)
         # D-125 (PO): the D-110 regression gaps no longer grid — they read
@@ -4157,7 +4184,9 @@ def _render_matchups(board: SlateBoard) -> None:
         "**Cell colors (D-127, PO):** every rate cell wears one of six "
         "researched bands — three greens, dark green at elite; three "
         "reds, dark red at very poor; the unfilled cell neutral — graded "
-        "against 2025 league baselines (derivations in DECISIONS D-127); "
+        "against 2025 league baselines (derivations in DECISIONS D-127), "
+        "except season LA, which wears the measurement run's three "
+        "evidence zones (D-181); "
         "where an edge is a ratified v2.2 line the column's hover says "
         "so. The edges: "
         + _GRID_SCALE_TEXT
