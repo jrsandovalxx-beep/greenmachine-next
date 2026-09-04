@@ -4780,3 +4780,27 @@ score exactly as before.
 Unchanged: 11.3 total, cutoffs, component maxes, categories, bucket
 edges, sample minimums. Full gate green (3450 passed, 1 skipped),
 consistency check clean, all three app runners clean.
+
+## D-181 - Season launch angle wears the measurement run's evidence zones
+
+2026-09-04, build order item 4 (D-175: "season launch-angle numbers get
+evidence color bands (16-24 hot, 12-16 neutral, below 10 weak)").
+Display only — barrel% already grades the contact physics, and LA stays
+unstarred context (D-124).
+
+The batter grid's season-view LA column leaves the generic six-tier
+scale (D-127's 2025 league baselines) for the measured plateau: hot
+16-24° (both edges inclusive, strong green), weak below 10° (poor red),
+neutral 12-16° unfilled. The run named no band for 10-12° or above 24°,
+so those cells stay unfilled — the old scale kept greening as angles
+climbed past 24°, which the evidence contradicts. Single zones wear the
+middle intensities (strong green / poor red): one positive zone claims
+no "elite" tier. The edges print in the grid caption and the column
+hover (D-079). The pitcher side is untouched: LA allowed keeps D-127's
+vulnerability scale, and the dialog's per-pitch LA stays uncolored
+(window-scoped, not the season read).
+
+New tests pin the plateau (both hot edges, the weak line, the unfilled
+neutral and unnamed zones) and the registry guard now names LA's
+dedicated coverage. Full gate green (3451 passed, 1 skipped),
+consistency check clean, all three app runners clean.
