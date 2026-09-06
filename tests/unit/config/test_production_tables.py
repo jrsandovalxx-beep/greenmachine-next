@@ -20,45 +20,46 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION = REPO_ROOT / "config" / "production" / "gm_hr_v1.yaml"
 
 # component -> (direction, [(lower, upper, points), ...]) exactly as D-175
-# approved and D-176/D-183 shipped. String-compared: no float drift.
+# approved, D-176/D-183 shipped, and D-188 rescaled with the new component
+# maxima. String-compared: no float drift.
 APPROVED_TABLES: dict[str, tuple[str, list[tuple[str, str, str]]]] = {
     "exit_velocity": (
         "higher_is_better",
         [
             ("0", "86", "0"),
-            ("86", "88", "0.25"),
-            ("88", "89.5", "0.45"),
-            ("89.5", "91", "0.65"),
-            ("91", "92", "0.8"),
-            ("92", "93", "0.9"),
-            ("93", "130", "1"),
+            ("86", "88", "0.375"),
+            ("88", "89.5", "0.675"),
+            ("89.5", "91", "0.975"),
+            ("91", "92", "1.2"),
+            ("92", "93", "1.35"),
+            ("93", "130", "1.5"),
         ],
     ),
     "barrel_pct": (
         "higher_is_better",
         [
             ("0", "5", "0"),
-            ("5", "7", "0.25"),
-            ("7", "9", "0.5"),
-            ("9", "11", "0.7"),
-            ("11", "13", "0.85"),
-            ("13", "100", "1"),
+            ("5", "7", "0.5"),
+            ("7", "9", "1"),
+            ("9", "11", "1.4"),
+            ("11", "13", "1.7"),
+            ("13", "100", "2"),
         ],
     ),
     "hard_hit_pct": (
         "higher_is_better",
         [
             ("0", "35", "0"),
-            ("35", "40", "0.25"),
-            ("40", "43", "0.5"),
-            ("43", "46", "0.7"),
-            ("46", "50", "0.85"),
-            ("50", "100", "1"),
+            ("35", "40", "0.125"),
+            ("40", "43", "0.25"),
+            ("43", "46", "0.35"),
+            ("46", "50", "0.425"),
+            ("50", "100", "0.5"),
         ],
     ),
     "bat_speed": (
         "higher_is_better",
-        [("0", "69", "0"), ("69", "70.5", "0.2"), ("70.5", "72", "0.4"), ("72", "130", "0.6")],
+        [("0", "69", "0"), ("69", "70.5", "0.1"), ("70.5", "72", "0.2"), ("72", "130", "0.3")],
     ),
     "park": (
         "higher_is_better",
@@ -88,27 +89,27 @@ APPROVED_TABLES: dict[str, tuple[str, list[tuple[str, str, str]]]] = {
     "pull_pct_air_balls": (
         "band",
         [
-            ("0", "30", "0.5"),
-            ("30", "32", "1"),
-            ("32", "35", "1.5"),
-            ("35", "45", "2"),
-            ("45", "50", "1.5"),
-            ("50", "55", "1"),
-            ("55", "60", "0.5"),
-            ("60", "100", "0.25"),
+            ("0", "30", "0.25"),
+            ("30", "32", "0.5"),
+            ("32", "35", "0.75"),
+            ("35", "45", "1"),
+            ("45", "50", "0.75"),
+            ("50", "55", "0.5"),
+            ("55", "60", "0.25"),
+            ("60", "100", "0.125"),
         ],
     ),
 }
 
-# attack_angle_quality's approved ramp (D-175) on the published ideal-rate
-# measurement; the dormant proxy block keeps its own table (Q21 open).
+# attack_angle_quality's ramp (D-175, rescaled x10/7 by D-188) on the published
+# ideal-rate measurement; the dormant proxy block keeps its own table (Q21 open).
 APPROVED_ATTACK_ANGLE = [
     ("0", "38", "0"),
-    ("38", "42", "0.2"),
-    ("42", "46", "0.35"),
-    ("46", "52", "0.5"),
-    ("52", "58", "0.6"),
-    ("58", "100", "0.7"),
+    ("38", "42", "0.29"),
+    ("42", "46", "0.5"),
+    ("46", "52", "0.71"),
+    ("52", "58", "0.86"),
+    ("58", "100", "1"),
 ]
 
 
@@ -137,7 +138,7 @@ def test_the_attack_angle_ideal_rate_ramp_is_shipped_verbatim() -> None:
     assert _table("attack_angle_quality") == [
         *APPROVED_ATTACK_ANGLE,
         ("0", "60", "0"),
-        ("60", "100", "0.7"),
+        ("60", "100", "1"),
     ]
 
 
@@ -153,17 +154,18 @@ def test_the_slow_fastball_edge_bonus_is_wired_to_pitch_mix_pressure() -> None:
 
 # D-184: the ratified league-average priors and shrink strengths, measured
 # over the 381-batter 2026 season board, 15k+ floored pair-days, the pinned
-# park-factor cells, and 2,454 games of weather. String-compared like the
-# tables: a silent prior edit is a silent scoring change.
+# park-factor cells, and 2,454 games of weather; D-188 rescaled the six
+# reweighted components' priors in proportion to their new maxima.
+# String-compared like the tables: a silent prior edit is a silent scoring change.
 APPROVED_PRIORS: dict[str, tuple[str, int | None]] = {
-    "exit_velocity": ("0.4", 15),
-    "barrel_pct": ("0.43", 15),
-    "hard_hit_pct": ("0.39", 15),
+    "exit_velocity": ("0.6", 15),
+    "barrel_pct": ("0.86", 15),
+    "hard_hit_pct": ("0.195", 15),
     "pitch_mix_pressure": ("0.56", None),
     "put_away_pitch_exploitation": ("0.61", None),
-    "attack_angle_quality": ("0.44", 25),
-    "bat_speed": ("0.25", 25),
-    "pull_pct_air_balls": ("1.14", 5),
+    "attack_angle_quality": ("0.63", 25),
+    "bat_speed": ("0.125", 25),
+    "pull_pct_air_balls": ("0.57", 5),
     "park": ("0.37", None),
     "weather": ("0.67", None),
 }
@@ -182,20 +184,21 @@ def test_the_ratified_prior_and_shrink_strength_are_shipped_verbatim(
     assert component.shrink_strength == want_strength
 
 
-# D-186: the ratified HR-chance curve, measured over the 42-slate backtest
-# (10,278 graded batter-days, 2026-07-25..2026-09-04, no look-ahead). The S
-# band holds the 9-10 bin's 15.3% until a real S sample exists. String-
-# compared like the tables: a silent anchor edit is a silent display change.
+# D-188: the ratified HR-chance curve, re-measured over the 42-slate backtest
+# under the D-188 weights (10,278 graded batter-days, 2026-07-26..2026-09-05,
+# no look-ahead). The top anchor caps the tiny S sample (13 batters, 23.1%)
+# at the 9-10 bin's read until the S sample grows. String-compared like the
+# tables: a silent anchor edit is a silent display change.
 APPROVED_HR_CHANCE: tuple[tuple[str, str], ...] = (
-    ("1", "3.6"),
-    ("2.5", "5.7"),
-    ("3.5", "6.5"),
-    ("4.5", "10.3"),
-    ("5.5", "11.2"),
-    ("6.5", "12.2"),
-    ("7.5", "14.4"),
-    ("8.5", "14.4"),
-    ("9.5", "15.3"),
+    ("1", "5.8"),
+    ("2.5", "5.8"),
+    ("3.5", "7.2"),
+    ("4.5", "9.2"),
+    ("5.5", "11.6"),
+    ("6.5", "13.6"),
+    ("7.5", "14.6"),
+    ("8.5", "14.9"),
+    ("9.5", "15.7"),
 )
 
 

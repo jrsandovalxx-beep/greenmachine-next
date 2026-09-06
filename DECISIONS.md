@@ -4998,3 +4998,59 @@ never leaves the request URL), the host pin, and the live-board render:
 the cell's one-decimal format, the gap bubble, the sort, and the missing-
 key wording. No engine surface moves: the market read is presentation,
 never a grading input.
+
+## D-188 — The weights follow the measurement
+
+The PO asked which weighing changes the data supports. The measurement:
+component-level points recorded for all 42 backtest slates (10,278 graded
+batter-days, 2026-07-26..2026-09-05, no look-ahead), read two ways — the
+separation between homer and non-homer days, and a standardized logistic
+regression crediting each component while holding the others constant.
+
+What measured: barrel rate and exit velocity carry the model (44% and 37%
+higher homer odds per standard step, both p<0.001). Hard-hit percentage is
+77% shared information with barrel and goes significantly negative once
+barrel is counted — double-counting. Bat speed is redundant the same way.
+Pull-air rate — the largest seat at the table at 2.0 points — shows zero
+separation across all 10,278 days. Attack-angle quality carries a small,
+real, confirmed signal.
+
+The matchup question got its own fair test first (PO: "run the matchup
+split first"): the matchup block is measured from a real named starter on
+96.5% of days, so its modest signal is not the D-184 substitution diluting
+it. Pitch-mix pressure keeps a small true pulse (fourth-best separation);
+put-away exploitation adds nothing once contact quality is counted. But
+the simulated cut of the matchup block made the shortlist worse (top-3
+fell to 15.9%), so matchup, park, and weather keep their seats. Weather
+stays unjudgeable in the backtest by construction (weather absent in the
+D-095 wiring) and is untouched.
+
+The ratified rebalance (PO answered "no preference" with the full evidence
+and simulations in hand; the recommended option ships): exit velocity
+1.0->1.5, barrel rate 1.0->2.0, attack angle 0.7->1.0; hard-hit 1.0->0.5,
+bat speed 0.6->0.3, pull-air 2.0->1.0. Doublings and halvings only; the
+total stays 11.3 and the D/C/B/A/S cutoffs stay 4/6/8/10, so no
+specification constant, fixture, or synthetic configuration moves. Bucket
+thresholds (the measured quantities) are unchanged; bucket awards and the
+D-184 priors rescale in exact proportion to each new maximum, so the
+league-average substitution keeps its meaning.
+
+Shipped results under the new weights (same 42 slates, real engine): the
+grade ladder stays cleanly ordered — D 6.1%, C 10.5%, B 14.2% (1.39x),
+A 14.9% (1.46x) — and S finally has a sample: 13 batter-days at 23.1%
+(2.25x). Top-of-board, where the product lives: top-3 per slate 19.0%
+(from 18.3%), top-5 20.0% (from 17.6%). Brier skill is unchanged
+(0.0907 vs the 0.0919 base rate). The D-186 chance curve is re-anchored
+on the new score distribution — anchors 5.8/5.8/7.2/9.2/11.6/13.6/14.6/
+14.9/15.7, measured at the same score positions with the same
+monotonicity rule; band-level calibration lands within 0.4 points of
+actual everywhere except the 13-day S band, which the top anchor caps at
+the 9-10 bin's read until the S sample grows (same conservative stance as
+D-186).
+
+Caveats, stated plainly: in-sample anchors on 42 slates; the top-of-board
+gains are directionally real but rest on 126 top-3 picks; hard-hit and
+bat speed keep token seats rather than retiring outright because the
+sample is one window of one season. The component-level dump and the
+measured-vs-substituted split are preserved in the evidence folder for
+the next measurement question.
