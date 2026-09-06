@@ -216,11 +216,11 @@ from greenmachine.live.savant import BaseballSavant, PitchEvent
 from greenmachine.live.transport import UrllibTransport as MlbTransport
 from greenmachine.live.wind import resolved_wind_mph, spray_field_bearing, wind_field_words
 from greenmachine.odds import (
+    MARKET_PRE_GAME,
     NO_PROPS_REASON,
     MarketMemo,
     MarketRead,
     TheOddsApi,
-    in_market_quiet_hours,
     market_snapshot,
     normalize_name,
 )
@@ -2329,27 +2329,36 @@ def _hr_chance_text(result: GradeResult, config: GreenMachineConfig) -> str | No
 # home-run props, de-vigged and averaged across the books that priced the
 # batter, beside the D-186 calibrated chance — the gap is the whole point.
 # The key is the owner's, bridged from Streamlit secrets; without it the
-# column names the absence rather than inventing a number. D-189: the keep
-# is a policy, not a blind cache — no morning spend, a priced board locks
-# for the day, an empty one retries two hours later.
+# column names the absence rather than inventing a number. D-190 (PO): one
+# paid sweep a day, opening an hour before first pitch — the events list
+# is free, so the gate costs nothing; a priced board locks for the day, an
+# empty or failed sweep retries two hours later.
 _MARKET_MEMO = MarketMemo()
 
 
 def _market_snapshot(official_date: str) -> dict[str, MarketRead] | str:
     """The slate's market reads keyed by normalized batter name, or the
     absence word — "no key" when the owner has not configured one, "not
-    posted yet" while the feed is still empty (quiet hours count too),
+    posted yet" before the sweep window opens or while the feed is empty,
     "unavailable" when the source itself failed."""
     key = os.environ.get("GM_ODDS_API_KEY", "").strip()
     if not key:
         return "no key"
     now = datetime.now(UTC)
-    if in_market_quiet_hours(now):
-        return "not posted yet"
     kept = _MARKET_MEMO.get(official_date, now)
     if kept is not None:
         return dict(kept) if isinstance(kept, Mapping) else kept
-    result = market_snapshot(TheOddsApi(OddsTransport(), key), date.fromisoformat(official_date))
+    api = TheOddsApi(OddsTransport(), key)
+    slate_day = date.fromisoformat(official_date)
+    events = api.fetch_events(slate_day)  # the events list is free
+    if isinstance(events, FetchFailure):
+        return "unavailable"
+    if not events:
+        return "not posted yet"  # no fixtures today — nothing to price
+    first_pitch = min(event.commence_time for event in events)
+    if now < first_pitch - MARKET_PRE_GAME:
+        return "not posted yet"  # before the window: the free gate, no spend
+    result = market_snapshot(api, slate_day)
     value: dict[str, MarketRead] | str
     if isinstance(result, FetchFailure):
         value = "not posted yet" if result.reason == NO_PROPS_REASON else "unavailable"

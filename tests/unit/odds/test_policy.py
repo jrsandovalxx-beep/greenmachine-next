@@ -1,8 +1,8 @@
-"""D-189 market-fetch policy: quiet hours, split keeps, and the memo.
+"""D-190 market-fetch policy: the pre-game window and the memo.
 
-Every expectation is derivable by hand from the policy constants: nothing
-is spent before 2 PM Eastern, a priced board keeps twenty hours, an
-absence keeps two, and a miss re-fetches.
+Every expectation is derivable by hand from the policy constants: the paid
+sweep opens one hour before first pitch, a priced board keeps twenty
+hours, an absence keeps two, and a miss re-fetches.
 """
 
 from __future__ import annotations
@@ -10,29 +10,21 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from greenmachine.odds import (
-    ET,
     MARKET_ABSENCE_KEEP,
-    MARKET_FIRST_CHECK_ET,
+    MARKET_PRE_GAME,
     MARKET_PRICED_KEEP,
     MarketMemo,
-    in_market_quiet_hours,
     market_keep,
 )
 
 
-def test_quiet_hours_boundary_is_two_pm_eastern() -> None:
-    just_before = datetime(2026, 9, 6, 17, 59, tzinfo=UTC)  # 1:59 PM ET
-    on_the_dot = datetime(2026, 9, 6, 18, 0, tzinfo=UTC)  # 2:00 PM ET
-    assert in_market_quiet_hours(just_before)
-    assert not in_market_quiet_hours(on_the_dot)
-    assert MARKET_FIRST_CHECK_ET.hour == 14
-
-
-def test_quiet_hours_converts_the_callers_zone() -> None:
-    morning_et = datetime(2026, 9, 6, 9, 30, tzinfo=ET)
-    evening_et = datetime(2026, 9, 6, 19, 30, tzinfo=ET)
-    assert in_market_quiet_hours(morning_et)
-    assert not in_market_quiet_hours(evening_et)
+def test_the_sweep_window_is_one_hour_before_first_pitch() -> None:
+    assert timedelta(hours=1) == MARKET_PRE_GAME
+    first_pitch = datetime(2026, 9, 6, 23, 5, tzinfo=UTC)  # 7:05 PM ET
+    window_opens = first_pitch - MARKET_PRE_GAME
+    before = datetime(2026, 9, 6, 12, 0, tzinfo=UTC)  # a morning visit
+    inside = datetime(2026, 9, 6, 22, 30, tzinfo=UTC)
+    assert before < window_opens <= inside
 
 
 def test_priced_board_keeps_longer_than_an_absence() -> None:

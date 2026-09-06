@@ -52,11 +52,14 @@ class PayloadMalformedError(Exception):
 
 @dataclass(frozen=True)
 class OddsEvent:
-    """One listed fixture: the feed's id for it and its slate-day teams."""
+    """One listed fixture: the feed's id for it, its slate-day teams, and
+    the first-pitch instant (D-190) — the freshness policy gates the paid
+    props sweep on it, and the events list itself is free."""
 
     event_id: str
     home_team: str
     away_team: str
+    commence_time: datetime
 
 
 @dataclass(frozen=True)
@@ -163,7 +166,14 @@ class TheOddsApi:
                     _SLATE_ZONE
                 )
                 if local.date() == day:
-                    events.append(OddsEvent(event_id=event_id, home_team=home, away_team=away))
+                    events.append(
+                        OddsEvent(
+                            event_id=event_id,
+                            home_team=home,
+                            away_team=away,
+                            commence_time=datetime.fromisoformat(commence.replace("Z", "+00:00")),
+                        )
+                    )
         except (PayloadMalformedError, ValueError) as exc:
             return FetchFailure(f"events list: {exc}")
         return tuple(events)
