@@ -40,6 +40,11 @@ _SLATE_ZONE = ZoneInfo("America/Phoenix")
 _HR_MARKET = "batter_home_runs"
 _HR_POINT = Decimal("0.5")
 
+# The empty-slate absence, named once so the app can tell "nothing posted
+# yet" apart from a transport failure (D-189) — and so the unit pin matches
+# the same constant rather than a second copy of the sentence.
+NO_PROPS_REASON = "no batter home-run props posted for this slate"
+
 
 class PayloadMalformedError(Exception):
     """The odds feed answered but not in the published shape."""
@@ -241,7 +246,7 @@ def market_snapshot(api: TheOddsApi, day: date) -> dict[str, MarketRead] | Fetch
             fairs.setdefault(player, []).append(fair)
             books.setdefault(player, set()).add(book_key)
     if not fairs:
-        return FetchFailure("no batter home-run props posted for this slate")
+        return FetchFailure(NO_PROPS_REASON)
     snapshot: dict[str, MarketRead] = {}
     for player, prices in fairs.items():
         mean = sum(prices) / Decimal(len(prices))

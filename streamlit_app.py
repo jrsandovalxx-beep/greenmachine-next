@@ -42,7 +42,7 @@ import sys
 import tempfile
 import threading
 import traceback
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from functools import lru_cache
@@ -215,7 +215,15 @@ from greenmachine.live.pipeline import (
 from greenmachine.live.savant import BaseballSavant, PitchEvent
 from greenmachine.live.transport import UrllibTransport as MlbTransport
 from greenmachine.live.wind import resolved_wind_mph, spray_field_bearing, wind_field_words
-from greenmachine.odds import MarketRead, TheOddsApi, market_snapshot, normalize_name
+from greenmachine.odds import (
+    NO_PROPS_REASON,
+    MarketMemo,
+    MarketRead,
+    TheOddsApi,
+    in_market_quiet_hours,
+    market_snapshot,
+    normalize_name,
+)
 from greenmachine.odds import UrllibTransport as OddsTransport
 from greenmachine.scoring import hr_chance
 from greenmachine.shell import (
@@ -2321,20 +2329,37 @@ def _hr_chance_text(result: GradeResult, config: GreenMachineConfig) -> str | No
 # home-run props, de-vigged and averaged across the books that priced the
 # batter, beside the D-186 calibrated chance — the gap is the whole point.
 # The key is the owner's, bridged from Streamlit secrets; without it the
-# column names the absence rather than inventing a number.
-@st.cache_data(ttl=timedelta(hours=20), show_spinner=False)
+# column names the absence rather than inventing a number. D-189: the keep
+# is a policy, not a blind cache — no morning spend, a priced board locks
+# for the day, an empty one retries two hours later.
+_MARKET_MEMO = MarketMemo()
+
+
 def _market_snapshot(official_date: str) -> dict[str, MarketRead] | str:
     """The slate's market reads keyed by normalized batter name, or the
-    absence word — "no key" when the owner has not configured one,
-    "unavailable" when the source failed. Cached for the day so a rerun
-    never re-spends the request quota."""
+    absence word — "no key" when the owner has not configured one, "not
+    posted yet" while the feed is still empty (quiet hours count too),
+    "unavailable" when the source itself failed."""
     key = os.environ.get("GM_ODDS_API_KEY", "").strip()
     if not key:
         return "no key"
+    now = datetime.now(UTC)
+    if in_market_quiet_hours(now):
+        return "not posted yet"
+    kept = _MARKET_MEMO.get(official_date, now)
+    if kept is not None:
+        return dict(kept) if isinstance(kept, Mapping) else kept
     result = market_snapshot(TheOddsApi(OddsTransport(), key), date.fromisoformat(official_date))
+    value: dict[str, MarketRead] | str
     if isinstance(result, FetchFailure):
-        return "unavailable"
-    return dict(result)
+        value = "not posted yet" if result.reason == NO_PROPS_REASON else "unavailable"
+    else:
+        value = dict(result)
+    _MARKET_MEMO.put(official_date, value, now)
+    return value
+
+
+_market_snapshot.clear = _MARKET_MEMO.clear  # type: ignore[attr-defined]
 
 
 def _market_cell(
