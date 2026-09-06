@@ -5054,3 +5054,39 @@ bat speed keep token seats rather than retiring outright because the
 sample is one window of one season. The component-level dump and the
 measured-vs-substituted split are preserved in the evidence folder for
 the next measurement question.
+
+## D-189 — The market column retries an empty feed, on a quota budget
+
+The owner keyed the odds source (The Odds API, free tier) and the column
+woke up saying "unavailable" — correctly: no book had posted batter
+home-run props for the slate yet (books post through the early afternoon
+ET). But the D-187 cache kept that answer for 20 hours, so late-posting
+props would never have appeared the same day.
+
+The fix is a freshness policy (`greenmachine.odds.policy`), measured
+against the free tier's 500-requests-a-month budget — one full-slate
+sweep costs one request per fixture (~15), and the feed confirmed the
+player-props market is per-event only, so no cheaper single-call sweep
+exists:
+
+- **No morning spend.** Before 2 PM Eastern the app makes no paid calls
+  and the column says "not posted yet" — a morning sweep is almost
+  always empty and costs the same ~15 requests.
+- **A priced board keeps 20 hours** (the D-187 stance: one sweep a day,
+  reruns never re-spend).
+- **An empty afternoon keeps 2 hours**, then the next visit retries, so
+  late-posting props land the same day.
+
+Expected spend: ~430–490 requests on a typical month — at the free cap
+by design. A heavy month can trip the cap; the column then names
+"unavailable" until the monthly reset, which is the signal to revisit
+the plan, never a breakage. (The engineering estimate first put to the
+PO — "hourly retries, ~90 extra a month" — understated the morning
+hours; the 2 PM gate plus 2-hour retry is what actually fits the budget.)
+
+Mechanically: the st.cache_data decorator is replaced by a small tested
+memo (`MarketMemo`) because the keep must depend on the answer, and the
+empty-slate FetchFailure reason is now a named constant so the app tells
+"not posted yet" apart from a real failure ("unavailable"). The
+transport, the de-vig, the gap pill, and the column vocabulary otherwise
+stand unchanged.

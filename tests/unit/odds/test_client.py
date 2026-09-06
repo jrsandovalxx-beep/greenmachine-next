@@ -13,7 +13,13 @@ from decimal import Decimal
 
 from greenmachine.live.mlb_api import FetchFailure
 from greenmachine.live.transport import HttpResponse, TransportUnreachableError
-from greenmachine.odds import MarketRead, TheOddsApi, market_snapshot, normalize_name
+from greenmachine.odds import (
+    NO_PROPS_REASON,
+    MarketRead,
+    TheOddsApi,
+    market_snapshot,
+    normalize_name,
+)
 
 DAY = date(2026, 9, 5)  # 2026-09-06T01:10Z is still the 9/5 slate in Phoenix
 
@@ -195,7 +201,7 @@ def test_snapshot_names_an_unpriced_slate() -> None:
     routes["/events/ev1/odds"] = (200, {"bookmakers": []})
     result = market_snapshot(_api(routes), DAY)
     assert isinstance(result, FetchFailure)
-    assert "no batter home-run props" in result.reason
+    assert result.reason == NO_PROPS_REASON
 
 
 def test_a_fixture_failure_degrades_out_of_the_average() -> None:
