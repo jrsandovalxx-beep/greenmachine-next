@@ -215,6 +215,7 @@ from greenmachine.live.pipeline import (
 from greenmachine.live.savant import BaseballSavant, PitchEvent
 from greenmachine.live.transport import UrllibTransport as MlbTransport
 from greenmachine.live.wind import resolved_wind_mph, spray_field_bearing, wind_field_words
+from greenmachine.scoring import hr_chance
 from greenmachine.shell import (
     BLOT_CSS,
     BLOT_HTML,
@@ -1858,7 +1859,7 @@ white-space:nowrap;padding:0;min-height:0;line-height:1.55;justify-content:flex-
 # and the pitcher he faces, the bubble tags, the conditions, then the
 # reads — Park factor, Form Score (D-132: the actual graded subtotal),
 # Grade last — and the More button that opens the detail popup.
-_SLUGGER_SPECS = [1.7, 0.55, 1.6, 1.6, 3.6, 1.9, 0.85, 0.95, 0.7, 0.8]
+_SLUGGER_SPECS = [1.7, 0.55, 1.6, 1.6, 3.6, 1.9, 0.85, 0.95, 0.9, 0.7, 0.8]
 _SLUGGER_HEADERS = (
     "Batter",
     "HR",
@@ -1868,6 +1869,7 @@ _SLUGGER_HEADERS = (
     "Weather",
     "Park factor",
     "Form Score",
+    "HR chance",
     "Grade",
     "",
 )
@@ -1975,7 +1977,16 @@ def _slugger_rows(board: SlateBoard) -> list[_SluggerRow]:
 # D-168 (PO): the shortlist sorts from its column headers — an arrow per
 # data column, Tags and Weather excepted. Grade stays the load order: S
 # before A, the total score breaking ties.
-_SLUGGER_SORTABLE = ("Batter", "HR", "Team", "Versus", "Park factor", "Form Score", "Grade")
+_SLUGGER_SORTABLE = (
+    "Batter",
+    "HR",
+    "Team",
+    "Versus",
+    "Park factor",
+    "Form Score",
+    "HR chance",
+    "Grade",
+)
 _SLUGGER_TEXT_SORTS = frozenset({"Batter", "Team", "Versus"})
 _SLUGGER_GRADE_RANK = {Grade.S: 0, Grade.A: 1, Grade.B: 2, Grade.C: 3, Grade.D: 4}
 
@@ -2059,6 +2070,17 @@ def _sorted_slugger_rows(
                 (_form_points(row.card.result) or Decimal(0)) * (1 if ascending else -1),
                 grade_rank(row),
                 -total(row),
+                row.card.full_name,
+            ),
+        )
+    if sort == "HR chance":
+        # D-186: the chance is a monotone read of the total, so the sort
+        # walks the total itself; ties still fall through grade and name.
+        return sorted(
+            rows,
+            key=lambda row: (
+                total(row) * (1 if ascending else -1),
+                grade_rank(row),
                 row.card.full_name,
             ),
         )
@@ -2237,6 +2259,19 @@ def _form_score_text(result: GradeResult, form_max: Decimal) -> str | None:
     # ("1.3", never "1.30").
     shown = points.quantize(Decimal("0.01")).normalize()
     return f"{format(shown, 'f')} / {format(form_max.normalize(), 'f')}"
+
+
+def _hr_chance_text(result: GradeResult, config: GreenMachineConfig) -> str | None:
+    """D-186 (PO, item 5): the calibrated home-run chance for the batter's
+    total, one decimal of percent — the 42-slate backtest's honest read of
+    how often a score like this homered (S band holds the 9-10 bin's rate).
+    Display-only: the grade never reads it. None when the config carries no
+    anchors or there is no evaluated total, so the cell names the absence
+    rather than inventing a number."""
+    if config.hr_chance is None or not isinstance(result, EvaluatedGradeResult):
+        return None
+    chance = hr_chance(result.total_score, config.hr_chance)
+    return f"{float(chance):.1f}%"
 
 
 def _form_section_frames(
@@ -2676,6 +2711,11 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
     pitch-mix filter.
     """
     st.markdown(f"**{card.full_name}** — {card.team}")
+    # D-186 (PO): the detail carries the same display-only calibrated
+    # chance the shortlist cell shows.
+    chance_text = _hr_chance_text(card.result, production_config())
+    if chance_text is not None:
+        st.caption(f"HR chance {chance_text} — the calibrated 42-slate read, display-only.")
     pitcher = _opposing_pitcher(game, card) if game is not None else None
 
     # D-129 (PO): the park panel and the expected starter's details sit
@@ -3090,6 +3130,8 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> None:
         "≥ 8 mph. **Form Score** is his actual graded form subtotal out "
         "of the category max — 2 in v1, and the weights may change in a "
         "future version (D-132, PO; the D-124 placeholder dash is dead). "
+        "**HR chance** is how often a score like his homered across the "
+        "42 tracked slates — the calibrated read, display-only (D-186). "
         "Tap a data column's header to sort by it — the arrow marks the "
         "active sort and a second tap flips the direction; Tags and "
         "Weather stay unsorted (D-168, PO). Hover any column header for "
@@ -3169,14 +3211,21 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> None:
             form_text if form_text is not None else '<span class="gm-dim">—</span>',
             unsafe_allow_html=True,
         )
+        # D-186 (PO): the calibrated HR chance sits beside the grade it
+        # describes — display-only, never a grading input.
+        chance_text = _hr_chance_text(row.card.result, config)
         cells[8].markdown(
+            chance_text if chance_text is not None else '<span class="gm-dim">—</span>',
+            unsafe_allow_html=True,
+        )
+        cells[9].markdown(
             f'<span class="gm-grade">{row.card.result.grade.value}</span>',
             unsafe_allow_html=True,
         )
         # D-169 (PO): the tap is queued by callback — every row's More
         # renders on every run, so opening one detail never vanishes the
         # others.
-        cells[9].button(
+        cells[10].button(
             "More",
             key=f"more_{board.official_date}_{row.card.player_id}",
             on_click=_queue_batter_detail,
@@ -3696,6 +3745,11 @@ _SLUGGERS_HELP: dict[str, str] = {
     "Form Score": (
         "His actual form score from the grade: the recent-form reads scored "
         "against the category max — 2 in v1, weights may change (D-132, PO)."
+    ),
+    "HR chance": (
+        "How often a score like his homered across 42 tracked slates "
+        "(10,278 graded batter-days), interpolated between the measured "
+        "points — display-only, the grade never reads it (D-186)."
     ),
     "Park factor": (
         "The batter-side home-run factor: 100 is neutral, ≥ 110 boosts, ≤ 90 suppresses (v2.2)."

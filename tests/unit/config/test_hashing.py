@@ -111,12 +111,15 @@ def test_the_projection_excludes_the_version_label_and_keeps_everything_else() -
 
     assert "model_configuration_version" not in projection
     assert set(projection) == expected
+    # D-186: hr_chance joined the projection — the calibrated curve is
+    # configuration, so a silent anchor edit moves the hash like any table.
     assert expected == {
         "schema_version",
         "specification_version",
         "fuzzy_scoring",
         "allocations",
         "components",
+        "hr_chance",
     }
 
 

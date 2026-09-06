@@ -14,6 +14,7 @@ disclaimed synthetic fixture, and the engine never embeds a threshold.
 
 from __future__ import annotations
 
+from .chance import hr_chance
 from .engine import OBSERVED_VALUE_INPUT_NAME, score_snapshot
 from .errors import ScoringConfigError, ScoringError, ScoringInputError
 
@@ -22,5 +23,6 @@ __all__ = [
     "ScoringConfigError",
     "ScoringError",
     "ScoringInputError",
+    "hr_chance",
     "score_snapshot",
 ]

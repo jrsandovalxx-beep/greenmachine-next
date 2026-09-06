@@ -34,8 +34,10 @@ RETIRED = REPO_ROOT / "tests" / "fixtures" / "config" / "valid" / "gm041_engine_
 # Re-captured at D-184 (2026-09-05): the projection gained `prior_points`
 # and `shrink_strength` (both unset on the synthetic components) — again
 # the source bytes are unchanged and only the projection shape moved.
+# Re-captured at D-186 (2026-09-05): the projection gained `hr_chance`
+# (unset on the synthetic configuration) — same story, shape only.
 EXPECTED_SOURCE_DIGEST = "e46abf13f20c2f75e6041dd4980081bfa0a03279e85eab95c24659471babca32"
-EXPECTED_CONFIG_HASH = "2c78ec1053183a44ebed0b9f49e377625f88c19fd470d450cd269b7ae3d3f675"
+EXPECTED_CONFIG_HASH = "0e615a93015931db37d67caf9075a2ca8963bbdd45c361607c6bce23521635a8"
 EXPECTED_VERSION = "gm041-engine-synthetic-0"
 
 

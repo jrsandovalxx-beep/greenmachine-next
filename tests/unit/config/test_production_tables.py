@@ -180,3 +180,27 @@ def test_the_ratified_prior_and_shrink_strength_are_shipped_verbatim(
     assert component.prior_points is not None
     assert str(component.prior_points) == want_prior
     assert component.shrink_strength == want_strength
+
+
+# D-186: the ratified HR-chance curve, measured over the 42-slate backtest
+# (10,278 graded batter-days, 2026-07-25..2026-09-04, no look-ahead). The S
+# band holds the 9-10 bin's 15.3% until a real S sample exists. String-
+# compared like the tables: a silent anchor edit is a silent display change.
+APPROVED_HR_CHANCE: tuple[tuple[str, str], ...] = (
+    ("1", "3.6"),
+    ("2.5", "5.7"),
+    ("3.5", "6.5"),
+    ("4.5", "10.3"),
+    ("5.5", "11.2"),
+    ("6.5", "12.2"),
+    ("7.5", "14.4"),
+    ("8.5", "14.4"),
+    ("9.5", "15.3"),
+)
+
+
+def test_the_ratified_hr_chance_curve_is_shipped_verbatim() -> None:
+    config = load_config(PRODUCTION)
+
+    assert config.hr_chance is not None
+    assert [(str(a.score), str(a.chance)) for a in config.hr_chance] == list(APPROVED_HR_CHANCE)

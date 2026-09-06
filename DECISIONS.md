@@ -4924,3 +4924,36 @@ the full expansion. The cell now shows two places — "0.63 / 1.3" — with
 clean values unchanged ("1.3", never "1.30"). Display-only: the audit trail
 and every downstream computation keep the exact award. The live-board test
 pins the cell to at most two decimal places.
+
+## D-186 — The shortlist shows the calibrated HR chance beside the grade
+
+Build-order item 5 (grades → 0-100 probabilities). The 42-slate backtest
+(10,278 graded batter-days, 2026-07-25..2026-09-04, no look-ahead —
+``evidence/calibration_rows_42d.csv``) measured how often a graded total
+homered: letter-grade rates A 14.5% (1.45x the 10.05% base), B 13.1%,
+C 10.7%, D 6.2%; the score-bin curve runs 3.6% at 0-2 up to 15.3% at
+9-10, monotone and stable across split halves, but flat from 7-10 — and
+the S band saw only 6 batter-days with no home runs, too thin to price.
+
+PO answered "no preference" on the display mapping, so the recommended
+Option 1 ships: an honest calibrated probability, not a rescaled 0-100.
+The config carries a ``hr_chance`` table of nine measured anchors (score
+→ chance, percent scale, 3.6 at 1 up to 15.3 at 9.5); the new
+``scoring/chance.py`` interpolates piecewise-linear between anchors and
+holds the end values past both rails, so the S band shows the 9-10 bin's
+15.3% until a real S sample exists — the display can never extrapolate
+steeper than the backtest measured. Display-only: the grade never reads
+the chance.
+
+The Sluggers shortlist gains an "HR chance" column between Form Score and
+Grade, one decimal of percent, sortable (the sort walks the total the
+chance reads, so the order can never disagree with the numbers); the
+header hover and the board caption state the calibration; the batter
+detail carries the same read as a caption. Validation: at least two
+anchors, every chance inside 0-100, scores strictly increasing, chances
+nondecreasing. The production pin test ships the nine anchors verbatim;
+the semantic hash moved with the new projection field (shape only — the
+synthetic fixture and its source digest stand). Unit tests pin the
+interpolation, both clamps, the plateau, and monotonicity across the
+domain; the live-board render tests pin the column's place, its format,
+and its sort.
