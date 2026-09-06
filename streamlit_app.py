@@ -215,6 +215,8 @@ from greenmachine.live.pipeline import (
 from greenmachine.live.savant import BaseballSavant, PitchEvent
 from greenmachine.live.transport import UrllibTransport as MlbTransport
 from greenmachine.live.wind import resolved_wind_mph, spray_field_bearing, wind_field_words
+from greenmachine.odds import MarketRead, TheOddsApi, market_snapshot, normalize_name
+from greenmachine.odds import UrllibTransport as OddsTransport
 from greenmachine.scoring import hr_chance
 from greenmachine.shell import (
     BLOT_CSS,
@@ -273,7 +275,7 @@ def bridge_secrets_into_environment() -> None:
     stays exactly as REBUILD_PLAN §GMR-004 defines it: git, then
     ``GM_COMMIT``, then ``unknown``.
     """
-    for key in ("GM_ENVIRONMENT", "GM_COMMIT"):
+    for key in ("GM_ENVIRONMENT", "GM_COMMIT", "GM_ODDS_API_KEY"):
         if not os.environ.get(key):
             value = _secret(key)
             if value:
@@ -290,6 +292,7 @@ def resolve_environment() -> str:
 
 
 _SLATE_ZONE = "America/Phoenix"
+_SLATE_TZ = ZoneInfo(_SLATE_ZONE)
 
 
 def slate_today() -> date:
@@ -1859,7 +1862,7 @@ white-space:nowrap;padding:0;min-height:0;line-height:1.55;justify-content:flex-
 # and the pitcher he faces, the bubble tags, the conditions, then the
 # reads — Park factor, Form Score (D-132: the actual graded subtotal),
 # Grade last — and the More button that opens the detail popup.
-_SLUGGER_SPECS = [1.7, 0.55, 1.6, 1.6, 3.6, 1.9, 0.85, 0.95, 0.9, 0.7, 0.8]
+_SLUGGER_SPECS = [1.7, 0.55, 1.6, 1.6, 3.6, 1.9, 0.85, 0.95, 0.9, 0.8, 0.7, 0.8]
 _SLUGGER_HEADERS = (
     "Batter",
     "HR",
@@ -1870,6 +1873,7 @@ _SLUGGER_HEADERS = (
     "Park factor",
     "Form Score",
     "HR chance",
+    "Market",
     "Grade",
     "",
 )
@@ -1928,6 +1932,11 @@ class _SluggerRow(NamedTuple):
     # D-146 (PO): the raw batter-side HR factor for the park-factor sort —
     # None when the venue publishes no split (the text names the absence).
     factor_value: Decimal | None = None
+    # D-187 (PO): the market cell — the de-vigged fair chance as text, the
+    # Decimal for the sort, None when the source has no read for him (the
+    # text names the absence).
+    market_text: str = "not priced"
+    market_value: Decimal | None = None
 
 
 def _slugger_rows(board: SlateBoard) -> list[_SluggerRow]:
@@ -1936,6 +1945,8 @@ def _slugger_rows(board: SlateBoard) -> list[_SluggerRow]:
     identity cells, the bubble tags, the weather, the park factor, the Form
     Score placeholder and the grade — in the PO's D-126 order."""
     rows: list[_SluggerRow] = []
+    market = _market_snapshot(board.official_date)
+    config = production_config()
     for game in board.games:
         for batters, opposing in (
             (game.away_batters, game.home_pitcher),
@@ -1954,6 +1965,21 @@ def _slugger_rows(board: SlateBoard) -> list[_SluggerRow]:
                 if money_iso is not None:
                     _, month, day = money_iso.split("-")
                     money_day = f"{int(month)}/{int(day)}"
+                # D-187 (PO): the market read, and the gap note when the
+                # model and the books disagree by five points or more.
+                market_text, market_value = _market_cell(card, market)
+                pills = _tag_pills(advisories, boosters, vetoes)
+                if market_value is not None and config.hr_chance is not None:
+                    chance = hr_chance(card.result.total_score, config.hr_chance)
+                    gap = chance - market_value
+                    if abs(gap) >= _MARKET_GAP_POINTS:
+                        direction = "over" if gap > 0 else "under"
+                        note = (
+                            f"market gap: the model reads {float(chance):.1f}% against the "
+                            f"books' {float(market_value):.1f}% — {abs(float(gap)):.1f} points "
+                            f"{direction} the market (D-187)"
+                        )
+                        pills = (*pills, (_pill_label(note), "note", note))
                 rows.append(
                     _SluggerRow(
                         card=card,
@@ -1961,7 +1987,7 @@ def _slugger_rows(board: SlateBoard) -> list[_SluggerRow]:
                         versus=opposing.full_name if opposing else "TBD",
                         money_day=money_day,
                         money_iso=money_iso,
-                        pills=_tag_pills(advisories, boosters, vetoes),
+                        pills=pills,
                         weather=weather,
                         weather_absent=weather_absent,
                         factor_text=(
@@ -1969,6 +1995,8 @@ def _slugger_rows(board: SlateBoard) -> list[_SluggerRow]:
                         ),
                         factor_absent=factor is None,
                         factor_value=factor.factor if factor is not None else None,
+                        market_text=market_text,
+                        market_value=market_value,
                     )
                 )
     return rows
@@ -1985,6 +2013,7 @@ _SLUGGER_SORTABLE = (
     "Park factor",
     "Form Score",
     "HR chance",
+    "Market",
     "Grade",
 )
 _SLUGGER_TEXT_SORTS = frozenset({"Batter", "Team", "Versus"})
@@ -2081,6 +2110,20 @@ def _sorted_slugger_rows(
             key=lambda row: (
                 total(row) * (1 if ascending else -1),
                 grade_rank(row),
+                row.card.full_name,
+            ),
+        )
+    if sort == "Market":
+        # D-187: the de-vigged fair chance; an unpriced batter sorts last
+        # in both directions, like the uncovered park factor.
+        return sorted(
+            rows,
+            key=lambda row: (
+                row.market_value is None,
+                (row.market_value if row.market_value is not None else Decimal(0))
+                * (1 if ascending else -1),
+                grade_rank(row),
+                -total(row),
                 row.card.full_name,
             ),
         )
@@ -2272,6 +2315,44 @@ def _hr_chance_text(result: GradeResult, config: GreenMachineConfig) -> str | No
         return None
     chance = hr_chance(result.total_score, config.hr_chance)
     return f"{float(chance):.1f}%"
+
+
+# D-187 (PO, item 6): the market comparison. The Odds API's batter
+# home-run props, de-vigged and averaged across the books that priced the
+# batter, beside the D-186 calibrated chance — the gap is the whole point.
+# The key is the owner's, bridged from Streamlit secrets; without it the
+# column names the absence rather than inventing a number.
+@st.cache_data(ttl=timedelta(hours=20), show_spinner=False)
+def _market_snapshot(official_date: str) -> dict[str, MarketRead] | str:
+    """The slate's market reads keyed by normalized batter name, or the
+    absence word — "no key" when the owner has not configured one,
+    "unavailable" when the source failed. Cached for the day so a rerun
+    never re-spends the request quota."""
+    key = os.environ.get("GM_ODDS_API_KEY", "").strip()
+    if not key:
+        return "no key"
+    result = market_snapshot(TheOddsApi(OddsTransport(), key), date.fromisoformat(official_date))
+    if isinstance(result, FetchFailure):
+        return "unavailable"
+    return dict(result)
+
+
+def _market_cell(
+    card: BatterCard, market: dict[str, MarketRead] | str
+) -> tuple[str, Decimal | None]:
+    """(cell text, sortable value) for one batter — the fair chance when a
+    book priced him, else the named absence (dimmed at render)."""
+    if not isinstance(market, dict):
+        return market, None
+    read = market.get(normalize_name(card.full_name))
+    if read is None:
+        return "not priced", None
+    return f"{float(read.fair_percent):.1f}%", read.fair_percent
+
+
+# The gap that earns a note pill: model chance minus market fair chance at
+# this many percentage points or wider.
+_MARKET_GAP_POINTS = Decimal("5")
 
 
 def _form_section_frames(
@@ -2712,10 +2793,23 @@ def _render_batter_detail(card: BatterCard, game: GameCard | None) -> None:
     """
     st.markdown(f"**{card.full_name}** — {card.team}")
     # D-186 (PO): the detail carries the same display-only calibrated
-    # chance the shortlist cell shows.
+    # chance the shortlist cell shows; D-187 adds the market's fair chance
+    # beside it when the source has one for his game day.
     chance_text = _hr_chance_text(card.result, production_config())
     if chance_text is not None:
-        st.caption(f"HR chance {chance_text} — the calibrated 42-slate read, display-only.")
+        market_clause = ""
+        if game is not None:
+            slate_day = game.scheduled_start_utc.astimezone(_SLATE_TZ).date().isoformat()
+            market_text, market_value = _market_cell(card, _market_snapshot(slate_day))
+            market_clause = (
+                f" · market {market_text}"
+                if market_value is not None
+                else f" · market: {market_text}"
+            )
+        st.caption(
+            f"HR chance {chance_text}{market_clause} — the calibrated 42-slate read "
+            "against the books, display-only."
+        )
     pitcher = _opposing_pitcher(game, card) if game is not None else None
 
     # D-129 (PO): the park panel and the expected starter's details sit
@@ -3218,14 +3312,23 @@ def _render_sluggers(board: SlateBoard, config: GreenMachineConfig) -> None:
             chance_text if chance_text is not None else '<span class="gm-dim">—</span>',
             unsafe_allow_html=True,
         )
+        # D-187 (PO): the market's fair chance beside the model's — the
+        # absence (no key, source down, unpriced) is named and dimmed.
+        market_cell = html.escape(row.market_text)
         cells[9].markdown(
+            f'<span class="gm-dim">{market_cell}</span>'
+            if row.market_value is None
+            else market_cell,
+            unsafe_allow_html=True,
+        )
+        cells[10].markdown(
             f'<span class="gm-grade">{row.card.result.grade.value}</span>',
             unsafe_allow_html=True,
         )
         # D-169 (PO): the tap is queued by callback — every row's More
         # renders on every run, so opening one detail never vanishes the
         # others.
-        cells[10].button(
+        cells[11].button(
             "More",
             key=f"more_{board.official_date}_{row.card.player_id}",
             on_click=_queue_batter_detail,
@@ -3750,6 +3853,13 @@ _SLUGGERS_HELP: dict[str, str] = {
         "How often a score like his homered across 42 tracked slates "
         "(10,278 graded batter-days), interpolated between the measured "
         "points — display-only, the grade never reads it (D-186)."
+    ),
+    "Market": (
+        "The books' fair chance he homers today: each book's 1+ HR prop "
+        "de-vigged, then averaged across the books that priced him "
+        "(The Odds API, D-187). A gap of five points or more against the "
+        "model's HR chance earns a note bubble. Unpriced batters, a "
+        "missing key, and a source outage all say so in words."
     ),
     "Park factor": (
         "The batter-side home-run factor: 100 is neutral, ≥ 110 boosts, ≤ 90 suppresses (v2.2)."

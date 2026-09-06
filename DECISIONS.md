@@ -4957,3 +4957,44 @@ synthetic fixture and its source digest stand). Unit tests pin the
 interpolation, both clamps, the plateau, and monotonicity across the
 domain; the live-board render tests pin the column's place, its format,
 and its sort.
+
+## D-187 — The shortlist compares the model to the market
+
+Build-order item 6 (market comparison). PO answered "no preference" on
+both the source and the placement, so the recommended pairing ships: The
+Odds API as the source (the established provider; its free tier covers a
+once-a-day slate fetch inside the request quota), as a "Market" column on
+the shortlist between HR chance and Grade.
+
+The read: each book's "1+ home runs" prop is a two-way Over/Under 0.5
+market; the cell shows the de-vigged Over — each side's implied share
+normalized against their sum — averaged across the books that priced the
+batter, on the same percent scale as the D-186 calibrated chance.
+Alternate ladder rungs (any point but 0.5) and one-sided books carry no
+read. When the model's calibrated chance and the market's fair chance sit
+five percentage points or more apart, the row's tags gain a note bubble
+naming the size and direction of the gap — the comparison is the point of
+the column. The batter detail caption carries the same pair.
+
+Architecture: a new ``greenmachine.odds`` package — a transport pinned to
+``api.the-odds-api.com`` by the same construction as the MLB and NWS pins
+(D-069, §GMF-005: module constant, refusal before a socket, every redirect
+re-validated, no test ever opens a socket), and a client that lists the
+slate's fixtures (Phoenix date, matching the board's "today"), fetches the
+props per fixture, and aggregates per normalized batter name. Player
+identity in the feed is a display name, so the join is the letters-only
+name fold; a fixture whose fetch fails degrades out of the average, and a
+slate with no priced batter at all is a named absence. The owner's key
+bridges from Streamlit secrets as ``GM_ODDS_API_KEY``; the snapshot is
+cached for the day so reruns never re-spend the quota. Every absence is
+named in the cell — "no key", "market unavailable", "not priced" — never
+an invented number.
+
+The column is sortable (the de-vigged chance, unpriced last in both
+directions), with the header hover and the board caption stating the
+source and the de-vig. Unit suites pin the de-vig arithmetic, the ladder
+and one-sided skips, the cross-book average, the named absences (the key
+never leaves the request URL), the host pin, and the live-board render:
+the cell's one-decimal format, the gap bubble, the sort, and the missing-
+key wording. No engine surface moves: the market read is presentation,
+never a grading input.
