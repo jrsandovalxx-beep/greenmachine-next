@@ -5115,3 +5115,34 @@ fixed-clock quiet hours are replaced by the first-pitch window
 trade-off note still holds: if a heavy month ever trips the free cap the
 column names "unavailable" until the reset — the signal to revisit the
 plan, never a breakage.
+
+## D-191 — Cold starts stop re-downloading what cannot have changed
+
+The PO reported 10-18 minute loads after every reboot and a morning wake
+job failing about half its runs. The measurement: a full cold build —
+every season leaderboard, all fourteen form-window day feeds, the board
+math — takes about 90 seconds on an unthrottled machine, so the minutes
+live in Streamlit Cloud's weak CPU and throttled egress to the data
+sources, not in the work itself. The wake job's three 5-minute attempts
+expired while the app was simply still building — the wake failures and
+the slow loads are one problem.
+
+Two-part fix, both semantics-preserving:
+
+1. **Disk-persist the heavy fetches.** ``_season_fetch``,
+   ``_final_day_events``, and ``_batter_season_events_final`` gain
+   ``persist="disk"`` with their TTLs untouched — the D-136 anchor flip
+   still refreshes the season sources each morning, and the 26-hour
+   correction re-read still happens. What changes: a process restart
+   inside the day (a redeploy, a secrets edit, a wake-after-sleep)
+   re-reads the morning's downloads from disk instead of re-pulling ~13
+   final days plus the season board over the slow path. In-progress day
+   feeds and the 15-minute board cache stay memory-only, so intraday
+   freshness semantics do not move. If Streamlit's disk proves not to
+   survive restarts, the fallback is the structural build: the morning
+   Action precomputes the board and the app reads the finished file.
+   The next few mornings' wake runs are the measurement.
+
+2. **The wake job waits longer.** Three attempts became five (25 minutes
+   of board-wait inside the 30-minute job budget), so a genuinely cold
+   morning still completes instead of failing at minute 15.

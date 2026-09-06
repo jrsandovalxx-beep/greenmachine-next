@@ -688,12 +688,15 @@ def _season_source_call(kind: str, params: tuple[object, ...]) -> object:
     raise ValueError(f"unknown season source kind: {kind}")
 
 
-@st.cache_data(ttl=SEASON_DATA_TTL_SECONDS, show_spinner=False)
+@st.cache_data(ttl=SEASON_DATA_TTL_SECONDS, show_spinner=False, persist="disk")
 def _season_fetch(kind: str, anchor: str, params: tuple[object, ...]) -> object:
     """One day-anchored season-source fetch (D-136): the anchor date is
     part of the cache key, so the morning flip — and only the flip —
     refetches. Failures raise out of the cache; the proxies translate
-    them back to the FetchFailure values the pipeline already handles."""
+    them back to the FetchFailure values the pipeline already handles.
+    D-191: persisted to disk so a process restart inside the anchor day
+    (a redeploy, a secrets change) re-reads the morning's downloads
+    instead of re-running them on Streamlit's throttled egress."""
     result = _season_source_call(kind, params)
     if isinstance(result, FetchFailure):
         raise _SeasonFetchError(result)
@@ -780,10 +783,13 @@ class _DayAnchoredMlbApi:
         return self._season("season_pitching", tuple(player_ids))
 
 
-@st.cache_data(ttl=FINAL_DAY_EVENTS_TTL_SECONDS, show_spinner=False)
+@st.cache_data(ttl=FINAL_DAY_EVENTS_TTL_SECONDS, show_spinner=False, persist="disk")
 def _final_day_events(day_iso: str, year: int) -> object:
     """A finalized day's pitches (D-136): once the morning update has
-    landed, that day never changes again."""
+    landed, that day never changes again. D-191: persisted to disk — the
+    form window is ~13 final days, and re-downloading them is the long
+    pole of every cold start; the 26-hour TTL is unchanged, so the daily
+    correction re-read D-136 chose still happens."""
     _, savant = live_mlb_adapters()
     return savant.fetch_pitch_events(year=year, day=day_iso)
 
@@ -810,7 +816,7 @@ def _final_day_before(anchor: str) -> str:
     return (date.fromisoformat(anchor) - timedelta(days=1)).isoformat()
 
 
-@st.cache_data(ttl=FINAL_DAY_EVENTS_TTL_SECONDS, show_spinner=False)
+@st.cache_data(ttl=FINAL_DAY_EVENTS_TTL_SECONDS, show_spinner=False, persist="disk")
 def _batter_season_events_final(
     player_id: int, end_iso: str
 ) -> tuple[PitchEvent, ...] | FetchFailure:
