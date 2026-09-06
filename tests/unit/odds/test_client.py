@@ -8,7 +8,7 @@ that priced the batter, and every absence is named rather than invented.
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from greenmachine.live.mlb_api import FetchFailure
@@ -174,6 +174,15 @@ def test_events_keeps_only_the_slate_day() -> None:
     events = _api(_routes()).fetch_events(DAY)
     assert not isinstance(events, FetchFailure)
     assert [event.event_id for event in events] == ["ev1", "ev2"]
+
+
+def test_events_carry_first_pitch_for_the_freshness_gate() -> None:
+    """D-190: the paid sweep opens one hour before the earliest commence —
+    the events list is free, so the gate spends nothing."""
+    events = _api(_routes()).fetch_events(DAY)
+    assert not isinstance(events, FetchFailure)
+    first_pitch = min(event.commence_time for event in events)
+    assert first_pitch == datetime(2026, 9, 5, 17, 5, tzinfo=UTC)
 
 
 def test_props_devig_and_skip_the_ladder() -> None:

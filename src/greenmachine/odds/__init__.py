@@ -10,20 +10,17 @@ from .client import (
     normalize_name,
 )
 from .policy import (
-    ET,
     MARKET_ABSENCE_KEEP,
-    MARKET_FIRST_CHECK_ET,
+    MARKET_PRE_GAME,
     MARKET_PRICED_KEEP,
     MarketMemo,
-    in_market_quiet_hours,
     market_keep,
 )
 from .transport import ODDS_HOST, UrllibTransport, require_pinned_host
 
 __all__ = [
-    "ET",
     "MARKET_ABSENCE_KEEP",
-    "MARKET_FIRST_CHECK_ET",
+    "MARKET_PRE_GAME",
     "MARKET_PRICED_KEEP",
     "NO_PROPS_REASON",
     "ODDS_HOST",
@@ -33,7 +30,6 @@ __all__ = [
     "PayloadMalformedError",
     "TheOddsApi",
     "UrllibTransport",
-    "in_market_quiet_hours",
     "market_keep",
     "market_snapshot",
     "normalize_name",

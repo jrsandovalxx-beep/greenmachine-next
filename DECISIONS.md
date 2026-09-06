@@ -5090,3 +5090,28 @@ empty-slate FetchFailure reason is now a named constant so the app tells
 "not posted yet" apart from a real failure ("unavailable"). The
 transport, the de-vig, the gap pill, and the column vocabulary otherwise
 stand unchanged.
+
+## D-190 — One market sweep a day, an hour before first pitch
+
+The PO set the market schedule: exactly one paid sweep per day, opening
+an hour before the slate's first game. Presented with the quota math
+(the free tier's 500 requests a month vs ~15 per sweep), the PO left the
+choice to the recommendation; the one-a-day schedule is what fits the
+free plan with margin — ~450 requests a month — while guaranteeing the
+evening numbers are fresh when decisions happen.
+
+The schedule rides on a newly noticed freebie: The Odds API's events
+list (which carries first-pitch times) costs no quota, so the gate is
+free to check on every visit. Before first pitch minus one hour the
+column says "not posted yet" without spending anything — morning visits
+and the 5 AM wake included. Inside the window the first visit sweeps; a
+priced board keeps 20 hours; an empty or failed sweep keeps 2 hours and
+retries once more, so props that post inside the last hour still land.
+An off-day (no fixtures) spends nothing and says "not posted yet".
+
+Mechanically: ``OddsEvent`` gains the commence instant; the D-189
+fixed-clock quiet hours are replaced by the first-pitch window
+(``MARKET_PRE_GAME``); the memo and the split keeps stand. The D-189
+trade-off note still holds: if a heavy month ever trips the free cap the
+column names "unavailable" until the reset — the signal to revisit the
+plan, never a breakage.
