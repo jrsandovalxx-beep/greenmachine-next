@@ -14,6 +14,25 @@ specification_version: "v6.3"
 fuzzy_scoring:
   enabled: false
 
+# D-186 (PO build order item 5, "HR chance" reading 2026-09-05): the total
+# score mapped to the calibrated chance the batter homers on the slate day,
+# percent scale, piecewise-linear through the anchors, flat past both ends.
+# Anchors are the measured bin centers of the 42-slate backtest (10,278
+# graded batter-days, 2026-07-25 .. 2026-09-04, regraded as of the prior
+# evening — no look-ahead): 3.6% at 0-2 points up to 15.3% at 9-10. The S
+# band holds the 9.5-point rate until a real S sample exists (6 batter-days
+# in the run homered 0 — too thin to calibrate).
+hr_chance:
+  - { score: "1", chance: "3.6" }
+  - { score: "2.5", chance: "5.7" }
+  - { score: "3.5", chance: "6.5" }
+  - { score: "4.5", chance: "10.3" }
+  - { score: "5.5", chance: "11.2" }
+  - { score: "6.5", chance: "12.2" }
+  - { score: "7.5", chance: "14.4" }
+  - { score: "8.5", chance: "14.4" }
+  - { score: "9.5", chance: "15.3" }
+
 allocations:
   total_max_points: "11.3"
 

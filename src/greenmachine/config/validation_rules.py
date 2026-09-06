@@ -138,6 +138,46 @@ def validate_semantics(config: GreenMachineConfig, file_path: str | None) -> Non
     _validate_allocations(config.allocations, config.components, file_path)
     _validate_grade_cutoffs(config.allocations, file_path)
     _validate_components(config, file_path)
+    _validate_hr_chance(config, file_path)
+
+
+def _validate_hr_chance(config: GreenMachineConfig, file_path: str | None) -> None:
+    """D-186: the calibration curve must interpolate sanely — at least two
+    anchors, scores strictly increasing, chances nondecreasing and inside
+    the percent domain. A kinked or reversed table would silently bend
+    every displayed chance."""
+    anchors = config.hr_chance
+    if anchors is None:
+        return
+    base = ("hr_chance",)
+    if len(anchors) < 2:
+        raise _fail(
+            "hr_chance needs at least two anchors to interpolate",
+            file_path,
+            base,
+        )
+    for index, anchor in enumerate(anchors):
+        if anchor.chance < 0 or anchor.chance > 100:
+            raise _fail(
+                f"chance must sit inside 0-100, got {anchor.chance}",
+                file_path,
+                (*base, str(index), "chance"),
+            )
+        if index == 0:
+            continue
+        previous = anchors[index - 1]
+        if anchor.score <= previous.score:
+            raise _fail(
+                f"anchor scores must strictly increase ({previous.score} then {anchor.score})",
+                file_path,
+                (*base, str(index), "score"),
+            )
+        if anchor.chance < previous.chance:
+            raise _fail(
+                f"chances must not decrease ({previous.chance} then {anchor.chance})",
+                file_path,
+                (*base, str(index), "chance"),
+            )
 
 
 # --------------------------------------------------------------------------

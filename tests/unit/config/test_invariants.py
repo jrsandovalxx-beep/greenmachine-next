@@ -20,6 +20,7 @@ from config_fixtures import (
     PROXY_DEFINITION,
     WEATHER_BINARY,
     mutate,
+    valid_text,
 )
 
 from greenmachine.config import ConfigSchemaError, ConfigSemanticError, load_config_text
@@ -628,3 +629,61 @@ def test_zero_shrink_strength_is_rejected() -> None:
     error = reject(_ev_with_bonus(_EV_PRIOR + _EV_SHRINK.replace("15", "0")))
 
     assert "shrink_strength must be positive" in str(error)
+
+
+# --------------------------------------------------------------------------
+# D-186 hr_chance rules (the calibrated display curve)
+# --------------------------------------------------------------------------
+
+_HR_CHANCE = 'hr_chance:\n  - { score: "1", chance: "4" }\n  - { score: "5", chance: "12" }\n'
+
+
+def _with_hr_chance(block: str) -> str:
+    return mutate("\ncomponents:\n", "\n" + block + "components:\n")
+
+
+def test_a_valid_hr_chance_curve_loads() -> None:
+    config = load_config_text(_with_hr_chance(_HR_CHANCE), file_path="synthetic.yaml")
+    assert config.hr_chance is not None
+    assert [(str(a.score), str(a.chance)) for a in config.hr_chance] == [("1", "4"), ("5", "12")]
+
+
+def test_hr_chance_is_optional() -> None:
+    config = load_config_text(valid_text(), file_path="synthetic.yaml")
+    assert config.hr_chance is None
+
+
+def test_a_single_anchor_is_rejected() -> None:
+    error = reject(_with_hr_chance('hr_chance:\n  - { score: "1", chance: "4" }\n'))
+
+    assert "hr_chance needs at least two anchors to interpolate" in str(error)
+
+
+def test_a_chance_outside_the_percent_scale_is_rejected() -> None:
+    error = reject(
+        _with_hr_chance(
+            'hr_chance:\n  - { score: "1", chance: "104" }\n' + _HR_CHANCE.split("\n", 1)[1]
+        )
+    )
+
+    assert "chance must sit inside 0-100" in str(error)
+
+
+def test_anchor_scores_must_strictly_increase() -> None:
+    error = reject(
+        _with_hr_chance(
+            'hr_chance:\n  - { score: "5", chance: "4" }\n  - { score: "1", chance: "12" }\n'
+        )
+    )
+
+    assert "anchor scores must strictly increase" in str(error)
+
+
+def test_chances_must_not_decrease() -> None:
+    error = reject(
+        _with_hr_chance(
+            'hr_chance:\n  - { score: "1", chance: "12" }\n  - { score: "5", chance: "4" }\n'
+        )
+    )
+
+    assert "chances must not decrease" in str(error)

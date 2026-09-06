@@ -375,6 +375,19 @@ class ComponentConfig(_Frozen):
     shrink_strength: StrictInt | None = None
 
 
+class ChanceAnchor(_Frozen):
+    """One point on the D-186 total-score → HR-chance curve (percent scale).
+
+    The anchors are measured backtest bin centers; the display interpolates
+    piecewise-linearly between neighbors and holds the end values past the
+    rails, so the curve can never invent a steeper edge than the backtest
+    measured.
+    """
+
+    score: ConfigDecimal
+    chance: ConfigDecimal
+
+
 # --------------------------------------------------------------------------
 # Root
 # --------------------------------------------------------------------------
@@ -394,3 +407,6 @@ class GreenMachineConfig(_Frozen):
     fuzzy_scoring: FuzzyScoringPolicy
     allocations: AllocationConfig
     components: tuple[ComponentConfig, ...] = Field(min_length=1)
+    # D-186: the calibrated total-score → HR-chance curve (percent scale).
+    # None leaves the display absent — the grade never reads it.
+    hr_chance: tuple[ChanceAnchor, ...] | None = None

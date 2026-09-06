@@ -305,6 +305,8 @@ def test_sluggers_render_as_bubble_rows_with_more_buttons(_staged_app: SlateBoar
     # D-168 (PO): the radio toggle is dead — every data column's header
     # is a sort button, Tags and Weather excepted; Grade is the load order.
     heads = {button.key for button in tab.button if button.key.startswith("sluggers_head_")}
+    # D-186: HR chance joined the sortable data columns between Form Score
+    # and Grade.
     assert heads == {
         "sluggers_head_Batter",
         "sluggers_head_HR",
@@ -312,6 +314,7 @@ def test_sluggers_render_as_bubble_rows_with_more_buttons(_staged_app: SlateBoar
         "sluggers_head_Versus",
         "sluggers_head_Park factor",
         "sluggers_head_Form Score",
+        "sluggers_head_HR chance",
         "sluggers_head_Grade",
     }
     grade_head = next(button for button in tab.button if button.key == "sluggers_head_Grade")
@@ -486,6 +489,7 @@ def test_shortlist_keeps_only_a_and_s_as_bubble_rows() -> None:
     import streamlit_app
 
     rows = streamlit_app._slugger_rows(_graded_board())
+    # D-186: the calibrated HR chance sits between Form Score and Grade.
     assert streamlit_app._SLUGGER_HEADERS == (
         "Batter",
         "HR",
@@ -495,6 +499,7 @@ def test_shortlist_keeps_only_a_and_s_as_bubble_rows() -> None:
         "Weather",
         "Park factor",
         "Form Score",
+        "HR chance",
         "Grade",
         "",
     )
@@ -532,6 +537,31 @@ def test_form_score_cell_reads_the_actual_graded_subtotal() -> None:
         # the cell never shows more than two places.
         shown = text[: -len(" / 1.3")]
         assert re.fullmatch(r"\d+(\.\d{1,2})?", shown), text
+
+
+def test_hr_chance_cell_reads_the_calibrated_curve() -> None:
+    """D-186 (PO): the shortlist's HR chance is the production config's
+    calibrated percent for the batter's total — one decimal, display-only,
+    never an invented number; the header sort walks the same total, so the
+    visible order can never disagree with the numbers."""
+    import streamlit_app
+
+    config = streamlit_app.production_config()
+    assert config.hr_chance is not None
+    rows = streamlit_app._slugger_rows(_graded_board())
+    for row in rows:
+        text = streamlit_app._hr_chance_text(row.card.result, config)
+        assert text is not None
+        assert re.fullmatch(r"\d{1,2}\.\d%", text), text
+    totals = [
+        row.card.result.total_score for row in streamlit_app._sorted_slugger_rows(rows, "HR chance")
+    ]
+    assert totals == sorted(totals, reverse=True)
+    ascending = [
+        row.card.result.total_score
+        for row in streamlit_app._sorted_slugger_rows(rows, "HR chance", ascending=True)
+    ]
+    assert ascending == sorted(ascending)
 
 
 def test_sluggers_sort_loads_highest_first_and_flips() -> None:
