@@ -23,22 +23,22 @@ fuzzy_scoring:
 # band holds the 9.5-point rate until a real S sample exists (6 batter-days
 # in the run homered 0 — too thin to calibrate).
 hr_chance:
-  - { score: "1", chance: "3.6" }
-  - { score: "2.5", chance: "5.7" }
-  - { score: "3.5", chance: "6.5" }
-  - { score: "4.5", chance: "10.3" }
-  - { score: "5.5", chance: "11.2" }
-  - { score: "6.5", chance: "12.2" }
-  - { score: "7.5", chance: "14.4" }
-  - { score: "8.5", chance: "14.4" }
-  - { score: "9.5", chance: "15.3" }
+  - { score: "1", chance: "5.8" }
+  - { score: "2.5", chance: "5.8" }
+  - { score: "3.5", chance: "7.2" }
+  - { score: "4.5", chance: "9.2" }
+  - { score: "5.5", chance: "11.6" }
+  - { score: "6.5", chance: "13.6" }
+  - { score: "7.5", chance: "14.6" }
+  - { score: "8.5", chance: "14.9" }
+  - { score: "9.5", chance: "15.7" }
 
 allocations:
   total_max_points: "11.3"
 
   categories:
     - category: power_profile
-      max_points: "3"
+      max_points: "4"
       components: [exit_velocity, barrel_pct, hard_hit_pct]
     - category: pitcher_matchup
       max_points: "3"
@@ -47,7 +47,7 @@ allocations:
       max_points: "1.3"
       components: [attack_angle_quality, bat_speed]
     - category: pull_power
-      max_points: "2"
+      max_points: "1"
       components: [pull_pct_air_balls]
     - category: environment
       max_points: "2"
@@ -64,10 +64,11 @@ components:
   - component_id: exit_velocity
     scoring_method: bucketed
     direction: higher_is_better
-    max_points: "1"
+    max_points: "1.5"
     # D-184: league-average award measured over the 381-batter 2026 season
     # board (0.397); substitutes when missing, anchors shrinkage at k=15 BBE.
-    prior_points: "0.4"
+    # D-188: rescaled x1.5 with max_points; the prior stays 40% of max.
+    prior_points: "0.6"
     shrink_strength: 15
     sample_type: batted_ball_events
     missing_data:
@@ -83,18 +84,19 @@ components:
             domain_max: "130"
             buckets:
               - { lower: "0", upper: "86", points: "0" }
-              - { lower: "86", upper: "88", points: "0.25" }
-              - { lower: "88", upper: "89.5", points: "0.45" }
-              - { lower: "89.5", upper: "91", points: "0.65" }
-              - { lower: "91", upper: "92", points: "0.8" }
-              - { lower: "92", upper: "93", points: "0.9" }
-              - { lower: "93", upper: "130", points: "1" }
+              - { lower: "86", upper: "88", points: "0.375" }
+              - { lower: "88", upper: "89.5", points: "0.675" }
+              - { lower: "89.5", upper: "91", points: "0.975" }
+              - { lower: "91", upper: "92", points: "1.2" }
+              - { lower: "92", upper: "93", points: "1.35" }
+              - { lower: "93", upper: "130", points: "1.5" }
   - component_id: barrel_pct
     scoring_method: bucketed
     direction: higher_is_better
-    max_points: "1"
+    max_points: "2"
     # D-184: league-average award 0.434 (2026 season board, 381 batters).
-    prior_points: "0.43"
+    # D-188: rescaled x2 with max_points; the prior stays 43% of max.
+    prior_points: "0.86"
     shrink_strength: 15
     sample_type: batted_ball_events
     missing_data:
@@ -110,17 +112,18 @@ components:
             domain_max: "100"
             buckets:
               - { lower: "0", upper: "5", points: "0" }
-              - { lower: "5", upper: "7", points: "0.25" }
-              - { lower: "7", upper: "9", points: "0.5" }
-              - { lower: "9", upper: "11", points: "0.7" }
-              - { lower: "11", upper: "13", points: "0.85" }
-              - { lower: "13", upper: "100", points: "1" }
+              - { lower: "5", upper: "7", points: "0.5" }
+              - { lower: "7", upper: "9", points: "1" }
+              - { lower: "9", upper: "11", points: "1.4" }
+              - { lower: "11", upper: "13", points: "1.7" }
+              - { lower: "13", upper: "100", points: "2" }
   - component_id: hard_hit_pct
     scoring_method: bucketed
     direction: higher_is_better
-    max_points: "1"
+    max_points: "0.5"
     # D-184: league-average award 0.392 (2026 season board, 381 batters).
-    prior_points: "0.39"
+    # D-188: rescaled x0.5 with max_points; the prior stays 39% of max.
+    prior_points: "0.195"
     shrink_strength: 15
     sample_type: batted_ball_events
     missing_data:
@@ -136,11 +139,11 @@ components:
             domain_max: "100"
             buckets:
               - { lower: "0", upper: "35", points: "0" }
-              - { lower: "35", upper: "40", points: "0.25" }
-              - { lower: "40", upper: "43", points: "0.5" }
-              - { lower: "43", upper: "46", points: "0.7" }
-              - { lower: "46", upper: "50", points: "0.85" }
-              - { lower: "50", upper: "100", points: "1" }
+              - { lower: "35", upper: "40", points: "0.125" }
+              - { lower: "40", upper: "43", points: "0.25" }
+              - { lower: "43", upper: "46", points: "0.35" }
+              - { lower: "46", upper: "50", points: "0.425" }
+              - { lower: "50", upper: "100", points: "0.5" }
   - component_id: pitch_mix_pressure
     scoring_method: bucketed
     direction: higher_is_better
@@ -216,9 +219,10 @@ components:
   - component_id: attack_angle_quality
     scoring_method: bucketed
     direction: higher_is_better
-    max_points: "0.7"
+    max_points: "1"
     # D-184: league-average award 0.438 (2026 season board, 381 batters).
-    prior_points: "0.44"
+    # D-188: rescaled x10/7 with max_points; the prior stays ~63% of max.
+    prior_points: "0.63"
     shrink_strength: 25
     sample_type: swings
     missing_data:
@@ -235,11 +239,11 @@ components:
             measurement_id: ideal_attack_angle_pct
             buckets:
               - { lower: "0", upper: "38", points: "0" }
-              - { lower: "38", upper: "42", points: "0.2" }
-              - { lower: "42", upper: "46", points: "0.35" }
-              - { lower: "46", upper: "52", points: "0.5" }
-              - { lower: "52", upper: "58", points: "0.6" }
-              - { lower: "58", upper: "100", points: "0.7" }
+              - { lower: "38", upper: "42", points: "0.29" }
+              - { lower: "42", upper: "46", points: "0.5" }
+              - { lower: "46", upper: "52", points: "0.71" }
+              - { lower: "52", upper: "58", points: "0.86" }
+              - { lower: "58", upper: "100", points: "1" }
           # Schema requires one bucket set per measurement. The proxy block is
           # dormant: no proxy formula is implemented (Q21 open), so no
           # observation ever carries that measurement id.
@@ -249,13 +253,14 @@ components:
             measurement_id: attack_angle_threshold_proxy
             buckets:
               - { lower: "0", upper: "60", points: "0" }
-              - { lower: "60", upper: "100", points: "0.7" }
+              - { lower: "60", upper: "100", points: "1" }
   - component_id: bat_speed
     scoring_method: bucketed
     direction: higher_is_better
-    max_points: "0.6"
+    max_points: "0.3"
     # D-184: league-average award 0.249 (2026 season board, 381 batters).
-    prior_points: "0.25"
+    # D-188: rescaled x0.5 with max_points; the prior stays ~42% of max.
+    prior_points: "0.125"
     shrink_strength: 25
     sample_type: swings
     missing_data:
@@ -271,19 +276,20 @@ components:
             domain_max: "130"
             buckets:
               - { lower: "0", upper: "69", points: "0" }
-              - { lower: "69", upper: "70.5", points: "0.2" }
-              - { lower: "70.5", upper: "72", points: "0.4" }
-              - { lower: "72", upper: "130", points: "0.6" }
+              - { lower: "69", upper: "70.5", points: "0.1" }
+              - { lower: "70.5", upper: "72", points: "0.2" }
+              - { lower: "72", upper: "130", points: "0.3" }
   - component_id: pull_pct_air_balls
     scoring_method: bucketed
     # D-175 ruling 2 (D-183 ships what D-176's merge dropped): the season
     # curve is a band — +61% at 35-38%, -33% at 60%+ — so the direction is
     # "band", not monotone; the label reads as a comment note.
     direction: band
-    max_points: "2"
+    max_points: "1"
     # D-184: league-average award 1.137 (381 batters, production spray
     # convention). Shrinkage k=5 — the D-133 light L7 air-ball floor.
-    prior_points: "1.14"
+    # D-188: rescaled x0.5 with max_points; the prior stays 57% of max.
+    prior_points: "0.57"
     shrink_strength: 5
     sample_type: air_balls
     missing_data:
@@ -298,14 +304,14 @@ components:
             domain_min: "0"
             domain_max: "100"
             buckets:
-              - { lower: "0", upper: "30", points: "0.5" }
-              - { lower: "30", upper: "32", points: "1" }
-              - { lower: "32", upper: "35", points: "1.5" }
-              - { lower: "35", upper: "45", points: "2" }
-              - { lower: "45", upper: "50", points: "1.5" }
-              - { lower: "50", upper: "55", points: "1" }
-              - { lower: "55", upper: "60", points: "0.5" }
-              - { lower: "60", upper: "100", points: "0.25" }
+              - { lower: "0", upper: "30", points: "0.25" }
+              - { lower: "30", upper: "32", points: "0.5" }
+              - { lower: "32", upper: "35", points: "0.75" }
+              - { lower: "35", upper: "45", points: "1" }
+              - { lower: "45", upper: "50", points: "0.75" }
+              - { lower: "50", upper: "55", points: "0.5" }
+              - { lower: "55", upper: "60", points: "0.25" }
+              - { lower: "60", upper: "100", points: "0.125" }
   - component_id: park
     scoring_method: bucketed
     direction: higher_is_better
