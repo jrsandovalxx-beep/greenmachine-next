@@ -74,12 +74,14 @@ def test_only_the_enumerated_modules_in_src_can_open_a_connection() -> None:
 
     D-069 authorized automated pulls from the two named MLB hosts, so the
     enumeration is now two modules: the weather transport (api.weather.gov)
-    and the MLB transport (statsapi.mlb.com, baseballsavant.mlb.com). If a
-    third appears, this fails and the package's central claim has to be
-    rewritten rather than quietly outgrown.
+    and the MLB transport (statsapi.mlb.com, baseballsavant.mlb.com). D-187
+    authorized the third: the odds transport (api.the-odds-api.com), pinned
+    by the same construction. If a fourth appears, this fails and the
+    package's central claim has to be rewritten rather than quietly
+    outgrown.
     """
     network_modules = {"urllib", "http", "socket", "ssl", "ftplib", "requests", "httpx", "aiohttp"}
-    approved = ("weather/transport.py:", "live/transport.py:")
+    approved = ("weather/transport.py:", "live/transport.py:", "odds/transport.py:")
     offenders: list[str] = []
     for path in sorted(SRC.rglob("*.py")):
         text = path.read_text(encoding="utf-8")

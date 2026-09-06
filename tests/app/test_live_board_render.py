@@ -306,7 +306,7 @@ def test_sluggers_render_as_bubble_rows_with_more_buttons(_staged_app: SlateBoar
     # is a sort button, Tags and Weather excepted; Grade is the load order.
     heads = {button.key for button in tab.button if button.key.startswith("sluggers_head_")}
     # D-186: HR chance joined the sortable data columns between Form Score
-    # and Grade.
+    # and Grade; D-187 added the Market column beside it.
     assert heads == {
         "sluggers_head_Batter",
         "sluggers_head_HR",
@@ -315,6 +315,7 @@ def test_sluggers_render_as_bubble_rows_with_more_buttons(_staged_app: SlateBoar
         "sluggers_head_Park factor",
         "sluggers_head_Form Score",
         "sluggers_head_HR chance",
+        "sluggers_head_Market",
         "sluggers_head_Grade",
     }
     grade_head = next(button for button in tab.button if button.key == "sluggers_head_Grade")
@@ -489,7 +490,8 @@ def test_shortlist_keeps_only_a_and_s_as_bubble_rows() -> None:
     import streamlit_app
 
     rows = streamlit_app._slugger_rows(_graded_board())
-    # D-186: the calibrated HR chance sits between Form Score and Grade.
+    # D-186: the calibrated HR chance sits between Form Score and Grade;
+    # D-187: the market read sits between them.
     assert streamlit_app._SLUGGER_HEADERS == (
         "Batter",
         "HR",
@@ -500,6 +502,7 @@ def test_shortlist_keeps_only_a_and_s_as_bubble_rows() -> None:
         "Park factor",
         "Form Score",
         "HR chance",
+        "Market",
         "Grade",
         "",
     )
@@ -562,6 +565,76 @@ def test_hr_chance_cell_reads_the_calibrated_curve() -> None:
         for row in streamlit_app._sorted_slugger_rows(rows, "HR chance", ascending=True)
     ]
     assert ascending == sorted(ascending)
+
+
+def test_market_cell_names_the_missing_key() -> None:
+    """D-187 (PO): without the owner's key every market cell says so — a
+    named absence, never an invented number."""
+    import streamlit_app
+
+    streamlit_app._market_snapshot.clear()
+    for row in streamlit_app._slugger_rows(_graded_board()):
+        assert row.market_text == "no key"
+        assert row.market_value is None
+
+
+def test_market_cell_reads_the_devigged_chance_and_tags_the_gap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-187 (PO): a priced batter shows the books' fair chance at one
+    decimal, and a gap of five-plus points against the model's calibrated
+    chance earns a note bubble naming the direction."""
+    import streamlit_app
+
+    from greenmachine.odds import MarketRead, normalize_name
+
+    rows = streamlit_app._slugger_rows(_graded_board())
+    name = normalize_name(rows[0].card.full_name)
+    model_chance = streamlit_app._hr_chance_text(
+        rows[0].card.result, streamlit_app.production_config()
+    )
+    assert model_chance is not None
+
+    def fake_snapshot(official_date: str) -> dict[str, MarketRead]:
+        return {name: MarketRead(fair_percent=Decimal("4.4"), books=3)}
+
+    monkeypatch.setattr(streamlit_app, "_market_snapshot", fake_snapshot)
+    rows = streamlit_app._slugger_rows(_graded_board())
+    priced = rows[0]
+    assert priced.market_text == "4.4%"
+    assert priced.market_value == Decimal("4.4")
+    gaps = [text for _, kind, text in priced.pills if "market gap" in text]
+    assert len(gaps) == 1
+    assert "over the market" in gaps[0]  # the model reads well above 4.4%
+    assert all(kind == "note" for _, kind, text in priced.pills if "market gap" in text)
+    # The unpriced row names its absence.
+    assert rows[1].market_text == "not priced"
+    assert rows[1].market_value is None
+
+
+def test_market_sort_orders_the_priced_and_drops_the_rest_last() -> None:
+    """D-187: the Market header sort walks the fair chance; unpriced rows
+    sort last in both directions, like the uncovered park factor."""
+    import streamlit_app
+
+    from greenmachine.odds import MarketRead, normalize_name
+
+    rows = streamlit_app._slugger_rows(_graded_board())
+    name = normalize_name(rows[1].card.full_name)
+
+    def fake_snapshot(official_date: str) -> dict[str, MarketRead]:
+        return {name: MarketRead(fair_percent=Decimal("9.9"), books=2)}
+
+    import unittest.mock
+
+    with unittest.mock.patch.object(streamlit_app, "_market_snapshot", fake_snapshot):
+        rows = streamlit_app._slugger_rows(_graded_board())
+    descending = streamlit_app._sorted_slugger_rows(rows, "Market")
+    assert descending[0].market_value == Decimal("9.9")
+    assert descending[-1].market_value is None
+    ascending = streamlit_app._sorted_slugger_rows(rows, "Market", ascending=True)
+    assert ascending[0].market_value == Decimal("9.9")
+    assert ascending[-1].market_value is None
 
 
 def test_sluggers_sort_loads_highest_first_and_flips() -> None:
