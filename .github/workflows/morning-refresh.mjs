@@ -9,9 +9,13 @@
 import { chromium } from "playwright-core";
 
 const APP_URL = "https://greenmachine.streamlit.app/";
-const ATTEMPTS = 3;
+// D-191: 5 attempts — a true cold start on Streamlit's free tier has run
+// past the old 3-attempt (15-min) budget about half of mornings, failing
+// the job while the app was merely still building. 5 x 5 min plus setup
+// fits the job's 30-minute budget.
+const ATTEMPTS = 5;
 const LOAD_TIMEOUT_MS = 120_000;
-const BOARD_TIMEOUT_MS = 300_000; // per attempt; 3 attempts fit the 30-min job budget
+const BOARD_TIMEOUT_MS = 300_000; // per attempt; 5 attempts fit the 30-min job budget
 const POLL_MS = 5_000;
 
 // The board is considered loaded when any of these texts is visible: a normal
