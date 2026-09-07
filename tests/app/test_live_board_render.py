@@ -586,7 +586,7 @@ def test_market_cell_reads_the_devigged_chance_and_tags_the_gap(
     chance earns a note bubble naming the direction."""
     import streamlit_app
 
-    from greenmachine.odds import MarketRead, normalize_name
+    from greenmachine.odds import MarketBoard, MarketRead, normalize_name
 
     rows = streamlit_app._slugger_rows(_graded_board())
     name = normalize_name(rows[0].card.full_name)
@@ -595,8 +595,11 @@ def test_market_cell_reads_the_devigged_chance_and_tags_the_gap(
     )
     assert model_chance is not None
 
-    def fake_snapshot(official_date: str) -> dict[str, MarketRead]:
-        return {name: MarketRead(fair_percent=Decimal("4.4"), books=3)}
+    def fake_snapshot(official_date: str) -> MarketBoard:
+        return MarketBoard(
+            reads={name: MarketRead(fair_percent=Decimal("4.4"), books=3)},
+            pending=False,
+        )
 
     monkeypatch.setattr(streamlit_app, "_market_snapshot", fake_snapshot)
     rows = streamlit_app._slugger_rows(_graded_board())
@@ -612,18 +615,41 @@ def test_market_cell_reads_the_devigged_chance_and_tags_the_gap(
     assert rows[1].market_value is None
 
 
+def test_market_cell_says_not_posted_yet_while_a_fixture_is_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-193 (PO): cluster sweeps price each fixture near its own first
+    pitch, so an unpriced batter whose game still waits on its window reads
+    "not posted yet" — the truth — and only reads "not priced" once no
+    fixture is pending."""
+    import streamlit_app
+
+    from greenmachine.odds import MarketBoard
+
+    def pending_snapshot(official_date: str) -> MarketBoard:
+        return MarketBoard(reads={}, pending=True)
+
+    monkeypatch.setattr(streamlit_app, "_market_snapshot", pending_snapshot)
+    rows = streamlit_app._slugger_rows(_graded_board())
+    assert rows[0].market_text == "not posted yet"
+    assert rows[0].market_value is None
+
+
 def test_market_sort_orders_the_priced_and_drops_the_rest_last() -> None:
     """D-187: the Market header sort walks the fair chance; unpriced rows
     sort last in both directions, like the uncovered park factor."""
     import streamlit_app
 
-    from greenmachine.odds import MarketRead, normalize_name
+    from greenmachine.odds import MarketBoard, MarketRead, normalize_name
 
     rows = streamlit_app._slugger_rows(_graded_board())
     name = normalize_name(rows[1].card.full_name)
 
-    def fake_snapshot(official_date: str) -> dict[str, MarketRead]:
-        return {name: MarketRead(fair_percent=Decimal("9.9"), books=2)}
+    def fake_snapshot(official_date: str) -> MarketBoard:
+        return MarketBoard(
+            reads={name: MarketRead(fair_percent=Decimal("9.9"), books=2)},
+            pending=False,
+        )
 
     import unittest.mock
 

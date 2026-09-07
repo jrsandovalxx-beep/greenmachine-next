@@ -5147,6 +5147,47 @@ Two-part fix, both semantics-preserving:
    of board-wait inside the 30-minute job budget), so a genuinely cold
    morning still completes instead of failing at minute 15.
 
+## D-193 — Cluster sweeps: every game priced an hour before it starts
+
+The PO's ask, verbatim: "make sure we have odds for all games," with one
+late-night check included. D-190/D-192's single evening sweep could never
+do that — books pull a game's props at its first pitch, so a 6:30 PM
+sweep arrives hours after the afternoon games' markets closed. The same
+day's measurement settled the timing facts: props for every fixture on
+the slate — day games through the 10 PM West Coast start — were posted
+by late morning (one book), with more books joining through the day.
+
+The restructure, both sides of it:
+
+1. **The policy thinks per fixture, not per slate.** The memo keys on
+   (slate date, fixture); each fixture's sweep window opens 2.5 hours
+   before ITS first pitch and closes 45 minutes after it (one grace
+   attempt — a just-started fixture often still answers). Every fixture
+   is priced exactly once, near its own first pitch, so the daily spend
+   is still one request per fixture (~10-16, same free-tier budget as
+   D-190). An empty or failed answer keeps 45 minutes (was 2 hours), so
+   the next cluster trigger retries a late-posting book. A fixture never
+   swept by 45 minutes past its first pitch is closed — no visit spends
+   on it again. An unpriced batter reads "not posted yet" while any
+   fixture still waits on its window, "not priced" once none does —
+   either way the absence is named, never an invented number.
+
+2. **The wake workflow runs cluster triggers.** Seven loads through the
+   day (10:05 AM, 12:05, 2:35, 4:05, 5:35, 7:05, 9:05 PM Eastern) put a
+   trigger inside every realistic MLB start window, morning games through
+   the 10 PM West Coast cluster; the 9:30 UTC morning wake is untouched.
+   The trigger times are provisional pending the cadence measurement's
+   last reads (when the later books join); adjusting a cron line is a
+   one-line change. D-192's single 22:30 UTC trigger is superseded —
+   subsumed by the 5:35/7:05 PM pair.
+
+What the column IS, restated for the record (the PO asked): the Market
+cell is the de-vigged consensus — each book's Over 0.5/Under 0.5 implied
+shares normalized, then averaged across the books that priced the batter
+— beside the model's own calibrated HR chance, with a note bubble when
+the two disagree by five points or more. That comparison is the feature;
+cluster sweeps just make it present for every game.
+
 
 ## D-192 — The evening sweep gets its own trigger
 
