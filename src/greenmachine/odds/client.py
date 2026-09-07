@@ -43,7 +43,7 @@ _HR_POINT = Decimal("0.5")
 # The empty-slate absence, named once so the app can tell "nothing posted
 # yet" apart from a transport failure (D-189) — and so the unit pin matches
 # the same constant rather than a second copy of the sentence.
-NO_PROPS_REASON = "no batter home-run props posted for this slate"
+NO_PROPS_REASON = "no batter home-run props posted for this fixture"
 
 
 class PayloadMalformedError(Exception):
@@ -70,6 +70,18 @@ class MarketRead:
 
     fair_percent: Decimal
     books: int
+
+
+@dataclass(frozen=True)
+class MarketBoard:
+    """The slate's market state at one build (D-193): every priced batter's
+    read, plus whether any fixture still waits on its sweep window — an
+    unpriced batter reads "not posted yet" while a fixture is pending and
+    "not priced" once none is. Either way the absence is named, never an
+    invented number."""
+
+    reads: dict[str, MarketRead]
+    pending: bool
 
 
 def normalize_name(name: str) -> str:
@@ -235,33 +247,29 @@ def _read_market(
     return reads
 
 
-def market_snapshot(api: TheOddsApi, day: date) -> dict[str, MarketRead] | FetchFailure:
-    """The slate's market reads keyed by normalized batter name.
+def event_reads(api: TheOddsApi, event_id: str) -> dict[str, MarketRead] | FetchFailure:
+    """One fixture's market reads keyed by normalized batter name (D-193).
 
-    Each fixture's props are one request; a fixture that fails degrades out
-    of the average rather than failing the slate, and a slate with no
+    The fixture's props are one request; a book posting only one side or a
+    ladder without the 0.5 rung simply has no read, and a fixture with no
     priced batter at all is a named absence — props post through the day,
-    so an empty morning board is a timing fact, not an error.
+    so an empty early answer is a timing fact, not an error.
     """
-    events = api.fetch_events(day)
-    if isinstance(events, FetchFailure):
-        return events
+    props = api.fetch_hr_props(event_id)
+    if isinstance(props, FetchFailure):
+        return props
     fairs: dict[str, list[Decimal]] = {}
     books: dict[str, set[str]] = {}
-    for event in events:
-        props = api.fetch_hr_props(event.event_id)
-        if isinstance(props, FetchFailure):
-            continue
-        for player, book_key, fair in props:
-            fairs.setdefault(player, []).append(fair)
-            books.setdefault(player, set()).add(book_key)
+    for player, book_key, fair in props:
+        fairs.setdefault(player, []).append(fair)
+        books.setdefault(player, set()).add(book_key)
     if not fairs:
         return FetchFailure(NO_PROPS_REASON)
-    snapshot: dict[str, MarketRead] = {}
+    reads: dict[str, MarketRead] = {}
     for player, prices in fairs.items():
         mean = sum(prices) / Decimal(len(prices))
-        snapshot[player] = MarketRead(
+        reads[player] = MarketRead(
             fair_percent=(mean * 100).quantize(Decimal("0.0001")),
             books=len(books[player]),
         )
-    return snapshot
+    return reads

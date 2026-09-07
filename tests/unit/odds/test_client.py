@@ -17,7 +17,7 @@ from greenmachine.odds import (
     NO_PROPS_REASON,
     MarketRead,
     TheOddsApi,
-    market_snapshot,
+    event_reads,
     normalize_name,
 )
 
@@ -177,7 +177,7 @@ def test_events_keeps_only_the_slate_day() -> None:
 
 
 def test_events_carry_first_pitch_for_the_freshness_gate() -> None:
-    """D-190: the paid sweep opens one hour before the earliest commence —
+    """D-193: the paid sweep gates on each fixture's own commence —
     the events list is free, so the gate spends nothing."""
     events = _api(_routes()).fetch_events(DAY)
     assert not isinstance(events, FetchFailure)
@@ -195,35 +195,33 @@ def test_props_devig_and_skip_the_ladder() -> None:
     }
 
 
-def test_snapshot_averages_books_and_counts_them() -> None:
-    snapshot = market_snapshot(_api(_routes()), DAY)
-    assert not isinstance(snapshot, FetchFailure)
-    ohtani = snapshot["shoheiohtani"]
+def test_event_reads_average_books_and_count_them() -> None:
+    reads = event_reads(_api(_routes()), "ev1")
+    assert not isinstance(reads, FetchFailure)
+    ohtani = reads["shoheiohtani"]
     want = (_fair("2.98", "1.40") + _fair("3.10", "1.38")) / 2 * 100
     assert ohtani.fair_percent == want.quantize(Decimal("0.0001"))
     assert ohtani.books == 2
-    assert snapshot["freddiefreeman"].books == 1
+    assert reads["freddiefreeman"].books == 1
 
 
-def test_snapshot_names_an_unpriced_slate() -> None:
-    routes = _routes()
-    routes["/events/ev1/odds"] = (200, {"bookmakers": []})
-    result = market_snapshot(_api(routes), DAY)
+def test_event_reads_name_an_unpriced_fixture() -> None:
+    result = event_reads(_api(_routes()), "ev2")  # the empty-props fixture
     assert isinstance(result, FetchFailure)
     assert result.reason == NO_PROPS_REASON
 
 
-def test_a_fixture_failure_degrades_out_of_the_average() -> None:
+def test_a_fixture_failure_is_a_named_failure() -> None:
     routes = _routes()
-    routes["/events/ev2/odds"] = (500, b"server error")
-    snapshot = market_snapshot(_api(routes), DAY)
-    assert not isinstance(snapshot, FetchFailure)
-    assert "shoheiohtani" in snapshot
+    routes["/events/ev1/odds"] = (500, b"server error")
+    result = event_reads(_api(routes), "ev1")
+    assert isinstance(result, FetchFailure)
+    assert "HTTP 500" in result.reason
 
 
-def test_an_events_failure_fails_the_snapshot() -> None:
+def test_an_events_failure_is_a_named_failure() -> None:
     routes = {"/events?": (429, b"quota exhausted")}
-    result = market_snapshot(_api(routes), DAY)
+    result = _api(routes).fetch_events(DAY)
     assert isinstance(result, FetchFailure)
     assert "HTTP 429" in result.reason
 
