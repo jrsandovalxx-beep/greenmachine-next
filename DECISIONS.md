@@ -5146,3 +5146,43 @@ Two-part fix, both semantics-preserving:
 2. **The wake job waits longer.** Three attempts became five (25 minutes
    of board-wait inside the 30-minute job budget), so a genuinely cold
    morning still completes instead of failing at minute 15.
+
+
+## D-192 — The evening sweep gets its own trigger
+
+D-190's one-sweep-a-day had a hole the first evening exposed: the sweep
+only runs when someone loads the board inside the window, and nobody
+does. The wake job runs at 5:30 AM Eastern (before the window, zero
+spend by design); the app then sleeps all day. Tonight's evidence: a
+board built six hours after first pitch showed "not posted yet" and the
+odds account's monthly counter had not moved — the window came and went
+with no visitor, and by the time anyone looked, the games were underway
+and the books had pulled their props. Owner-only app + one morning wake
+= the pre-game check effectively never fires.
+
+Fix: the existing wake workflow gains a second scheduled run at 22:30
+UTC (6:30 PM Eastern — inside the T-1h window for every standard evening
+slate, and safely clear of GitHub's cron jitter before the earliest
+common first pitch). That load is the sweep: the app's own D-190 gate
+decides — before the window it spends nothing, inside it sweeps once,
+and the memo still dedupes against a same-day PO visit, so the day
+never pays twice. The morning run is untouched. As a side effect the
+evening board is pre-built and warm when the PO opens it at game time.
+
+Accepted edges, both deliberate:
+
+- **Day-game slates** (getaway afternoons, most Sunday ball): a 6:30 PM
+  trigger lands after those first pitches, so started games come back
+  unpriced and only the evening remainder prices. Covering early slates
+  would take a second paid sweep — outside D-190's one-a-day budget.
+- **September's quota lands at the wire**: diagnostics plus D-189's one
+  day of empty-feed retries already spent 186 of 500, and ~15/day
+  finishes the month around the cap; a capped-out last day would read
+  "unavailable", fail soft, and reset on the 1st. Steady state from
+  October is ~400/500 — comfortable.
+
+And a wording edge now visible but left alone: a board first built after
+the whole slate is underway reads "not posted yet" (the events list has
+already dropped the started games, so there is genuinely nothing left
+to price). With the evening trigger in place that state should not
+occur in practice; if it ever misleads, the word is a one-line change.
