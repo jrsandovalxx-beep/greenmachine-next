@@ -17,10 +17,25 @@ name: Morning refresh
     # 09:30 UTC — after the 09:00-UTC anchor flip, with slack for the
     # sources' overnight publishes to settle.
     - cron: "30 9 * * *"
-    # 22:30 UTC (6:30 PM Eastern) — D-192: the evening sweep's trigger.
-    # Loading the board inside the T-1h window is what makes the one
-    # daily odds sweep fire; before the window this load spends nothing.
-    - cron: "30 22 * * *"
+    # D-193 (PO: "make sure we have odds for all games"): cluster triggers
+    # through the day, so every fixture's own sweep window (first pitch
+    # minus 2.5h) has a trigger inside it. Each load prices only the
+    # fixtures in their window — one request per fixture, once, near its
+    # own first pitch; a load with nothing in window spends nothing.
+    #   14:05 UTC (10:05 AM ET) — catches the rare 11 AM ET morning starts
+    #   16:05 UTC (12:05 PM ET) — the 1-2 PM ET afternoon cluster
+    #   18:35 UTC ( 2:35 PM ET) — the 3 PM ET cluster
+    #   20:05 UTC ( 4:05 PM ET) — the 4-5 PM ET cluster
+    #   21:35 UTC ( 5:35 PM ET) — the 6:40-7:15 PM ET main cluster
+    #   23:05 UTC ( 7:05 PM ET) — the 8-9 PM ET cluster
+    #   01:35 UTC ( 9:05 PM ET) — the West Coast ~10 PM ET late cluster
+    - cron: "5 14 * * *"
+    - cron: "5 16 * * *"
+    - cron: "35 18 * * *"
+    - cron: "5 20 * * *"
+    - cron: "35 21 * * *"
+    - cron: "5 23 * * *"
+    - cron: "35 1 * * *"
   workflow_dispatch:
 
 # Read-only contents: the checkout needs it (the repo is private — {} got
